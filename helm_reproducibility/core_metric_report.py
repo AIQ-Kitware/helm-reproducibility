@@ -19,7 +19,7 @@ from magnet.backends.helm.helm_outputs import HelmRun
 from magnet.backends.helm.helm_run_analysis import HelmRunAnalysis
 from magnet.backends.helm.helm_run_diff import HelmRunDiff
 from magnet.backends.helm.util import helm_metrics
-from paper_labels import load_paper_label_manager
+from helm_reproducibility.paper_labels import load_paper_label_manager
 
 
 def _quantile(values: list[float], q: float) -> float | None:

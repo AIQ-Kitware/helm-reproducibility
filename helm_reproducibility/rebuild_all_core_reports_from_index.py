@@ -6,8 +6,15 @@ from collections import Counter
 from pathlib import Path
 
 from helm_reproducibility.common import audit_root, default_report_root, env_defaults
-from rebuild_core_report_from_index import latest_index_csv, load_rows, matching_rows
-from compare_batch import collect_historic_candidates, choose_historic_candidate
+from helm_reproducibility.rebuild_core_report_from_index import (
+    latest_index_csv,
+    load_rows,
+    matching_rows,
+)
+from helm_reproducibility.compare_batch import (
+    collect_historic_candidates,
+    choose_historic_candidate,
+)
 
 
 def main() -> None:
@@ -23,7 +30,6 @@ def main() -> None:
     run_entries = sorted({row.get('run_entry') for row in rows if row.get('run_entry')})
     counts = Counter(row.get('run_entry') for row in rows if row.get('run_entry'))
 
-    script = audit_root() / 'python' / 'rebuild_core_report_from_index.py'
     built = 0
     skipped = []
     for run_entry in run_entries:
@@ -47,7 +53,8 @@ def main() -> None:
             continue
         cmd = [
             env_defaults()['AIQ_PYTHON'],
-            str(script),
+            '-m',
+            'helm_reproducibility.rebuild_core_report_from_index',
             '--run-entry', str(run_entry),
             '--index-fpath', str(index_fpath),
         ]

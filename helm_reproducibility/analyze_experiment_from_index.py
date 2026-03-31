@@ -11,10 +11,18 @@ from typing import Any
 
 import pandas as pd
 
-from aggregate_core_reports import _find_curve_value, _find_pair, _write_latest_alias
+from helm_reproducibility.aggregate_core_reports import (
+    _find_curve_value,
+    _find_pair,
+    _write_latest_alias,
+)
 from helm_reproducibility.common import audit_root, default_report_root, env_defaults
-from paper_labels import load_paper_label_manager
-from rebuild_core_report_from_index import latest_index_csv, load_rows, slugify
+from helm_reproducibility.paper_labels import load_paper_label_manager
+from helm_reproducibility.rebuild_core_report_from_index import (
+    latest_index_csv,
+    load_rows,
+    slugify,
+)
 
 
 def _load_json(fpath: Path) -> dict[str, Any]:
@@ -112,14 +120,14 @@ def main() -> None:
     reports_dpath = out_dpath / 'core-reports'
     reports_dpath.mkdir(parents=True, exist_ok=True)
 
-    rebuild_script = audit_root() / 'python' / 'rebuild_core_report_from_index.py'
     built_report_paths = []
     skipped_run_entries: list[dict[str, Any]] = []
     for run_entry in run_entries:
         report_dpath = reports_dpath / f'core-metrics-{slugify(run_entry)}'
         cmd = [
             env_defaults()['AIQ_PYTHON'],
-            str(rebuild_script),
+            '-m',
+            'helm_reproducibility.rebuild_core_report_from_index',
             '--run-entry', str(run_entry),
             '--index-fpath', str(index_fpath),
             '--experiment-name', str(args.experiment_name),
@@ -168,7 +176,6 @@ def main() -> None:
             'official_runlevel_max': (((official.get('run_level') or {}).get('overall_quantiles') or {}).get('abs_delta') or {}).get('max'),
         })
 
-    compare_pair_script = audit_root() / 'python' / 'compare_pair.py'
     paper_labels = load_paper_label_manager(style='paper_short')
     summary_by_run_spec = {
         row['run_spec_name']: row
@@ -204,7 +211,8 @@ def main() -> None:
         cross_report_dpath.mkdir(parents=True, exist_ok=True)
         compare_cmd = [
             env_defaults()['AIQ_PYTHON'],
-            str(compare_pair_script),
+            '-m',
+            'helm_reproducibility.compare_pair',
             '--run-a', str(aiq_gpu_match['run_dir']),
             '--run-b', str(experiment_match['run_dir']),
             '--label-a', machine_a,

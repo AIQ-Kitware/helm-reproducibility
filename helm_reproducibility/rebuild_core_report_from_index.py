@@ -10,7 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from helm_reproducibility.common import audit_root, default_report_root, env_defaults
-from compare_batch import collect_historic_candidates, choose_historic_candidate
+from helm_reproducibility.compare_batch import (
+    collect_historic_candidates,
+    choose_historic_candidate,
+)
 
 
 def latest_index_csv(index_dpath: Path) -> Path:
@@ -178,10 +181,10 @@ def main() -> None:
     report_dpath = report_dpath.expanduser().resolve()
     report_dpath.mkdir(parents=True, exist_ok=True)
 
-    script = audit_root() / 'python' / 'core_metric_report.py'
     cmd = [
         env_defaults()['AIQ_PYTHON'],
-        str(script),
+        '-m',
+        'helm_reproducibility.core_metric_report',
         '--left-run-a', str(left_a),
         '--left-run-b', str(left_b),
         '--left-label', args.left_label,
@@ -215,11 +218,11 @@ def main() -> None:
     print(f'selection_fpath={selection_fpath}')
     subprocess.run(cmd, check=True)
 
-    inspect_script = audit_root() / 'python' / 'inspect_pair_samples.py'
     sample_jobs = [
         [
             env_defaults()['AIQ_PYTHON'],
-            str(inspect_script),
+            '-m',
+            'helm_reproducibility.inspect_pair_samples',
             '--run-a', str(left_a),
             '--run-b', str(left_b),
             '--label', args.left_label,
@@ -227,7 +230,8 @@ def main() -> None:
         ],
         [
             env_defaults()['AIQ_PYTHON'],
-            str(inspect_script),
+            '-m',
+            'helm_reproducibility.inspect_pair_samples',
             '--run-a', str(chosen_historic['run_dir']),
             '--run-b', str(left_a),
             '--label', args.right_label,

@@ -43,12 +43,14 @@ Optional environment variables:
   Checked-in manifests and templates.
 - `scripts/`
   Shell entrypoints for operators.
-- `python/`
-  Python helpers used by the shell scripts.
+- `helm_reproducibility/`
+  Python package used by the shell scripts.
 - `reports/`
   Lightweight comparison reports.
 - `examples/`
   Example command sequences.
+- `dev/`
+  Historical one-off and POC scripts copied from the original development tree.
 
 ## Quick Start
 

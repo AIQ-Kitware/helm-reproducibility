@@ -37,11 +37,11 @@ def aiq_root() -> Path:
 
 
 def repo_run_specs_fpath() -> Path:
-    return aiq_root() / "run_specs.yaml"
+    return audit_root() / "run_specs.yaml"
 
 
 def repo_run_details_fpath() -> Path:
-    return aiq_root() / "run_details.yaml"
+    return audit_root() / "run_details.yaml"
 
 
 def default_report_root() -> Path:
