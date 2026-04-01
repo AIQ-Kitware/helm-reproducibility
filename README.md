@@ -18,11 +18,13 @@ This repo now treats the experiment as its own product:
   End-to-end sequencing for indexing, comparison, and experiment analysis.
 - `helm_audit/integrations/`
   External-tool bridges. `kwdagger` friction lives in
-  [kwdagger_bridge.py](/home/joncrall/code/helm-reproducibility/helm_audit/integrations/kwdagger_bridge.py).
+  [`helm_audit/integrations/kwdagger_bridge.py`](helm_audit/integrations/kwdagger_bridge.py).
 - `helm_audit/helm/`
   Local HELM output readers, analysis, metric categorization, and diff logic.
 - `helm_audit/reports/`
   Pair reports, core metric reports, aggregate summaries, and paper label helpers.
+  The `helm-audit-compare-pair`, `helm-audit-report-core`, and
+  `helm-audit-report-aggregate` entrypoints resolve directly to modules here.
 - `helm_audit/utils/`
   Generic Sankey helpers and shared utilities.
 - `reproduce/`
@@ -53,7 +55,7 @@ generated `kwdagger` invocation and `--run=1` to execute it intentionally.
 
 Start in:
 
-- [reproduce/README.md](/home/joncrall/code/helm-reproducibility/reproduce/README.md)
+- [`reproduce/README.md`](reproduce/README.md)
 
 Those runbooks are the primary operator surface now. They are intentionally
 small and shell-light: each step calls a Python CLI entrypoint rather than
@@ -63,11 +65,11 @@ relying on repo-specific shell glue.
 
 - `kwdagger` remains the real external scheduling boundary.
 - Runtime execution controls for `kwdagger` are handled in
-  [kwdagger_bridge.py](/home/joncrall/code/helm-reproducibility/helm_audit/integrations/kwdagger_bridge.py)
+  [`helm_audit/integrations/kwdagger_bridge.py`](helm_audit/integrations/kwdagger_bridge.py)
   via a small explicit runtime object.
 - HELM diff / analysis ownership now lives in `helm_audit/helm/`.
 - Generic Sankey machinery lives in:
-  - [sankey.py](/home/joncrall/code/helm-reproducibility/helm_audit/utils/sankey.py)
-  - [sankey_builder.py](/home/joncrall/code/helm-reproducibility/helm_audit/utils/sankey_builder.py)
+  - [`helm_audit/utils/sankey.py`](helm_audit/utils/sankey.py)
+  - [`helm_audit/utils/sankey_builder.py`](helm_audit/utils/sankey_builder.py)
 - One demo-only MAGNeT seam remains in
-  [helm_audit/helm/outputs.py](/home/joncrall/code/helm-reproducibility/helm_audit/helm/outputs.py).
+  [`helm_audit/helm/outputs.py`](helm_audit/helm/outputs.py).
