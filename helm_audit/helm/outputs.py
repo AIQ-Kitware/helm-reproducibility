@@ -1170,7 +1170,7 @@ class HelmRun(ub.NiceRepr):
     @property
     def name(self):
         ub.schedule_deprecation(
-            modname='magnet', name='.name', type='property',
+            modname='helm_audit', name='.name', type='property',
             migration='use .run.name to get the old behavior, or .json.run_spec().name to get the real name',
             deprecate='now', error='1.0.0', remove='1.0.0')
         # NOTE: the real run spec name is often different.
