@@ -12,7 +12,7 @@ Ignore:
 
     ls /data/crfm-helm-public/thaiexam/benchmark_output/runs/v1.1.0/thai_exam:exam=tpat1,method=multiple_choice_joint,model=aisingapore_llama3-8b-cpt-sea-lionv2.1-instruct
 
-    python ~/code/aiq-magnet/dev/poc/inspect_historic_helm_runs.py /data/crfm-helm-public --out_fpath run_specs.yaml --out_detail_fpath run_details.yaml
+    python -m helm_audit.cli.index_historic_helm_runs /data/crfm-helm-public --out_fpath run_specs.yaml --out_detail_fpath run_details.yaml
 
     cat run_specs.yaml | grep -v together > run_specs2.yaml
 
@@ -175,39 +175,92 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         if 0:
             ub.dict_hist([r.get('client') for r in model_rows])
 
-        require_tags = {
-            'FULL_FUNCTIONALITY_TEXT_MODEL_TAG'
+        # Filter to text models that will fit in memory
+        HF_CLIENT = 'helm.clients.huggingface_client.HuggingFaceClient'
+
+        SOFT_TEXT_TAGS = {
+            'TEXT_MODEL_TAG',
+            'FULL_FUNCTIONALITY_TEXT_MODEL_TAG',
+            'INSTRUCTION_FOLLOWING_MODEL_TAG',
         }
+
+        EXCLUDE_TAGS = {
+            'VISION_LANGUAGE_MODEL_TAG',
+            'AUDIO_LANGUAGE_MODEL_TAG',
+            'IMAGE_MODEL_TAG',
+            'TEXT_TO_IMAGE_MODEL_TAG',
+            'CODE_MODEL_TAG',
+        }
+
+        # Keep this conservative if you want, but allow unknown sizes through.
         MAX_PARAMS = 10e9
         # MAX_PARAMS = 200e9
+
+        # Optional manual escape hatch for models that are probably HF-runnable
+        # even if HELM currently resolves them to a non-HF deployment.
+        KNOWN_HF_OVERRIDES = {
+            'qwen/qwen2.5-7b-instruct-turbo',
+            'qwen/qwen2-72b-instruct',
+            'qwen/qwen2.5-72b-instruct-turbo',
+        }
 
         if 1:
             # check for dropped reasons
             for r in model_rows:
                 if 'qwen' in r['name'].lower():
+                    tags = set(r.get('tags', []))
                     reasons = []
-                    if not set(r['tags']).issuperset(require_tags):
-                        reasons.append(f"missing_required_tags={set(require_tags) - set(r['tags'])}")
-                    if r['num_parameters'] is None or r['num_parameters'] > MAX_PARAMS:
-                        reasons.append(f"num_parameters={r['num_parameters']}")
-                    if r['access'] != 'open':
-                        reasons.append(f"access={r['access']}")
-                    if r.get('client') != HF_CLIENT:
-                        reasons.append(f"client={r.get('client')}")
+
+                    is_text_like = bool(tags & SOFT_TEXT_TAGS)
+                    has_excluded_tags = bool(tags & EXCLUDE_TAGS)
+                    size_ok = (r.get('num_parameters') is None or r['num_parameters'] <= MAX_PARAMS)
+                    access_ok = (r.get('access') == 'open')
+                    has_local_hf_path = (
+                        r.get('has_hf_client', False) or
+                        r['name'] in KNOWN_HF_OVERRIDES
+                    )
+
+                    if not is_text_like:
+                        reasons.append(f"missing_soft_text_tags={SOFT_TEXT_TAGS - tags}")
+                    if has_excluded_tags:
+                        reasons.append(f"excluded_tags={tags & EXCLUDE_TAGS}")
+                    if not size_ok:
+                        reasons.append(f"num_parameters={r.get('num_parameters')}")
+                    if not access_ok:
+                        reasons.append(f"access={r.get('access')}")
+                    if not has_local_hf_path:
+                        reasons.append(
+                            f"no_local_hf_path has_hf_client={r.get('has_hf_client', False)} "
+                            f"override={r['name'] in KNOWN_HF_OVERRIDES}"
+                        )
+
                     print(r['name'])
                     print('  deployment_names =', r.get('deployment_names'))
                     print('  clients =', r.get('clients'))
                     print('  reasons =', reasons)
 
-        # Filter to text models that will fit in memory
-        chosen_model_rows = [
-            r for r in model_rows if (
-                set(r['tags']).issuperset(require_tags) and
-                (r['num_parameters'] is not None and r['num_parameters'] <= MAX_PARAMS) and
-                (r['access'] == 'open') and
-                r.get('has_hf_client', False)
+        chosen_model_rows = []
+        for r in model_rows:
+            tags = set(r.get('tags', []))
+
+            is_text_like = bool(tags & SOFT_TEXT_TAGS)
+            has_excluded_tags = bool(tags & EXCLUDE_TAGS)
+            size_ok = (r.get('num_parameters') is None or r['num_parameters'] <= MAX_PARAMS)
+            access_ok = (r.get('access') == 'open')
+            has_local_hf_path = (
+                r.get('has_hf_client', False) or
+                r['name'] in KNOWN_HF_OVERRIDES
             )
-        ]
+
+            if (
+                is_text_like and
+                not has_excluded_tags and
+                size_ok and
+                access_ok and
+                has_local_hf_path
+            ):
+                chosen_model_rows.append(r)
+
         chosen_model_names = {r['name'] for r in chosen_model_rows}
         logger.info('Filter to {} / {} models', len(chosen_model_rows), len(model_rows))
 
