@@ -154,17 +154,24 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         config_registry.register_builtin_configs_from_helm_package()
         model_rows = []
         for model_name, count in model_histo.items():
-            try:
-                model_meta = model_deployment_registry.get_model_metadata(model_name)
-                model_row = model_meta.__dict__ | {'count': count}
-                if model_meta.deployment_names:
-                    for deploy_name in model_meta.deployment_names:
-                        deploy_info = model_deployment_registry.get_model_deployment(deploy_name)
-                        model_row['client'] = deploy_info.client_spec.class_name
-                model_rows.append(model_row)
-            except (TypeError, ValueError) as ex:
-                logger.warning(f'missing: model_name = {ub.urepr(model_name, nl=1)} {ex}')
+            HF_CLIENT = 'helm.clients.huggingface_client.HuggingFaceClient'
 
+            for model_name, count in model_histo.items():
+                try:
+                    model_meta = model_deployment_registry.get_model_metadata(model_name)
+                    model_row = model_meta.__dict__ | {'count': count}
+
+                    clients = {}
+                    if model_meta.deployment_names:
+                        for deploy_name in model_meta.deployment_names:
+                            deploy_info = model_deployment_registry.get_model_deployment(deploy_name)
+                            clients[deploy_name] = deploy_info.client_spec.class_name
+
+                    model_row['clients'] = clients
+                    model_row['has_hf_client'] = HF_CLIENT in clients.values()
+                    model_rows.append(model_row)
+                except (TypeError, ValueError) as ex:
+                    logger.warning(f'missing: model_name = {ub.urepr(model_name, nl=1)} {ex}')
         if 0:
             ub.dict_hist([r.get('client') for r in model_rows])
 
@@ -174,13 +181,31 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         MAX_PARAMS = 10e9
         # MAX_PARAMS = 200e9
 
+        if 1:
+            # check for dropped reasons
+            for r in model_rows:
+                if 'qwen' in r['name'].lower():
+                    reasons = []
+                    if not set(r['tags']).issuperset(require_tags):
+                        reasons.append(f"missing_required_tags={set(require_tags) - set(r['tags'])}")
+                    if r['num_parameters'] is None or r['num_parameters'] > MAX_PARAMS:
+                        reasons.append(f"num_parameters={r['num_parameters']}")
+                    if r['access'] != 'open':
+                        reasons.append(f"access={r['access']}")
+                    if r.get('client') != HF_CLIENT:
+                        reasons.append(f"client={r.get('client')}")
+                    print(r['name'])
+                    print('  deployment_names =', r.get('deployment_names'))
+                    print('  clients =', r.get('clients'))
+                    print('  reasons =', reasons)
+
         # Filter to text models that will fit in memory
         chosen_model_rows = [
             r for r in model_rows if (
                 set(r['tags']).issuperset(require_tags) and
                 (r['num_parameters'] is not None and r['num_parameters'] <= MAX_PARAMS) and
                 (r['access'] == 'open') and
-                (r.get('client') == 'helm.clients.huggingface_client.HuggingFaceClient')
+                r.get('has_hf_client', False)
             )
         ]
         chosen_model_names = {r['name'] for r in chosen_model_rows}
