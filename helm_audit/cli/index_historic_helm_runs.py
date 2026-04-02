@@ -140,7 +140,12 @@ class CompileHelmReproListConfig(scfg.DataConfig):
             require_per_instance_stats=require_per_instance_stats,
             include_max_eval_instances=include_max_eval_instances,
         )
-        rows = build_run_table(runs)
+        rows = build_run_table(
+            runs,
+            include_max_eval_instances=include_max_eval_instances,
+        )
+        if config.dedupe:
+            rows = dedupe_rows(rows)
 
         scenario_histo = ub.dict_hist([r['scenario_class'] for r in rows])
         model_histo = ub.dict_hist([r['model'] for r in rows])
@@ -155,23 +160,21 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         model_rows = []
         for model_name, count in model_histo.items():
             HF_CLIENT = 'helm.clients.huggingface_client.HuggingFaceClient'
+            try:
+                model_meta = model_deployment_registry.get_model_metadata(model_name)
+                model_row = model_meta.__dict__ | {'count': count}
 
-            for model_name, count in model_histo.items():
-                try:
-                    model_meta = model_deployment_registry.get_model_metadata(model_name)
-                    model_row = model_meta.__dict__ | {'count': count}
+                clients = {}
+                if model_meta.deployment_names:
+                    for deploy_name in model_meta.deployment_names:
+                        deploy_info = model_deployment_registry.get_model_deployment(deploy_name)
+                        clients[deploy_name] = deploy_info.client_spec.class_name
 
-                    clients = {}
-                    if model_meta.deployment_names:
-                        for deploy_name in model_meta.deployment_names:
-                            deploy_info = model_deployment_registry.get_model_deployment(deploy_name)
-                            clients[deploy_name] = deploy_info.client_spec.class_name
-
-                    model_row['clients'] = clients
-                    model_row['has_hf_client'] = HF_CLIENT in clients.values()
-                    model_rows.append(model_row)
-                except (TypeError, ValueError) as ex:
-                    logger.warning(f'missing: model_name = {ub.urepr(model_name, nl=1)} {ex}')
+                model_row['clients'] = clients
+                model_row['has_hf_client'] = HF_CLIENT in clients.values()
+                model_rows.append(model_row)
+            except (TypeError, ValueError) as ex:
+                logger.warning(f'missing: model_name = {ub.urepr(model_name, nl=1)} {ex}')
         if 0:
             ub.dict_hist([r.get('client') for r in model_rows])
 
@@ -332,10 +335,12 @@ def gather_runs(
     return runs
 
 
-def build_run_table(runs: list[HelmRun]) -> list[dict]:
+def build_run_table(
+    runs: list[HelmRun],
+    *,
+    include_max_eval_instances: bool = False,
+) -> list[dict]:
     rows = []
-
-    include_max_eval_instances = False
     mismatches = []
     for run in ub.ProgIter(runs, desc='Extract run spec info'):
         max_eval_instances = None
@@ -391,7 +396,7 @@ def dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen = set()
     out = []
     for r in rows:
-        key = (r["suite"], r["run_entry"], r.get("max_eval_instances", None))
+        key = (r["run_spec_name"], r.get("max_eval_instances", None))
         if key in seen:
             continue
         seen.add(key)

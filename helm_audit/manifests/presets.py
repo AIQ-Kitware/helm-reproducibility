@@ -170,7 +170,7 @@ def build_vicuna_nochat_manifest(args: argparse.Namespace) -> dict:
     )
     manifest["model_deployments_fpath"] = (
         "configs/debug/"
-        "vicuna_no_chat_template.yaml"
+        "repro_model_overrides.yaml"
     )
     return manifest
 

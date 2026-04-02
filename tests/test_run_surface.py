@@ -8,6 +8,7 @@ from helm_audit.integrations.kwdagger_bridge import (
     kwdagger_schedule_argv,
     prepare_schedule_request,
 )
+from helm_audit.manifests import builders as manifest_builders
 from helm_audit.workflows import run_from_manifest as run_workflow
 
 
@@ -78,3 +79,38 @@ def test_run_from_manifest_execute_calls_runner(tmp_path: Path, monkeypatch: pyt
     assert "--run=1" in info["argv"]
     assert called["count"] == 1
 
+
+def test_choose_model_override_for_qwen_and_vicuna():
+    qwen_entry = "gsm:model=qwen/qwen2.5-7b-instruct-turbo,stop=none"
+    vicuna_entry = "boolq:model=lmsys/vicuna-7b-v1.3,data_augmentation=canonical"
+    assert manifest_builders._choose_model_override([qwen_entry], False) == (
+        "configs/debug/repro_model_overrides.yaml"
+    )
+    assert manifest_builders._choose_model_override([vicuna_entry], False) == (
+        "configs/debug/repro_model_overrides.yaml"
+    )
+
+
+def test_kwdagger_manifest_propagates_model_override(tmp_path: Path):
+    manifest_fpath = tmp_path / "manifest.yaml"
+    manifest_fpath.write_text(
+        "\n".join(
+            [
+                "experiment_name: demo-exp",
+                "description: demo",
+                "run_entries:",
+                "  - gsm:model=qwen/qwen2.5-7b-instruct-turbo,stop=none",
+                "suite: audit-smoke",
+                "max_eval_instances: 10",
+                "devices: 2,3",
+                "tmux_workers: 4",
+                "backend: tmux",
+                "model_deployments_fpath: configs/debug/repro_model_overrides.yaml",
+            ]
+        )
+        + "\n"
+    )
+    request = prepare_schedule_request(manifest_fpath, run=False)
+    params_text = request.params_text
+    assert "helm.model_deployments_fpath" in params_text
+    assert "configs/debug/repro_model_overrides.yaml" in params_text

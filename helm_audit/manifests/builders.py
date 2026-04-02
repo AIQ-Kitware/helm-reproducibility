@@ -12,10 +12,17 @@ from helm_audit.infra.api import dump_yaml, env_defaults, repo_run_details_fpath
 from helm_audit.manifests.models import ManifestSpec
 
 
-VICUNA_NOCHAT_OVERRIDE = (
+REPRO_MODEL_OVERRIDES = (
     "configs/debug/"
-    "vicuna_no_chat_template.yaml"
+    "repro_model_overrides.yaml"
 )
+
+MODELS_REQUIRING_LOCAL_OVERRIDE = {
+    "lmsys/vicuna-7b-v1.3",
+    "qwen/qwen2-72b-instruct",
+    "qwen/qwen2.5-7b-instruct-turbo",
+    "qwen/qwen2.5-72b-instruct-turbo",
+}
 
 
 def _load_run_specs(fpath: str | None) -> list[str]:
@@ -103,9 +110,9 @@ def _shard_entries(
 
 def _choose_model_override(run_entries: list[str], force_nochat: bool) -> str | None:
     models = {_infer_model(entry) for entry in run_entries}
-    needs_vicuna = "lmsys/vicuna-7b-v1.3" in models
-    if force_nochat or needs_vicuna:
-        return VICUNA_NOCHAT_OVERRIDE
+    needs_override = bool(models & MODELS_REQUIRING_LOCAL_OVERRIDE)
+    if force_nochat or needs_override:
+        return REPRO_MODEL_OVERRIDES
     return None
 
 
