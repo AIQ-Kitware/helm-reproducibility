@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -75,17 +76,21 @@ def emit_sankey_artifacts(
     html_out = None
     jpg_out = None
     plotly_error = None
-    try:
-        fig = graph.to_plotly(title=title)
-        fig.write_html(str(html_fpath), include_plotlyjs="cdn")
-        html_out = str(html_fpath)
+    if os.environ.get("HELM_AUDIT_SKIP_PLOTLY", "") in {"1", "true", "yes"}:
+        plotly_error = "skipped plotly sankey rendering by configuration"
+    else:
         try:
-            fig.write_image(str(jpg_fpath), scale=2.0)
-            jpg_out = str(jpg_fpath)
+            fig = graph.to_plotly(title=title)
+            fig.write_html(str(html_fpath), include_plotlyjs="cdn")
+            html_out = str(html_fpath)
+            if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
+                try:
+                    fig.write_image(str(jpg_fpath), scale=2.0)
+                    jpg_out = str(jpg_fpath)
+                except Exception as ex:
+                    plotly_error = f"unable to write sankey JPG: {ex!r}"
         except Exception as ex:
-            plotly_error = f"unable to write sankey JPG: {ex!r}"
-    except Exception as ex:
-        plotly_error = f"unable to write sankey HTML/images: {ex!r}"
+            plotly_error = f"unable to write sankey HTML/images: {ex!r}"
 
     write_latest_alias(json_fpath, report_dpath, f"sankey_{kind}.latest.json")
     write_latest_alias(txt_fpath, report_dpath, f"sankey_{kind}.latest.txt")
