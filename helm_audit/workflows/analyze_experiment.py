@@ -4,6 +4,7 @@ import argparse
 import csv
 import datetime as datetime_mod
 import json
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -93,6 +94,44 @@ def _write_latest_pair_aliases(report_dpath: Path) -> dict[str, str]:
     return created
 
 
+def _benchmark_completion_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_benchmark: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        benchmark = str(row.get('benchmark') or 'unknown')
+        info = by_benchmark.setdefault(
+            benchmark,
+            {
+                'benchmark': benchmark,
+                'total_rows': 0,
+                'completed_rows': 0,
+                'status_counts': Counter(),
+                'example_run_entries': [],
+            },
+        )
+        info['total_rows'] += 1
+        status = str(row.get('status') or '')
+        info['status_counts'][status] += 1
+        if _is_truthy_text(row.get('has_run_spec')):
+            info['completed_rows'] += 1
+        run_entry = row.get('run_entry')
+        if run_entry and len(info['example_run_entries']) < 3:
+            info['example_run_entries'].append(run_entry)
+
+    summary_rows = []
+    for benchmark, info in sorted(by_benchmark.items()):
+        total = info['total_rows']
+        completed = info['completed_rows']
+        summary_rows.append({
+            'benchmark': benchmark,
+            'total_rows': total,
+            'completed_rows': completed,
+            'completion_rate': (completed / total) if total else None,
+            'status_counts': dict(info['status_counts']),
+            'example_run_entries': info['example_run_entries'],
+        })
+    return summary_rows
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument('--experiment-name', required=True)
@@ -111,6 +150,7 @@ def main(argv: list[str] | None = None) -> None:
     if not experiment_rows:
         raise SystemExit(f'No rows found for experiment_name={args.experiment_name!r}')
     run_entries = sorted({r.get('run_entry') for r in experiment_rows if r.get('run_entry')})
+    benchmark_completion = _benchmark_completion_summary(experiment_rows)
 
     out_dpath = default_report_root() / f'experiment-analysis-{slugify(args.experiment_name)}'
     out_dpath.mkdir(parents=True, exist_ok=True)
@@ -131,11 +171,12 @@ def main(argv: list[str] | None = None) -> None:
             if args.allow_single_repeat:
                 argv.append('--allow-single-repeat')
             rebuild_core_report_main(argv)
-        except Exception as ex:
+        except (Exception, SystemExit) as ex:
             skipped_run_entries.append({
                 'run_entry': run_entry,
                 'reason': 'rebuild_failed',
                 'returncode': getattr(ex, 'returncode', None),
+                'error': str(ex),
             })
             continue
         built_report_paths.append(report_dpath / 'core_metric_report.latest.json')
@@ -259,6 +300,7 @@ def main(argv: list[str] | None = None) -> None:
         'n_run_entries': len(run_entries),
         'n_built_reports': len(summary_rows),
         'n_skipped_run_entries': len(skipped_run_entries),
+        'benchmark_completion': benchmark_completion,
         'run_entries': run_entries,
         'skipped_run_entries': skipped_run_entries,
         'cross_machine_rows': cross_machine_rows,
@@ -277,6 +319,14 @@ def main(argv: list[str] | None = None) -> None:
     lines.append(f'n_built_reports: {len(summary_rows)}')
     lines.append(f'n_skipped_run_entries: {len(skipped_run_entries)}')
     lines.append('')
+    lines.append('benchmark_completion:')
+    for row in benchmark_completion:
+        lines.append(f"  - benchmark: {row['benchmark']}")
+        lines.append(f"    completed_rows: {row['completed_rows']}")
+        lines.append(f"    total_rows: {row['total_rows']}")
+        lines.append(f"    completion_rate: {row['completion_rate']}")
+        lines.append(f"    status_counts: {row['status_counts']}")
+    lines.append('')
     lines.append('run_entries:')
     for run_entry in run_entries:
         lines.append(f'  - {run_entry}')
@@ -287,6 +337,7 @@ def main(argv: list[str] | None = None) -> None:
             lines.append(f"  - run_entry: {item['run_entry']}")
             lines.append(f"    reason: {item['reason']}")
             lines.append(f"    returncode: {item['returncode']}")
+            lines.append(f"    error: {item.get('error')}")
     lines.append('')
     if cross_machine_rows:
         lines.append('cross_machine_aiq_gpu:')

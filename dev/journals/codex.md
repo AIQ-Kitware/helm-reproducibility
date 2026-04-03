@@ -35,3 +35,34 @@ Design takeaways:
 1. When a local module is just a copied backend facade, delete it rather than preserving it as a shim once the replacement import path is stable.
 2. Prune stale docstrings alongside code imports; they are part of the dependency surface during validation.
 3. Keep the local layer focused on domain logic, not reader plumbing, so future refactors have a crisp boundary to preserve.
+
+## 2026-04-02 17:45:00 +0000
+
+Summary of user intent: expand the reproducibility experiment to include Qwen-family models on the available GPU machines, avoid Together-backed execution, prefer locally hosted open-weight execution, and determine whether the current `helm_audit` workflow can support that with minimal disruption.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This session shifted from refactor hygiene into research instrumentation. The immediate question was not whether Qwen models exist in the historic public HELM bundle, because they clearly do, but whether our current audit workflow can reproduce a meaningful subset of those runs under a local recipe. The important answer is “partially yes, but with caveats that matter scientifically.” The repository can now generate manifests that include Qwen runs and automatically attach a local `model_deployments.yaml` override for the relevant Together-only deployment names. In practice, that means the audit layer is now capable of asking the right experimental question: can a public Together-backed Qwen run be re-executed under a local Hugging Face deployment while preserving the logical model identity used by the historic run spec?
+
+The main methodological choice was to treat deployment rewriting as a controlled variable rather than as an ad hoc operator step. I added a shared override file for the currently relevant reproduction-sensitive models, including the Qwen cases and the earlier Vicuna no-chat case, and then taught manifest generation to select that override automatically whenever one of those models appears in the selected run entries. This is a better research posture than requiring manual edits per batch, because it reduces operator error and makes the deployment substitution explicit in the manifest artifact itself. If these runs eventually support a paper claim, we will be able to point to a concrete, versioned override recipe rather than reconstructing what was done from shell history.
+
+At the same time, a useful caution emerged from the first server-side failure. The local failure mode was not a conceptual mismatch in the audit pipeline. The run reached HELM execution and began materializing Qwen requests, which is already evidence that the indexing, manifest, kwdagger scheduling, and override plumbing are basically sound. The failure happened inside HELM’s tokenizer loading path for Qwen 2.5, and importantly, that was observed on the server’s own environment rather than in a purely local simulation. That distinction matters. From a reproducibility-research perspective, this means the current obstacle is closer to environment-specific backend robustness than to a flaw in the experimental design.
+
+The most important caution from the user was also correct and should be recorded clearly: patches made in the local editable HELM checkout do not automatically propagate to the remote server environment. That makes any local HELM code edits scientifically dangerous unless they are also deployed intentionally and documented as part of the reproduction recipe. Because of that, the right interpretation of today’s work is not “Qwen reproduction is fixed.” The more honest reading is narrower: `helm_audit` now knows how to request these experiments coherently, and at least some of the scheduled Qwen jobs are progressing far enough to suggest the workflow is not fundamentally blocked. However, the backend stack on the execution host still needs either an environment-compatible solution or a consciously deployed HELM-side patch before we can claim the full route is robust.
+
+The positive signal is partial but meaningful. One of the first runs failed, but several others appear to be running. In a research notebook this should be treated neither as success nor as failure, but as evidence that the experiment has crossed an important threshold: the candidate Qwen suite is now executable enough to produce informative partial observations. That is already better than the prior state, where these models were effectively excluded from the reproducibility apparatus. Even a partial batch can tell us which benchmarks are operationally runnable, whether specific Qwen model sizes are stable on `aiq-gpu`, and whether smaller configurations are plausible on `namek` or `yardrat`.
+
+Current interpretation:
+1. The audit repository is now in a state where Qwen runs can be indexed, selected, and scheduled under an explicit local-deployment override policy.
+2. The execution bottleneck is no longer primarily in `helm_audit`; it is now in the interaction between HELM, the server environment, and the Hugging Face tokenizer/model-loading path for specific Qwen families.
+3. Partial successful execution is already useful evidence for experiment triage and should be harvested even if the full batch does not complete cleanly.
+
+Recommended next research actions:
+1. Let the currently running Qwen jobs finish and record which exact model/benchmark combinations succeed versus fail.
+2. Treat `aiq-gpu` as the primary platform for the 72B-class Qwen attempts and use `namek` / `yardrat` only for the smaller Qwen configurations until there is direct evidence the larger models fit and load reliably elsewhere.
+3. Avoid depending on undeployed local HELM patches when interpreting server results. If a HELM-side fix becomes necessary, deploy it explicitly and record that intervention as part of the experimental recipe.
+
+Design takeaways:
+1. For reproducibility studies, deployment substitution should be encoded in versioned manifest inputs, not left as an operator convention.
+2. A partially running batch can still be a strong positive result if it shows that the workflow reached the true backend bottleneck rather than failing in orchestration.
+3. Environment-local fixes in upstream dependencies are not “real” experimental fixes until the execution environment is updated to match them.

@@ -10,13 +10,13 @@ from typing import Any
 import kwutil
 import ubelt as ub
 
+from helm_audit.compat.helm_outputs import HelmOutputs, HelmRun
 from helm_audit.infra.api import (
     env_defaults,
     experiment_report_dpath,
     experiment_result_dpath,
     load_manifest,
 )
-from magnet.backends.helm.helm_outputs import HelmOutputs, HelmRun
 from helm_audit.helm.run_entries import (
     discover_benchmark_output_dirs,
     run_dir_matches_requested,

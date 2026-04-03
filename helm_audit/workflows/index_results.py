@@ -10,8 +10,8 @@ from typing import Any
 import kwutil
 import pandas as pd
 
+from helm_audit.compat.helm_outputs import HelmOutputs
 from helm_audit.infra.api import default_report_root, env_defaults
-from magnet.backends.helm.helm_outputs import HelmOutputs
 from helm_audit.helm.run_entries import parse_run_entry_description
 
 
