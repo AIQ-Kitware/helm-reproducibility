@@ -217,17 +217,26 @@ def _classify_failure(job_dpath: Path, row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _configure_plotly_chrome() -> None:
+    import importlib.util
     chrome_candidates = [
         audit_root() / ".cache/plotly-chrome/chrome-linux64/chrome",
         Path.home() / ".plotly/chrome/chrome-linux64/chrome",
     ]
+    spec = importlib.util.find_spec("choreographer")
+    if spec and spec.submodule_search_locations:
+        chrome_candidates.insert(
+            0,
+            Path(list(spec.submodule_search_locations)[0]) / "cli/browser_exe/chrome-linux64/chrome",
+        )
+    chrome_found = False
     for cand in chrome_candidates:
         if cand.exists():
             os.environ.setdefault("BROWSER_PATH", str(cand))
             os.environ.setdefault("PLOTLY_CHROME_PATH", str(cand))
+            chrome_found = True
             break
-    os.environ.setdefault("HELM_AUDIT_SKIP_STATIC_IMAGES", "1")
-    os.environ.setdefault("HELM_AUDIT_SKIP_PLOTLY", "1")
+    if not chrome_found:
+        os.environ.setdefault("HELM_AUDIT_SKIP_STATIC_IMAGES", "1")
 
 
 def _raise_fd_limit(target: int = 8192) -> None:
