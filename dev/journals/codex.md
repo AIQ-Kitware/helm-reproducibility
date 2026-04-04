@@ -66,3 +66,39 @@ Design takeaways:
 1. For reproducibility studies, deployment substitution should be encoded in versioned manifest inputs, not left as an operator convention.
 2. A partially running batch can still be a strong positive result if it shows that the workflow reached the true backend bottleneck rather than failing in orchestration.
 3. Environment-local fixes in upstream dependencies are not “real” experimental fixes until the execution environment is updated to match them.
+
+## 2026-04-04 02:45:38 +0000
+
+Summary of user intent: three sessions' worth of work on `build_reports_summary.py` and related infrastructure. (1) Reorganize output so `.json` files go into a `machine/` subfolder and human-readable files (`.html`, `.jpg`, `.png`, `.txt`, `.csv`, `.sh`) stay at the top level of `level_001`. (2) Add threshold context to all figures that use `abs_tol=0` agreement buckets without saying so. (3) Add three new diagnostic plots: agreement tolerance curve, model×benchmark coverage matrix, and failure root-cause taxonomy.
+
+Model and configuration: claude-sonnet-4-6, Claude Code CLI.
+
+**machine/ subfolder reorganization**
+
+The original level_001 directory mixed 40+ files — JSON data blobs, HTML visualizations, TXT summaries, CSVs — at the same level. The operator opening it to find a Sankey diagram had to visually wade through the data files. The fix was clean: add an optional `machine_dpath` parameter to `emit_sankey_artifacts` (in `sankey.py`), `_write_table_artifacts`, and `_write_plotly_bar` (both in `build_reports_summary.py`). When provided, the `.json` file and its `.latest.json` alias go to `machine_dpath`; everything else stays in `report_dpath`. In `_render_scope_summary`, we create `level_001/machine/` and `level_002/machine/` and pass them everywhere. The summary manifest itself also goes into `machine/`. This pattern is non-invasive: callers that don't pass `machine_dpath` continue working as before, which is important for breakdown scopes that run with `include_visuals=False`.
+
+The alternative considered was writing everything to `machine/` and symlinking visual files back up — that was rejected because symlink chains pointing across directories are harder to follow manually and would make the human-readable files look like they live in `machine/` in some editors.
+
+**Threshold context on figures**
+
+The core problem: `official_instance_agree_bucket` is always computed at `abs_tol=0` (exact match). Five figures used it as a color or axis without saying that. Specifically: the strict reproducibility Sankey (“Executive Reproducibility Summary”), the operational Sankey's outcome stage, the reproducibility buckets bar chart, the benchmark status bar chart, and the per-metric drift Sankey. The fix was entirely in title strings and `stage_defs` descriptions — no logic changes. Added `(instance-level, abs_tol=0 exact match)` to titles, changed axis labels from machine-key strings to human descriptions, and expanded `stage_defs` for both the strict Sankey and the multi-tolerance Sankeys to spell out what the bucket labels mean (fraction of instances agreeing at that tolerance). Also added `xaxis_title`/`yaxis_title` optional overrides to `_write_plotly_bar` since plotly's default of replacing underscores with spaces produces confusing labels.
+
+**Three new diagnostic plots**
+
+Three questions drove the new plots:
+- “How does agreement change as tolerance relaxes?” → agreement tolerance curve
+- “What subset of HELM (model × benchmark) are we running, and at what analysis stage?” → coverage matrix
+- “Why are the other jobs failing — hardware limit, data access, or special infra?” → failure taxonomy
+
+For the tolerance curve, I extended `_load_all_repro_rows` to store the full `agreement_vs_abs_tol` list (13 thresholds) per row, then built a `go.Scatter` line plot with log-scale x-axis, one line per run colored by benchmark. Using `go.Figure` directly rather than `px.line` was necessary because the data shape (curves as separate lists per row) doesn't fit the px tidy-data model well, and because I needed `legendgroup` to deduplicate benchmark colors in the legend while showing all 30 individual run lines.
+
+For the coverage matrix, I used `go.Heatmap` with a custom colorscale mapping -1 (not attempted) through 5 (exact/near-exact) to six distinct colors. The aggregation per `(model, benchmark)` cell takes the *best* status across all runs in that cell — conservative in the sense that seeing one exact-match run means “we can do it,” which is the right semantic for a coverage question. The matrix shows immediately why our HELM coverage looks the way it does: `mmlu_clinical_afr` and `winogrande_afr` have high completion rates while `mmlu` (the large one) has mostly failures except for 4 models × a few subjects.
+
+For the failure taxonomy, I defined a static `_FAILURE_CATEGORIES` dict mapping each raw `failure_reason` to one of four root-cause categories: `hardware_timeout`, `data_access`, `missing_infrastructure`, `unknown`. This is important because the categories answer fundamentally different questions: hardware timeout means “get more GPU” or “run fewer instances”; data access means “cache the dataset locally”; missing infrastructure means “get OpenAI credentials or special datasets.” A stacked bar per benchmark makes the dominant barrier for each benchmark immediately legible.
+
+Risks and uncertainties: the coverage matrix color encoding (-1 through 5) could confuse readers who expect heatmaps to be continuous. The colorbar ticktext helps, but interactive hover is the real safeguard. The failure taxonomy assumes the static `_FAILURE_CATEGORIES` mapping is comprehensive; new failure reasons not in the dict fall back to “unknown / other” which is correct defensive behavior. The agreement curve x-axis substitutes `1e-13` for `abs_tol=0` to avoid `log(0)` — visually this looks like the zero-tolerance point lands at the leftmost tick, which is accurate enough.
+
+Design takeaways:
+1. Separate machine-readable data from human-readable views at the directory level, not just the file level — it changes the first-open experience from “where is the HTML?” to “obviously here.”
+2. When a visualization figure's color/axis encoding carries an implicit assumption (threshold, comparison direction, etc.), put that assumption in the title or axis label, not just in a key file. Readers look at figures before reading keys.
+3. Failure taxonomy charts are most useful when categories are defined by *what action fixes them*, not by symptom. “Hardware timeout,” “data access barrier,” and “missing credentials” each suggest a different next step for an operator.

@@ -20,8 +20,17 @@ def emit_sankey_artifacts(
     title: str,
     stage_defs: dict[str, list[str]],
     stage_order: list[tuple[str, str]],
+    machine_dpath: Path | None = None,
+    interactive_dpath: Path | None = None,
+    static_dpath: Path | None = None,
 ) -> dict[str, Any]:
     report_dpath.mkdir(parents=True, exist_ok=True)
+    _machine = machine_dpath if machine_dpath is not None else report_dpath
+    _interactive = interactive_dpath if interactive_dpath is not None else report_dpath
+    _static = static_dpath if static_dpath is not None else report_dpath
+    for d in {_machine, _interactive, _static}:
+        d.mkdir(parents=True, exist_ok=True)
+
     root = sankey_builder.Root(label=f"{title} n={len(rows)}")
     node = root
     stage_names: list[str] = []
@@ -36,12 +45,12 @@ def emit_sankey_artifacts(
     graph_summary = graph.summarize(max_edges=300)
     plan_text = root.to_text()
 
-    stem = report_dpath / f"sankey_{stamp}_{kind}"
-    json_fpath = stem.with_suffix(".json")
-    txt_fpath = stem.with_suffix(".txt")
-    key_fpath = stem.with_name(f"{stem.name}_key.txt")
-    html_fpath = stem.with_suffix(".html")
-    jpg_fpath = stem.with_suffix(".jpg")
+    base_name = f"sankey_{stamp}_{kind}"
+    json_fpath = (_machine / base_name).with_suffix(".json")
+    txt_fpath = (_static / base_name).with_suffix(".txt")
+    key_fpath = _static / f"{base_name}_key.txt"
+    html_fpath = (_interactive / base_name).with_suffix(".html")
+    jpg_fpath = (_static / base_name).with_suffix(".jpg")
 
     node_labels, source, target, value = graph._to_sankey_data()
     payload = kwutil.Json.ensure_serializable(
@@ -92,13 +101,13 @@ def emit_sankey_artifacts(
         except Exception as ex:
             plotly_error = f"unable to write sankey HTML/images: {ex!r}"
 
-    write_latest_alias(json_fpath, report_dpath, f"sankey_{kind}.latest.json")
-    write_latest_alias(txt_fpath, report_dpath, f"sankey_{kind}.latest.txt")
-    write_latest_alias(key_fpath, report_dpath, f"sankey_{kind}.latest.key.txt")
+    write_latest_alias(json_fpath, _machine, f"sankey_{kind}.latest.json")
+    write_latest_alias(txt_fpath, _static, f"sankey_{kind}.latest.txt")
+    write_latest_alias(key_fpath, _static, f"sankey_{kind}.latest.key.txt")
     if html_out is not None:
-        write_latest_alias(html_fpath, report_dpath, f"sankey_{kind}.latest.html")
+        write_latest_alias(html_fpath, _interactive, f"sankey_{kind}.latest.html")
     if jpg_out is not None:
-        write_latest_alias(jpg_fpath, report_dpath, f"sankey_{kind}.latest.jpg")
+        write_latest_alias(jpg_fpath, _static, f"sankey_{kind}.latest.jpg")
 
     return {
         "json": str(json_fpath),

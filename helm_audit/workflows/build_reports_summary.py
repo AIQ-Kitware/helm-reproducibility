@@ -6,6 +6,7 @@ import datetime as datetime_mod
 import json
 import os
 import resource
+import sys
 from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
@@ -298,15 +299,46 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
             ),
             "official_runlevel_abs_max": ((((official.get("run_level") or {}).get("overall_quantiles") or {}).get("abs_delta") or {}).get("max")),
             "official_runlevel_abs_p90": ((((official.get("run_level") or {}).get("overall_quantiles") or {}).get("abs_delta") or {}).get("p90")),
+            "official_instance_agree_001": _find_curve_value(
+                ((official.get("instance_level") or {}).get("agreement_vs_abs_tol") or []),
+                0.001,
+            ),
+            "official_instance_agree_005": _find_curve_value(
+                ((official.get("instance_level") or {}).get("agreement_vs_abs_tol") or []),
+                0.05,
+            ),
+            "core_metrics": official.get("core_metrics") or [],
+            "official_runlevel_metric_max_deltas": {
+                m["metric"]: (m.get("abs_delta") or {}).get("max")
+                for m in ((official.get("run_level") or {}).get("by_metric") or [])
+            },
+            "official_instance_agree_curve": [
+                {"abs_tol": pt["abs_tol"], "agree_ratio": pt["agree_ratio"]}
+                for pt in ((official.get("instance_level") or {}).get("agreement_vs_abs_tol") or [])
+            ],
         }
         deduped[(experiment_name, run_entry)] = row
     return list(deduped.values())
 
 
-def _write_table_artifacts(rows: list[dict[str, Any]], stem: Path) -> dict[str, str]:
-    json_fpath = stem.with_suffix(".json")
-    csv_fpath = stem.with_suffix(".csv")
-    txt_fpath = stem.with_suffix(".txt")
+def _write_table_artifacts(
+    rows: list[dict[str, Any]],
+    stem: Path,
+    machine_dpath: Path | None = None,
+    static_dpath: Path | None = None,
+) -> dict[str, str]:
+    if machine_dpath is not None:
+        machine_dpath.mkdir(parents=True, exist_ok=True)
+        json_fpath = (machine_dpath / stem.name).with_suffix(".json")
+    else:
+        json_fpath = stem.with_suffix(".json")
+    if static_dpath is not None:
+        static_dpath.mkdir(parents=True, exist_ok=True)
+        csv_fpath = (static_dpath / stem.name).with_suffix(".csv")
+        txt_fpath = (static_dpath / stem.name).with_suffix(".txt")
+    else:
+        csv_fpath = stem.with_suffix(".csv")
+        txt_fpath = stem.with_suffix(".txt")
     _write_json(rows, json_fpath)
     fieldnames = sorted({key for row in rows for key in row.keys()})
     with csv_fpath.open("w", newline="") as file:
@@ -334,11 +366,24 @@ def _write_plotly_bar(
     color: str,
     title: str,
     stem: Path,
+    machine_dpath: Path | None = None,
+    interactive_dpath: Path | None = None,
+    static_dpath: Path | None = None,
+    xaxis_title: str | None = None,
+    yaxis_title: str | None = None,
 ) -> dict[str, str | None]:
-    json_fpath = stem.with_suffix(".json")
-    html_fpath = stem.with_suffix(".html")
-    jpg_fpath = stem.with_suffix(".jpg")
-    png_fpath = stem.with_suffix(".png")
+    if machine_dpath is not None:
+        machine_dpath.mkdir(parents=True, exist_ok=True)
+        json_fpath = (machine_dpath / stem.name).with_suffix(".json")
+    else:
+        json_fpath = stem.with_suffix(".json")
+    _interactive = interactive_dpath if interactive_dpath is not None else stem.parent
+    _static = static_dpath if static_dpath is not None else stem.parent
+    _interactive.mkdir(parents=True, exist_ok=True)
+    _static.mkdir(parents=True, exist_ok=True)
+    html_fpath = (_interactive / stem.name).with_suffix(".html")
+    jpg_fpath = (_static / stem.name).with_suffix(".jpg")
+    png_fpath = (_static / stem.name).with_suffix(".png")
     _write_json(rows, json_fpath)
     html_out = None
     jpg_out = None
@@ -350,7 +395,10 @@ def _write_plotly_bar(
             import plotly.express as px
 
             fig = px.bar(rows, x=x, y=y, color=color, title=title, barmode="stack")
-            fig.update_layout(xaxis_title=x.replace("_", " "), yaxis_title=y.replace("_", " "))
+            fig.update_layout(
+                xaxis_title=xaxis_title if xaxis_title is not None else x.replace("_", " "),
+                yaxis_title=yaxis_title if yaxis_title is not None else y.replace("_", " "),
+            )
             fig.write_html(str(html_fpath), include_plotlyjs="cdn")
             html_out = str(html_fpath)
             if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
@@ -519,9 +567,13 @@ def _build_high_level_readme(
             "",
             "start_here:",
             "  - open sankey_operational.latest.html for the full pipeline from group to success/failure bucket",
-            "  - open sankey_reproducibility.latest.html for the analyzed subset and agreement thresholds",
+            "  - open sankey_reproducibility.latest.html for the analyzed subset at strict threshold (abs_tol=0)",
+            "  - open sankey_repro_tol001.latest.html / sankey_repro_tol010.latest.html / sankey_repro_tol050.latest.html",
+            "    to see how reproducibility changes as tolerance is relaxed (0.001 / 0.010 / 0.050)",
+            "  - open sankey_repro_by_metric.latest.html for per-metric drift breakdown (run-level max delta)",
             "  - read failure_reasons.latest.txt to see why incomplete jobs likely failed",
             "  - follow next_level/ for tables and breakdown folders",
+            "  - run reproduce.latest.sh to regenerate this report from current data",
             "",
             "default_breakdowns:",
         ]
@@ -535,29 +587,56 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
     write_latest_alias(level_001 / "README.latest.txt", summary_root, "README.latest.txt")
     write_latest_alias(level_001, summary_root, "level_001.latest")
     write_latest_alias(level_002, summary_root, "level_002.latest")
+    level_001_interactive = level_001 / "interactive"
+    level_001_static = level_001 / "static"
+    level_002_static = level_002 / "static"
     for src_name in [
         "sankey_operational.latest.html",
+        "sankey_reproducibility.latest.html",
+        "sankey_repro_tol001.latest.html",
+        "sankey_repro_tol010.latest.html",
+        "sankey_repro_tol050.latest.html",
+        "sankey_repro_by_metric.latest.html",
+        "benchmark_status.latest.html",
+        "reproducibility_buckets.latest.html",
+        "agreement_curve.latest.html",
+        "coverage_matrix.latest.html",
+        "failure_taxonomy.latest.html",
+    ]:
+        src = level_001_interactive / src_name
+        if src.exists() or src.is_symlink():
+            write_latest_alias(src, summary_root, src_name)
+    for src_name in [
         "sankey_operational.latest.jpg",
         "sankey_operational.latest.txt",
-        "sankey_reproducibility.latest.html",
         "sankey_reproducibility.latest.jpg",
         "sankey_reproducibility.latest.txt",
-        "benchmark_status.latest.html",
+        "sankey_repro_tol001.latest.jpg",
+        "sankey_repro_tol001.latest.txt",
+        "sankey_repro_tol010.latest.jpg",
+        "sankey_repro_tol010.latest.txt",
+        "sankey_repro_tol050.latest.jpg",
+        "sankey_repro_tol050.latest.txt",
+        "sankey_repro_by_metric.latest.jpg",
+        "sankey_repro_by_metric.latest.txt",
         "benchmark_status.latest.jpg",
-        "reproducibility_buckets.latest.html",
         "reproducibility_buckets.latest.jpg",
+        "agreement_curve.latest.jpg",
+        "coverage_matrix.latest.jpg",
+        "failure_taxonomy.latest.jpg",
         "failure_reasons.latest.txt",
         "failure_runs.latest.csv",
     ]:
-        src = level_001 / src_name
+        src = level_001_static / src_name
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
+    write_latest_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.latest.sh")
     for src_name in [
         "benchmark_summary.latest.csv",
         "run_inventory.latest.csv",
         "reproducibility_rows.latest.csv",
     ]:
-        src = level_002 / src_name
+        src = level_002_static / src_name
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
 
@@ -620,6 +699,490 @@ def _render_breakdown_scopes(
     write_latest_alias(manifest_fpath, breakdowns_root, "manifest.latest.json")
 
 
+def _bucket_metric_delta(max_delta: float | None) -> str:
+    if max_delta is None:
+        return "not_available"
+    if max_delta == 0.0:
+        return "exact_match"
+    if max_delta <= 0.001:
+        return "tiny_drift_0.001"
+    if max_delta <= 0.01:
+        return "small_drift_0.01"
+    return "large_drift"
+
+
+def _expand_repro_rows_by_metric(
+    repro_rows: list[dict[str, Any]],
+    enriched_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    enriched_lookup = {
+        (str(r.get("experiment_name")), str(r.get("run_entry"))): r
+        for r in enriched_rows
+    }
+    expanded = []
+    for row in repro_rows:
+        deltas = row.get("official_runlevel_metric_max_deltas") or {}
+        if isinstance(deltas, str):
+            try:
+                deltas = json.loads(deltas)
+            except Exception:
+                deltas = {}
+        metrics = row.get("core_metrics") or list(deltas.keys())
+        if isinstance(metrics, str):
+            try:
+                metrics = json.loads(metrics)
+            except Exception:
+                metrics = [metrics] if metrics else []
+        key = (str(row.get("experiment_name")), str(row.get("run_entry")))
+        parent = enriched_lookup.get(key)
+        for metric in (metrics or ["unknown"]):
+            max_delta = deltas.get(metric)
+            expanded.append({
+                "group": str((parent or {}).get("benchmark") or "unknown"),
+                "metric": str(metric),
+                "drift_bucket": _bucket_metric_delta(max_delta),
+            })
+    return expanded
+
+
+def _build_repro_sankey_rows_at_tol(
+    repro_rows: list[dict[str, Any]],
+    enriched_rows: list[dict[str, Any]],
+    agree_field: str,
+) -> list[dict[str, Any]]:
+    enriched_lookup = {
+        (str(r.get("experiment_name")), str(r.get("run_entry"))): r
+        for r in enriched_rows
+    }
+    rows = []
+    for row in repro_rows:
+        key = (str(row.get("experiment_name")), str(row.get("run_entry")))
+        parent = enriched_lookup.get(key)
+        agree_val = row.get(agree_field)
+        agree = float(agree_val) if agree_val is not None and agree_val != "" else None
+        rows.append({
+            "group": str((parent or {}).get("benchmark") or "unknown"),
+            "repeatability": str(row.get("repeat_diagnosis") or "unknown"),
+            "agreement": _bucket_agreement(agree),
+            "diagnosis": str(row.get("official_diagnosis") or "unknown"),
+        })
+    return rows
+
+
+_FAILURE_CATEGORIES: dict[str, tuple[str, str]] = {
+    # failure_reason -> (category_key, category_label)
+    "truncated_or_incomplete_runtime": ("hardware_timeout", "Hardware / Compute Timeout"),
+    "remote_dataset_download_failure": ("data_access", "Data Access Barrier"),
+    "gated_dataset_access": ("data_access", "Data Access Barrier"),
+    "missing_dataset_or_cached_artifact": ("data_access", "Data Access Barrier"),
+    "missing_math_dataset": ("missing_infrastructure", "Missing Special Infrastructure"),
+    "missing_openai_annotation_credentials": ("missing_infrastructure", "Missing Special Infrastructure"),
+    "missing_runtime_log": ("unknown", "Unknown / Other"),
+    "unknown_failure": ("unknown", "Unknown / Other"),
+}
+_FAILURE_CATEGORY_ORDER = [
+    "hardware_timeout",
+    "data_access",
+    "missing_infrastructure",
+    "unknown",
+]
+_FAILURE_CATEGORY_LABELS = {
+    "hardware_timeout": "Hardware / Compute Timeout",
+    "data_access": "Data Access Barrier",
+    "missing_infrastructure": "Missing Special Infrastructure",
+    "unknown": "Unknown / Other",
+}
+
+
+def _write_agreement_curve_plot(
+    repro_rows: list[dict[str, Any]],
+    enriched_rows: list[dict[str, Any]],
+    stem: Path,
+    title: str,
+    machine_dpath: Path | None = None,
+    interactive_dpath: Path | None = None,
+    static_dpath: Path | None = None,
+) -> dict[str, str | None]:
+    """Line chart: x=abs_tol (log), y=instance agree_ratio, one line per analyzed run."""
+    bench_lookup = {
+        (str(r.get("experiment_name")), str(r.get("run_entry"))): str(r.get("benchmark") or "unknown")
+        for r in enriched_rows
+    }
+    curve_data: list[dict[str, Any]] = []
+    for row in repro_rows:
+        key = (str(row.get("experiment_name")), str(row.get("run_entry")))
+        bench = bench_lookup.get(key, "unknown")
+        curve = row.get("official_instance_agree_curve") or []
+        run_label = str(row.get("run_spec_name") or row.get("run_entry") or "unknown")
+        for pt in curve:
+            curve_data.append({
+                "benchmark": bench,
+                "run": run_label,
+                "abs_tol": pt["abs_tol"],
+                "agree_ratio": pt["agree_ratio"],
+            })
+
+    if machine_dpath is not None:
+        machine_dpath.mkdir(parents=True, exist_ok=True)
+        json_fpath = (machine_dpath / stem.name).with_suffix(".json")
+    else:
+        json_fpath = stem.with_suffix(".json")
+    _interactive = interactive_dpath if interactive_dpath is not None else stem.parent
+    _static = static_dpath if static_dpath is not None else stem.parent
+    _interactive.mkdir(parents=True, exist_ok=True)
+    _static.mkdir(parents=True, exist_ok=True)
+    html_fpath = (_interactive / stem.name).with_suffix(".html")
+    jpg_fpath = (_static / stem.name).with_suffix(".jpg")
+    _write_json(curve_data, json_fpath)
+
+    html_out = None
+    jpg_out = None
+    plotly_error = None
+    if os.environ.get("HELM_AUDIT_SKIP_PLOTLY", "") in {"1", "true", "yes"}:
+        plotly_error = "skipped by configuration"
+    elif not curve_data:
+        plotly_error = "no agreement curve data available"
+    else:
+        try:
+            _configure_plotly_chrome()
+            import plotly.graph_objects as go
+
+            # Assign a color per benchmark
+            benchmarks = sorted(set(d["benchmark"] for d in curve_data))
+            palette = [
+                "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd",
+                "#8c564b", "#e377c2", "#7f7f7f", "#bcbd22", "#17becf",
+            ]
+            bench_color = {b: palette[i % len(palette)] for i, b in enumerate(benchmarks)}
+
+            fig = go.Figure()
+            seen_benchmarks: set[str] = set()
+            for row in repro_rows:
+                key = (str(row.get("experiment_name")), str(row.get("run_entry")))
+                bench = bench_lookup.get(key, "unknown")
+                curve = row.get("official_instance_agree_curve") or []
+                if not curve:
+                    continue
+                run_label = str(row.get("run_spec_name") or row.get("run_entry") or "unknown")
+                tols = [max(pt["abs_tol"], 1e-13) for pt in curve]  # avoid log(0)
+                ratios = [pt["agree_ratio"] for pt in curve]
+                show_legend = bench not in seen_benchmarks
+                seen_benchmarks.add(bench)
+                fig.add_trace(go.Scatter(
+                    x=tols,
+                    y=ratios,
+                    mode="lines+markers",
+                    name=bench,
+                    legendgroup=bench,
+                    showlegend=show_legend,
+                    line={"color": bench_color[bench], "width": 1.5},
+                    marker={"size": 5},
+                    opacity=0.75,
+                    hovertemplate=(
+                        f"<b>{bench}</b><br>"
+                        "abs_tol=%{x:.2e}<br>"
+                        "agree_ratio=%{y:.3f}<br>"
+                        f"run={run_label[:60]}<extra></extra>"
+                    ),
+                ))
+            fig.update_layout(
+                title=title,
+                xaxis={"title": "abs_tol (tolerance on |official - local|)", "type": "log"},
+                yaxis={"title": "Fraction of Instances Agreeing", "range": [0, 1.05]},
+                legend={"title": "Benchmark"},
+                hovermode="closest",
+            )
+            fig.write_html(str(html_fpath), include_plotlyjs="cdn")
+            html_out = str(html_fpath)
+            if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
+                fig.write_image(str(jpg_fpath), scale=2.0)
+                jpg_out = str(jpg_fpath)
+        except Exception as ex:
+            plotly_error = f"unable to write agreement curve: {ex!r}"
+
+    return {"json": str(json_fpath), "html": html_out, "jpg": jpg_out, "plotly_error": plotly_error}
+
+
+def _write_coverage_matrix_plot(
+    enriched_rows: list[dict[str, Any]],
+    repro_rows: list[dict[str, Any]],
+    stem: Path,
+    title: str,
+    machine_dpath: Path | None = None,
+    interactive_dpath: Path | None = None,
+    static_dpath: Path | None = None,
+) -> dict[str, str | None]:
+    """Heatmap: rows=model, cols=benchmark, color=best status for that cell."""
+    # Status levels (higher = better)
+    STATUS_LEVEL = {
+        "all_failed": 0,
+        "completed_not_analyzed": 1,
+        "analyzed_low": 2,
+        "analyzed_moderate": 3,
+        "analyzed_high": 4,
+        "analyzed_exact": 5,
+    }
+    STATUS_LABEL = {
+        0: "all failed",
+        1: "completed, not yet analyzed",
+        2: "analyzed: low agreement (<80%)",
+        3: "analyzed: moderate agreement (80-95%)",
+        4: "analyzed: high agreement (95%+)",
+        5: "analyzed: exact / near-exact",
+    }
+    repro_keyed = {
+        (str(r.get("experiment_name")), str(r.get("run_entry"))): r
+        for r in repro_rows
+    }
+    # Build best-status per (model, benchmark) cell
+    cell_status: dict[tuple[str, str], int] = {}
+    cell_counts: dict[tuple[str, str], dict[str, int]] = {}
+    for row in enriched_rows:
+        model = str(row.get("model") or "unknown")
+        bench = str(row.get("benchmark") or "unknown")
+        key = (model, bench)
+        counts = cell_counts.setdefault(key, {"total": 0, "completed": 0, "analyzed": 0, "failed": 0})
+        counts["total"] += 1
+        if row.get("completed_with_run_artifacts"):
+            counts["completed"] += 1
+            rkey = (str(row.get("experiment_name")), str(row.get("run_entry")))
+            repro = repro_keyed.get(rkey)
+            if repro:
+                counts["analyzed"] += 1
+                bucket = repro.get("official_instance_agree_bucket") or ""
+                if "exact" in bucket:
+                    level = STATUS_LEVEL["analyzed_exact"]
+                elif "high" in bucket:
+                    level = STATUS_LEVEL["analyzed_high"]
+                elif "moderate" in bucket:
+                    level = STATUS_LEVEL["analyzed_moderate"]
+                else:
+                    level = STATUS_LEVEL["analyzed_low"]
+            else:
+                level = STATUS_LEVEL["completed_not_analyzed"]
+        else:
+            counts["failed"] += 1
+            level = STATUS_LEVEL["all_failed"]
+        cell_status[key] = max(cell_status.get(key, -1), level)
+
+    models = sorted({m for m, _ in cell_status})
+    benchmarks = sorted({b for _, b in cell_status})
+    matrix: list[list[int]] = []
+    hover_matrix: list[list[str]] = []
+    for model in models:
+        row_vals = []
+        row_hover = []
+        for bench in benchmarks:
+            key = (model, bench)
+            level = cell_status.get(key, -1)
+            counts = cell_counts.get(key, {})
+            row_vals.append(level)
+            if level == -1:
+                row_hover.append("not attempted")
+            else:
+                label = STATUS_LABEL.get(level, "unknown")
+                total = counts.get("total", 0)
+                completed = counts.get("completed", 0)
+                analyzed = counts.get("analyzed", 0)
+                row_hover.append(
+                    f"{label}<br>total={total} completed={completed} analyzed={analyzed}"
+                )
+        matrix.append(row_vals)
+        hover_matrix.append(row_hover)
+
+    matrix_data = {
+        "models": models,
+        "benchmarks": benchmarks,
+        "matrix": matrix,
+        "status_level_meanings": STATUS_LABEL,
+    }
+    if machine_dpath is not None:
+        machine_dpath.mkdir(parents=True, exist_ok=True)
+        json_fpath = (machine_dpath / stem.name).with_suffix(".json")
+    else:
+        json_fpath = stem.with_suffix(".json")
+    _interactive = interactive_dpath if interactive_dpath is not None else stem.parent
+    _static = static_dpath if static_dpath is not None else stem.parent
+    _interactive.mkdir(parents=True, exist_ok=True)
+    _static.mkdir(parents=True, exist_ok=True)
+    html_fpath = (_interactive / stem.name).with_suffix(".html")
+    jpg_fpath = (_static / stem.name).with_suffix(".jpg")
+    _write_json(matrix_data, json_fpath)
+
+    html_out = None
+    jpg_out = None
+    plotly_error = None
+    if os.environ.get("HELM_AUDIT_SKIP_PLOTLY", "") in {"1", "true", "yes"}:
+        plotly_error = "skipped by configuration"
+    elif not models or not benchmarks:
+        plotly_error = "no data for coverage matrix"
+    else:
+        try:
+            _configure_plotly_chrome()
+            import plotly.graph_objects as go
+
+            colorscale = [
+                [0.0 / 6, "#f0f0f0"],   # -1 not attempted (grey)
+                [1.0 / 6, "#d62728"],    # 0 all_failed (red)
+                [2.0 / 6, "#ffdd57"],    # 1 completed not analyzed (yellow)
+                [3.0 / 6, "#ff7f0e"],    # 2 analyzed low (orange)
+                [4.0 / 6, "#aec7e8"],    # 3 analyzed moderate (light blue)
+                [5.0 / 6, "#1f77b4"],    # 4 analyzed high (blue)
+                [6.0 / 6, "#2ca02c"],    # 5 analyzed exact (green)
+            ]
+            fig = go.Figure(go.Heatmap(
+                z=matrix,
+                x=benchmarks,
+                y=models,
+                text=hover_matrix,
+                hovertemplate="%{y} × %{x}<br>%{text}<extra></extra>",
+                colorscale=colorscale,
+                zmin=-1,
+                zmax=5,
+                colorbar={
+                    "title": "Status",
+                    "tickvals": [-1, 0, 1, 2, 3, 4, 5],
+                    "ticktext": [
+                        "not attempted",
+                        "all failed",
+                        "completed (not analyzed)",
+                        "analyzed: low agreement",
+                        "analyzed: moderate",
+                        "analyzed: high",
+                        "analyzed: exact/near-exact",
+                    ],
+                },
+            ))
+            fig.update_layout(
+                title=title,
+                xaxis={"title": "Benchmark", "tickangle": -45},
+                yaxis={"title": "Model"},
+                height=max(400, 60 + 40 * len(models)),
+            )
+            fig.write_html(str(html_fpath), include_plotlyjs="cdn")
+            html_out = str(html_fpath)
+            if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
+                fig.write_image(str(jpg_fpath), scale=2.0)
+                jpg_out = str(jpg_fpath)
+        except Exception as ex:
+            plotly_error = f"unable to write coverage matrix: {ex!r}"
+
+    return {"json": str(json_fpath), "html": html_out, "jpg": jpg_out, "plotly_error": plotly_error}
+
+
+def _write_failure_taxonomy_plot(
+    failed_rows: list[dict[str, Any]],
+    stem: Path,
+    title: str,
+    machine_dpath: Path | None = None,
+    interactive_dpath: Path | None = None,
+    static_dpath: Path | None = None,
+) -> dict[str, str | None]:
+    """Stacked bar: x=benchmark, color=failure root-cause category, y=job count."""
+    from collections import defaultdict
+
+    counts: dict[tuple[str, str], int] = defaultdict(int)
+    for row in failed_rows:
+        bench = str(row.get("benchmark") or "unknown")
+        reason = str(row.get("failure_reason") or "unknown_failure")
+        cat_key, _ = _FAILURE_CATEGORIES.get(reason, ("unknown", "Unknown / Other"))
+        counts[(bench, cat_key)] += 1
+
+    bar_rows: list[dict[str, Any]] = [
+        {"benchmark": bench, "category": cat_key, "label": _FAILURE_CATEGORY_LABELS[cat_key], "count": count}
+        for (bench, cat_key), count in sorted(counts.items())
+    ]
+    # Total failures per benchmark for sort order
+    bench_totals: dict[str, int] = defaultdict(int)
+    for r in bar_rows:
+        bench_totals[r["benchmark"]] += r["count"]
+    bench_order = sorted(bench_totals, key=lambda b: -bench_totals[b])
+
+    if machine_dpath is not None:
+        machine_dpath.mkdir(parents=True, exist_ok=True)
+        json_fpath = (machine_dpath / stem.name).with_suffix(".json")
+    else:
+        json_fpath = stem.with_suffix(".json")
+    _interactive = interactive_dpath if interactive_dpath is not None else stem.parent
+    _static = static_dpath if static_dpath is not None else stem.parent
+    _interactive.mkdir(parents=True, exist_ok=True)
+    _static.mkdir(parents=True, exist_ok=True)
+    html_fpath = (_interactive / stem.name).with_suffix(".html")
+    jpg_fpath = (_static / stem.name).with_suffix(".jpg")
+    _write_json(bar_rows, json_fpath)
+
+    html_out = None
+    jpg_out = None
+    plotly_error = None
+    if os.environ.get("HELM_AUDIT_SKIP_PLOTLY", "") in {"1", "true", "yes"}:
+        plotly_error = "skipped by configuration"
+    elif not bar_rows:
+        plotly_error = "no failure data"
+    else:
+        try:
+            _configure_plotly_chrome()
+            import plotly.graph_objects as go
+
+            cat_colors = {
+                "hardware_timeout": "#d62728",
+                "data_access": "#ff7f0e",
+                "missing_infrastructure": "#9467bd",
+                "unknown": "#7f7f7f",
+            }
+            fig = go.Figure()
+            for cat_key in _FAILURE_CATEGORY_ORDER:
+                cat_label = _FAILURE_CATEGORY_LABELS[cat_key]
+                y_vals = [
+                    sum(r["count"] for r in bar_rows if r["benchmark"] == b and r["category"] == cat_key)
+                    for b in bench_order
+                ]
+                fig.add_trace(go.Bar(
+                    name=cat_label,
+                    x=bench_order,
+                    y=y_vals,
+                    marker_color=cat_colors[cat_key],
+                    hovertemplate=f"<b>{cat_label}</b><br>benchmark=%{{x}}<br>count=%{{y}}<extra></extra>",
+                ))
+            fig.update_layout(
+                title=title,
+                barmode="stack",
+                xaxis={"title": "Benchmark", "tickangle": -45, "categoryorder": "array", "categoryarray": bench_order},
+                yaxis={"title": "Failed Job Count"},
+                legend={"title": "Root Cause Category"},
+            )
+            fig.write_html(str(html_fpath), include_plotlyjs="cdn")
+            html_out = str(html_fpath)
+            if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
+                fig.write_image(str(jpg_fpath), scale=2.0)
+                jpg_out = str(jpg_fpath)
+        except Exception as ex:
+            plotly_error = f"unable to write failure taxonomy: {ex!r}"
+
+    return {"json": str(json_fpath), "html": html_out, "jpg": jpg_out, "plotly_error": plotly_error}
+
+
+def _write_reproduce_sh(
+    fpath: Path,
+    scope_kind: str,
+    scope_value: str | None,
+) -> None:
+    repo_root = str(audit_root())
+    python_exe = sys.executable
+    cmd = f"PYTHONPATH={repo_root} {python_exe} -m helm_audit.workflows.build_reports_summary"
+    if scope_kind not in ("all_results", None) and scope_value:
+        cmd += f" --experiment-name {scope_value}"
+    lines = [
+        "#!/usr/bin/env bash",
+        "# Regenerate this summary report from the current index and analysis data.",
+        f"# scope: {scope_kind}" + (f" / {scope_value}" if scope_value else ""),
+        "set -euo pipefail",
+        f"cd {repo_root}",
+        cmd,
+    ]
+    fpath.write_text("\n".join(lines) + "\n")
+    fpath.chmod(0o755)
+
+
 def _render_scope_summary(
     *,
     scope_kind: str,
@@ -640,6 +1203,13 @@ def _render_scope_summary(
     level_002 = version_dpath / "level_002"
     level_001.mkdir(parents=True, exist_ok=True)
     level_002.mkdir(parents=True, exist_ok=True)
+    level_001_machine = level_001 / "machine"
+    level_001_interactive = level_001 / "interactive"
+    level_001_static = level_001 / "static"
+    level_002_machine = level_002 / "machine"
+    level_002_static = level_002 / "static"
+    for d in [level_001_machine, level_001_interactive, level_001_static, level_002_machine, level_002_static]:
+        d.mkdir(parents=True, exist_ok=True)
 
     repro_keyed = {
         (str(row.get("experiment_name")), str(row.get("run_entry"))): row
@@ -732,6 +1302,11 @@ def _render_scope_summary(
             }
         )
 
+    repro_tol001_rows = _build_repro_sankey_rows_at_tol(repro_rows, enriched_rows, "official_instance_agree_001")
+    repro_tol010_rows = _build_repro_sankey_rows_at_tol(repro_rows, enriched_rows, "official_instance_agree_01")
+    repro_tol050_rows = _build_repro_sankey_rows_at_tol(repro_rows, enriched_rows, "official_instance_agree_005")
+    metric_sankey_rows = _expand_repro_rows_by_metric(repro_rows, enriched_rows)
+
     scope_title = _scope_label(scope_kind, scope_value)
     if include_visuals:
         operational_art = emit_sankey_artifacts(
@@ -743,20 +1318,39 @@ def _render_scope_summary(
             stage_defs={
                 "group": ["benchmark family or suite"],
                 "lifecycle": ["whether the run produced runnable artifacts"],
-                "outcome": ["failure reason or reproducibility threshold bucket"],
+                "outcome": [
+                    "for failed/incomplete runs: failure reason",
+                    "for completed runs: instance-level agreement bucket at abs_tol=0 (exact match)",
+                    "  exact_or_near_exact: >=99.9999% of instances agree exactly",
+                    "  high_agreement_0.95+: >=95% of instances agree exactly",
+                    "  moderate_agreement_0.80+: >=80% agree exactly",
+                    "  low_agreement_0.00+: >0% agree exactly",
+                    "  zero_agreement: no instances agree exactly",
+                ],
             },
             stage_order=[("group", "group"), ("lifecycle", "lifecycle"), ("outcome", "outcome")],
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
         )
         repro_art = emit_sankey_artifacts(
             rows=repro_sankey_rows,
             report_dpath=level_001,
             stamp=generated_utc,
             kind="reproducibility",
-            title=f"Executive Reproducibility Summary: {scope_title}",
+            title=f"Reproducibility Summary (instance-level, abs_tol=0 exact match): {scope_title}",
             stage_defs={
                 "group": ["benchmark family or suite"],
-                "repeatability": ["local repeatability diagnosis"],
-                "agreement": ["official-vs-local strict agreement bucket at abs_tol=0.0"],
+                "repeatability": ["local repeatability diagnosis (run vs its own repeat)"],
+                "agreement": [
+                    "official-vs-local agreement bucket at abs_tol=0 (exact match only)",
+                    "fraction = share of instances where |official_score - local_score| == 0",
+                    "  exact_or_near_exact: fraction >= 0.999999",
+                    "  high_agreement_0.95+: fraction >= 0.95",
+                    "  moderate_agreement_0.80+: fraction >= 0.80",
+                    "  low_agreement_0.00+: fraction > 0.0",
+                    "  zero_agreement: fraction == 0.0",
+                ],
                 "diagnosis": ["top-level diagnosis from official-vs-local comparison"],
             },
             stage_order=[
@@ -765,16 +1359,102 @@ def _render_scope_summary(
                 ("agreement", "agreement"),
                 ("diagnosis", "diagnosis"),
             ],
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        )
+        _repro_stage_order = [
+            ("group", "group"),
+            ("repeatability", "repeatability"),
+            ("agreement", "agreement"),
+            ("diagnosis", "diagnosis"),
+        ]
+        _repro_stage_defs = {
+            "group": ["benchmark family or suite"],
+            "repeatability": ["local repeatability diagnosis (run vs its own repeat)"],
+            "agreement": [
+                "official-vs-local agreement bucket at the abs_tol stated in the title",
+                "fraction = share of instances where |official_score - local_score| <= abs_tol",
+                "  exact_or_near_exact: fraction >= 0.999999",
+                "  high_agreement_0.95+: fraction >= 0.95",
+                "  moderate_agreement_0.80+: fraction >= 0.80",
+                "  low_agreement_0.00+: fraction > 0.0",
+                "  zero_agreement: fraction == 0.0",
+            ],
+            "diagnosis": ["top-level diagnosis from official-vs-local comparison"],
+        }
+        repro_tol001_art = emit_sankey_artifacts(
+            rows=repro_tol001_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="repro_tol001",
+            title=f"Reproducibility at abs_tol=0.001: {scope_title}",
+            stage_defs=_repro_stage_defs,
+            stage_order=_repro_stage_order,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        )
+        repro_tol010_art = emit_sankey_artifacts(
+            rows=repro_tol010_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="repro_tol010",
+            title=f"Reproducibility at abs_tol=0.010: {scope_title}",
+            stage_defs=_repro_stage_defs,
+            stage_order=_repro_stage_order,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        )
+        repro_tol050_art = emit_sankey_artifacts(
+            rows=repro_tol050_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="repro_tol050",
+            title=f"Reproducibility at abs_tol=0.050: {scope_title}",
+            stage_defs=_repro_stage_defs,
+            stage_order=_repro_stage_order,
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        )
+        repro_metric_art = emit_sankey_artifacts(
+            rows=metric_sankey_rows,
+            report_dpath=level_001,
+            stamp=generated_utc,
+            kind="repro_by_metric",
+            title=f"Per-Metric Reproducibility Drift (run-level max |official - local|): {scope_title}",
+            stage_defs={
+                "group": ["benchmark family or suite"],
+                "metric": ["core metric name (e.g. exact_match, f1_score, rouge_l)"],
+                "drift_bucket": [
+                    "signal: max absolute delta between official and local score across all runs",
+                    "  exact_match:      max |official - local| == 0.0  (bit-perfect agreement)",
+                    "  tiny_drift_0.001: max |official - local| <= 0.001",
+                    "  small_drift_0.01: max |official - local| <= 0.01",
+                    "  large_drift:      max |official - local|  > 0.01",
+                    "  not_available:    metric not present in run-level data",
+                ],
+            },
+            stage_order=[("group", "group"), ("metric", "metric"), ("drift_bucket", "drift_bucket")],
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
         )
     else:
         operational_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
         repro_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        repro_tol001_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        repro_tol010_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        repro_tol050_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
+        repro_metric_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
 
-    failure_table = _write_table_artifacts(failed_rows, level_001 / f"failure_runs_{generated_utc}")
-    failure_reason_table = _write_table_artifacts(failure_reason_rows, level_001 / f"failure_reasons_{generated_utc}")
-    benchmark_table = _write_table_artifacts(benchmark_summary, level_002 / f"benchmark_summary_{generated_utc}")
-    run_inventory_table = _write_table_artifacts(run_inventory, level_002 / f"run_inventory_{generated_utc}")
-    repro_table = _write_table_artifacts(repro_inventory, level_002 / f"reproducibility_rows_{generated_utc}")
+    failure_table = _write_table_artifacts(failed_rows, level_001 / f"failure_runs_{generated_utc}", machine_dpath=level_001_machine, static_dpath=level_001_static)
+    failure_reason_table = _write_table_artifacts(failure_reason_rows, level_001 / f"failure_reasons_{generated_utc}", machine_dpath=level_001_machine, static_dpath=level_001_static)
+    benchmark_table = _write_table_artifacts(benchmark_summary, level_002 / f"benchmark_summary_{generated_utc}", machine_dpath=level_002_machine, static_dpath=level_002_static)
+    run_inventory_table = _write_table_artifacts(run_inventory, level_002 / f"run_inventory_{generated_utc}", machine_dpath=level_002_machine, static_dpath=level_002_static)
+    repro_table = _write_table_artifacts(repro_inventory, level_002 / f"reproducibility_rows_{generated_utc}", machine_dpath=level_002_machine, static_dpath=level_002_static)
 
     if include_visuals:
         benchmark_plot = _write_plotly_bar(
@@ -782,20 +1462,59 @@ def _render_scope_summary(
             x="group_value",
             y="count",
             color="status_bucket",
-            title=f"Benchmark Coverage and Analysis Status: {scope_title}",
+            title=f"Benchmark Coverage and Analysis Status (analyzed runs use abs_tol=0): {scope_title}",
             stem=level_001 / f"benchmark_status_{generated_utc}",
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+            xaxis_title="Benchmark",
+            yaxis_title="Job Count",
         )
         repro_bucket_plot = _write_plotly_bar(
             rows=repro_bucket_rows,
             x="official_instance_agree_bucket",
             y="count",
             color="official_instance_agree_bucket",
-            title=f"Official vs Local Agreement Buckets: {scope_title}",
+            title=f"Official vs Local Agreement Buckets (instance-level, abs_tol=0 exact match): {scope_title}",
             stem=level_001 / f"reproducibility_buckets_{generated_utc}",
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+            xaxis_title="Agreement Bucket (fraction of instances with |official - local| == 0)",
+            yaxis_title="Run Count",
+        )
+        agreement_curve_plot = _write_agreement_curve_plot(
+            repro_rows=repro_rows,
+            enriched_rows=enriched_rows,
+            stem=level_001 / f"agreement_curve_{generated_utc}",
+            title=f"Agreement Rate vs Tolerance (instance-level): {scope_title}",
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        )
+        coverage_matrix_plot = _write_coverage_matrix_plot(
+            enriched_rows=enriched_rows,
+            repro_rows=repro_rows,
+            stem=level_001 / f"coverage_matrix_{generated_utc}",
+            title=f"Model × Benchmark Coverage and Reproducibility Status: {scope_title}",
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
+        )
+        failure_taxonomy_plot = _write_failure_taxonomy_plot(
+            failed_rows=failed_rows,
+            stem=level_001 / f"failure_taxonomy_{generated_utc}",
+            title=f"Why Jobs Failed: Root Cause Taxonomy by Benchmark: {scope_title}",
+            machine_dpath=level_001_machine,
+            interactive_dpath=level_001_interactive,
+            static_dpath=level_001_static,
         )
     else:
         benchmark_plot = {"json": None, "html": None, "jpg": None, "png": None, "plotly_error": None}
         repro_bucket_plot = {"json": None, "html": None, "jpg": None, "png": None, "plotly_error": None}
+        agreement_curve_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
+        coverage_matrix_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
+        failure_taxonomy_plot = {"json": None, "html": None, "jpg": None, "plotly_error": None}
 
     level_001_readme = _build_high_level_readme(
         scope_title=scope_title,
@@ -828,34 +1547,40 @@ def _render_scope_summary(
     latest_pairs = [
         (level_001 / f"README_{generated_utc}.txt", level_001, "README.latest.txt"),
         (level_002 / f"README_{generated_utc}.txt", level_002, "README.latest.txt"),
-        (Path(failure_table["json"]), level_001, "failure_runs.latest.json"),
-        (Path(failure_table["csv"]), level_001, "failure_runs.latest.csv"),
-        (Path(failure_table["txt"]), level_001, "failure_runs.latest.txt"),
-        (Path(failure_reason_table["json"]), level_001, "failure_reasons.latest.json"),
-        (Path(failure_reason_table["csv"]), level_001, "failure_reasons.latest.csv"),
-        (Path(failure_reason_table["txt"]), level_001, "failure_reasons.latest.txt"),
-        (Path(benchmark_table["json"]), level_002, "benchmark_summary.latest.json"),
-        (Path(benchmark_table["csv"]), level_002, "benchmark_summary.latest.csv"),
-        (Path(benchmark_table["txt"]), level_002, "benchmark_summary.latest.txt"),
-        (Path(run_inventory_table["json"]), level_002, "run_inventory.latest.json"),
-        (Path(run_inventory_table["csv"]), level_002, "run_inventory.latest.csv"),
-        (Path(run_inventory_table["txt"]), level_002, "run_inventory.latest.txt"),
-        (Path(repro_table["json"]), level_002, "reproducibility_rows.latest.json"),
-        (Path(repro_table["csv"]), level_002, "reproducibility_rows.latest.csv"),
-        (Path(repro_table["txt"]), level_002, "reproducibility_rows.latest.txt"),
+        (Path(failure_table["json"]), level_001_machine, "failure_runs.latest.json"),
+        (Path(failure_table["csv"]), level_001_static, "failure_runs.latest.csv"),
+        (Path(failure_table["txt"]), level_001_static, "failure_runs.latest.txt"),
+        (Path(failure_reason_table["json"]), level_001_machine, "failure_reasons.latest.json"),
+        (Path(failure_reason_table["csv"]), level_001_static, "failure_reasons.latest.csv"),
+        (Path(failure_reason_table["txt"]), level_001_static, "failure_reasons.latest.txt"),
+        (Path(benchmark_table["json"]), level_002_machine, "benchmark_summary.latest.json"),
+        (Path(benchmark_table["csv"]), level_002_static, "benchmark_summary.latest.csv"),
+        (Path(benchmark_table["txt"]), level_002_static, "benchmark_summary.latest.txt"),
+        (Path(run_inventory_table["json"]), level_002_machine, "run_inventory.latest.json"),
+        (Path(run_inventory_table["csv"]), level_002_static, "run_inventory.latest.csv"),
+        (Path(run_inventory_table["txt"]), level_002_static, "run_inventory.latest.txt"),
+        (Path(repro_table["json"]), level_002_machine, "reproducibility_rows.latest.json"),
+        (Path(repro_table["csv"]), level_002_static, "reproducibility_rows.latest.csv"),
+        (Path(repro_table["txt"]), level_002_static, "reproducibility_rows.latest.txt"),
     ]
     for src, root, name in latest_pairs:
         write_latest_alias(src, root, name)
 
     if include_visuals:
-        for base_name, artifact in [("benchmark_status", benchmark_plot), ("reproducibility_buckets", repro_bucket_plot)]:
-            write_latest_alias(Path(artifact["json"]), level_001, f"{base_name}.latest.json")
+        for base_name, artifact in [
+            ("benchmark_status", benchmark_plot),
+            ("reproducibility_buckets", repro_bucket_plot),
+            ("agreement_curve", agreement_curve_plot),
+            ("coverage_matrix", coverage_matrix_plot),
+            ("failure_taxonomy", failure_taxonomy_plot),
+        ]:
+            write_latest_alias(Path(artifact["json"]), level_001_machine, f"{base_name}.latest.json")
             if artifact.get("html"):
-                write_latest_alias(Path(str(artifact["html"])), level_001, f"{base_name}.latest.html")
+                write_latest_alias(Path(str(artifact["html"])), level_001_interactive, f"{base_name}.latest.html")
             if artifact.get("png"):
-                write_latest_alias(Path(str(artifact["png"])), level_001, f"{base_name}.latest.png")
+                write_latest_alias(Path(str(artifact["png"])), level_001_static, f"{base_name}.latest.png")
             if artifact.get("jpg"):
-                write_latest_alias(Path(str(artifact["jpg"])), level_001, f"{base_name}.latest.jpg")
+                write_latest_alias(Path(str(artifact["jpg"])), level_001_static, f"{base_name}.latest.jpg")
 
     manifest = {
         "generated_utc": generated_utc,
@@ -873,12 +1598,23 @@ def _render_scope_summary(
         "breakdown_dims": breakdown_dims,
         "operational_sankey": operational_art,
         "reproducibility_sankey": repro_art,
+        "reproducibility_sankey_tol001": repro_tol001_art,
+        "reproducibility_sankey_tol010": repro_tol010_art,
+        "reproducibility_sankey_tol050": repro_tol050_art,
+        "reproducibility_sankey_by_metric": repro_metric_art,
         "benchmark_plot": benchmark_plot,
         "repro_bucket_plot": repro_bucket_plot,
+        "agreement_curve_plot": agreement_curve_plot,
+        "coverage_matrix_plot": coverage_matrix_plot,
+        "failure_taxonomy_plot": failure_taxonomy_plot,
     }
-    manifest_fpath = level_001 / f"summary_manifest_{generated_utc}.json"
+    manifest_fpath = level_001_machine / f"summary_manifest_{generated_utc}.json"
     _write_json(manifest, manifest_fpath)
-    write_latest_alias(manifest_fpath, level_001, "summary_manifest.latest.json")
+    write_latest_alias(manifest_fpath, level_001_machine, "summary_manifest.latest.json")
+
+    reproduce_sh_fpath = level_001 / f"reproduce_{generated_utc}.sh"
+    _write_reproduce_sh(reproduce_sh_fpath, scope_kind, scope_value)
+    write_latest_alias(reproduce_sh_fpath, level_001, "reproduce.latest.sh")
 
     symlink_to(level_002, level_001 / "next_level")
     symlink_to(level_001, level_002 / "up_level")
