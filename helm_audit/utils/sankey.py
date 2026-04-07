@@ -7,7 +7,8 @@ from typing import Any
 
 import kwutil
 
-from helm_audit.infra.fs_publish import write_latest_alias
+from helm_audit.infra.fs_publish import history_publish_root, write_latest_alias
+from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.utils import sankey_builder
 
 
@@ -45,12 +46,15 @@ def emit_sankey_artifacts(
     graph_summary = graph.summarize(max_edges=300)
     plan_text = root.to_text()
 
+    machine_history = history_publish_root(report_dpath, _machine, stamp)
+    static_history = history_publish_root(report_dpath, _static, stamp)
+    interactive_history = history_publish_root(report_dpath, _interactive, stamp)
     base_name = f"sankey_{stamp}_{kind}"
-    json_fpath = (_machine / base_name).with_suffix(".json")
-    txt_fpath = (_static / base_name).with_suffix(".txt")
-    key_fpath = _static / f"{base_name}_key.txt"
-    html_fpath = (_interactive / base_name).with_suffix(".html")
-    jpg_fpath = (_static / base_name).with_suffix(".jpg")
+    json_fpath = (machine_history / base_name).with_suffix(".json")
+    txt_fpath = (static_history / base_name).with_suffix(".txt")
+    key_fpath = static_history / f"{base_name}_key.txt"
+    html_fpath = (interactive_history / base_name).with_suffix(".html")
+    jpg_fpath = (static_history / base_name).with_suffix(".jpg")
 
     node_labels, source, target, value = graph._to_sankey_data()
     payload = kwutil.Json.ensure_serializable(
@@ -89,6 +93,7 @@ def emit_sankey_artifacts(
         plotly_error = "skipped plotly sankey rendering by configuration"
     else:
         try:
+            configure_plotly_chrome()
             fig = graph.to_plotly(title=title)
             fig.write_html(str(html_fpath), include_plotlyjs="cdn")
             html_out = str(html_fpath)

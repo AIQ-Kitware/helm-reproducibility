@@ -66,3 +66,98 @@ Design takeaways:
 1. For reproducibility studies, deployment substitution should be encoded in versioned manifest inputs, not left as an operator convention.
 2. A partially running batch can still be a strong positive result if it shows that the workflow reached the true backend bottleneck rather than failing in orchestration.
 3. Environment-local fixes in upstream dependencies are not “real” experimental fixes until the execution environment is updated to match them.
+
+## 2026-04-06 17:14:45 +0000
+
+Summary of user intent: reorganize the Stage 1 filter report so it lives under a lexically friendlier `reports-filter` location, and substantially deepen the artifacts written to disk so future inspection can answer what was selected or excluded by model, dataset, and scenario as HELM or the audit recipe evolves over time.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This work is really about converting a one-off visualization into longitudinal research instrumentation. The current Sankey is useful as a quick overview, but it does not support the actual maintenance question the user is asking: if the reproducible subset grows or shrinks after a HELM upgrade, where exactly did that movement happen? The design I’m pursuing therefore treats the filter step as an inventory-building stage, not just a selection stage. Every discovered run that we can describe should become a row in a durable report inventory with enough facets to regroup later without recomputing from memory or shell history.
+
+The most important choice is to preserve selection semantics while broadening report semantics. I do not want to “fix” the selection logic while trying to improve observability, because that would blur whether future changes came from policy drift or from better reporting. Instead, the plan is to keep the existing model eligibility rules intact and layer a richer artifact set on top: selected and excluded inventories, grouped tables, and a few lightweight figures. I also want structurally incomplete runs to stop being invisible. Even if they remain excluded, they should appear in the report inventory whenever their directory names let us recover benchmark/model-ish facets, because otherwise one whole class of exclusion silently disappears from the facet breakdowns.
+
+The main uncertainty is metadata quality for incomplete runs and for the overloaded word “dataset.” HELM run identifiers mix benchmark names with parameterized slices such as `subset`, `subject`, `task`, and `dataset`, so there is no single perfect dataset field. My current approach is to make that ambiguity explicit by deriving a best-effort dataset label from the most informative non-model parameter while also preserving the raw run spec name and benchmark grouping. That is a tradeoff in favor of practical inspection over ontological purity. A maintainer can still regroup from the raw inventory later if they want a stricter taxonomy.
+
+Risks and tradeoffs: adding many artifacts can create noise if the names are sloppy or if the layout is inconsistent across runs. I’m aiming for stamped history files plus latest aliases so the report directory can support both longitudinal comparison and easy browsing. I also need to be careful not to bake the repository’s current ad hoc nesting into too many callers, since the user already expects another cleanup pass there later. The best outcome is a richer report payload now with naming and layout that is easy to migrate again when the broader report tree is reorganized.
+
+Design takeaways:
+1. A filter stage becomes scientifically useful when it writes a reusable inventory, not just a headline count and a picture.
+2. Observability upgrades should avoid changing eligibility policy unless the task explicitly asks for that coupling.
+3. When metadata taxonomies are messy, preserve raw identifiers and add best-effort derived facets side by side rather than pretending the derived view is canonical.
+
+## 2026-04-06 17:38:22 +0000
+
+Summary of user intent: go beyond richer raw artifacts and make the filtered-run analysis genuinely explanatory by separating Stage 1 inventory generation from a secondary analysis pass that can answer what all candidate runs were, why some were chosen, why others were not, and what fraction of the whole was considered.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+The user’s pushback is correct, and it clarifies an important distinction I was only partially addressing in the first pass. Writing more tables from the filter step is helpful, but it still leaves the explanatory burden tangled up with selection code. That is the wrong long-term shape if we expect the HELM inventory and the audit recipe to evolve. The better design is a two-stage surface: Stage 1 emits an honest inventory with enough metadata to reconstruct the decision boundary later, and a separate analyzer turns that inventory into narratives, fractions, grouped summaries, and visualizations. That lets us improve interpretability without repeatedly touching the selection implementation.
+
+The core change I’m making now is to treat explanation as data. Each inventory row should not just say selected or excluded; it should say whether it was ever in the candidate pool, what rule chain it passed or failed, and a human-readable explanation of that status. Once that exists, the secondary analyzer can produce more meaningful fractions like selected-of-all-discovered, selected-of-structurally-complete, and selected-of-eligible candidates, plus examples of chosen and non-chosen runs grouped by model/scenario/dataset. This is much closer to the actual research question: “what slice of HELM is reproducible under the current recipe, and why exactly is the rest out?”
+
+I’m deliberately accepting a bit more module surface area to get that clarity. In a small codebase there is always a temptation to keep helper code inline in a single CLI file, but here that would make future refinement painful. The tradeoff is an extra report module and workflow entrypoint, which is worth it because it makes later analysis improvements local and keeps the indexing logic from becoming a narrative-report monolith.
+
+Risks: the new analyzer needs to handle both fresh inventories and older report directories gracefully enough that the repo does not become version-fragile. I may not fully solve backward compatibility in one pass, but I want at least a clean path for current inventories plus a reasonable fallback message for older report trees that only have the Sankey rows. I’m confident in the direction even if some polish remains, because this split aligns much better with how maintainers will actually iterate on the filtered-subset story.
+
+Design takeaways:
+1. Decision explanations belong in the inventory schema, not only in derived prose.
+2. Separate “what happened” generation from “how do we interpret it” generation when the interpretation will evolve faster than the policy.
+3. Fractional coverage metrics are only persuasive when their denominator is explicit: all discovered, structurally complete, or actually eligible.
+
+## 2026-04-06 18:17:37 +0000
+
+Summary of user intent: improve the explanatory quality of the filtering outputs further by making opaque reasons like `too-large` concrete, and by adding hierarchical Sankey views that show how the full HELM corpus is reduced stage by stage into the actually attempted subset.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This request is about making the denominator story visually honest. The current candidate analysis is already much richer than the original filter report, but it still treats exclusion reasons too much like flat labels. That leaves an interpretability gap: if a reason is called `too-large`, a reader immediately wants to know “too large relative to what?” Likewise, flat reason counts do not show the nested decision boundary the user cares about, where open-weight eligibility is a fairer comparison class than the entire universe of historic HELM runs. The right move now is to preserve the flat summaries while adding a cumulative path view.
+
+I’m addressing this in two ways. First, I want every size-based exclusion to carry threshold context at the row level, not just in prose. That means storing the model parameter count and the active threshold and surfacing a readable explanation like “12B exceeds 10B local budget.” Second, I’m adding sequential Sankeys whose stages correspond to ordered gates rather than independent reason bins. This gives the repo both kinds of truth: a flat map of why runs are excluded at all, and a hierarchical map of what survives each gate. Those answer different questions and are both scientifically useful.
+
+A subtle tradeoff is stage ordering. One could sort by largest exclusion bucket, but the user’s more important requirement is conceptual fairness: open weight first, then suitability, then runnable deployment, then size. I’m following that semantic order even if another ordering would maximize first-stage drop volume, because this makes the diagrams easier to interpret as a cumulative eligibility funnel rather than as an arbitrary partitioning exercise.
+
+Remaining risk: some excluded rows still appear as `unclassified-exclusion`, which is a sign that the current reason taxonomy does not fully cover every old-model metadata hole. That is actually useful to surface. I do not want to hide that uncertainty just to make the Sankeys cleaner. Better to show it explicitly and leave a breadcrumb for a later taxonomy cleanup.
+
+Design takeaways:
+1. A reason label is not explanatory unless it carries the threshold or comparison class that made it fail.
+2. Flat exclusion histograms and ordered eligibility funnels are complementary, not redundant.
+3. When a subset claim needs a “fair denominator,” encode that denominator as an explicit earlier stage in the visualization.
+
+## 2026-04-06 18:32:08 +0000
+
+Summary of user intent: make the new Plotly static-rendering dependency reproducible on this headless Ubuntu 24.04 VM by documenting the Chrome requirement clearly and providing a scriptable installation path that future operators can follow without guesswork.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This is a good example of an initially “minor” dependency becoming operationally important once the reports mature. HTML-only Plotly output was enough while the analysis was exploratory, but as soon as the repo starts depending on saved JPG and PNG sidecars for later browsing, the implicit Chrome dependency hidden behind Kaleido becomes part of the reproducibility surface. The user is right to call that out now rather than later. If static artifacts matter, then the environment recipe for producing them has to be treated like code, not tribal knowledge.
+
+The design choice here is to keep the browser dependency repo-local and inspectable instead of assuming a system package manager state. I already introduced a shared helper that searches a repo cache first, and this turn is about making that choice legible: the setup script should populate `.cache/plotly-chrome/`, the docs should name that path explicitly, and verification should be narrow enough that someone can confirm Plotly static export readiness without satisfying every other runtime prerequisite for running the entire audit stack. That is why I am adding a Plotly-only environment check rather than telling operators to run the full `check_env` and interpret unrelated failures.
+
+The main tradeoff is between convenience and completeness. A system-installed Chromium package might be simpler on some hosts, but it would also be less controlled and harder to document consistently across machines. By using Plotly’s own Chrome acquisition path and a repo-local cache, we get a more portable story that matches what the helper code actually searches. The remaining risk is that network or upstream packaging changes could affect the installer script, but that risk is still easier to reason about than a hidden per-host browser setup.
+
+What I’m confident about is the shape of the operator experience: one documented install command, one narrow verification command, and shared helper logic that every Plotly rendering path uses. If a future maintainer has static rendering trouble, they should be able to inspect one script, one helper module, and one troubleshooting section rather than spelunking multiple report generators independently.
+
+Design takeaways:
+1. Once a visualization artifact becomes part of the research record, its rendering backend is part of the reproducibility contract.
+2. Narrow verification commands are worth adding when optional dependencies would otherwise be masked by unrelated environment checks.
+3. Repo-local caches are often a better fit than ambient system packages when the goal is repeatable analysis infrastructure.
+
+## 2026-04-06 22:03:24 +0000
+
+Summary of user intent: make the reporting layer easier to iterate on by adding explicit pipeline guidance for “index/filter once, then rebuild plots only,” reorganizing generated outputs under a cleaner `reports/` family layout, hiding history clutter better, and continuing the separation between result computation and reporting/aggregation code.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This turn ended up being more about boundaries than about visuals. The user’s request sounds like a directory cleanup on the surface, but the underlying issue is that the code still partially treats report generation as an incidental side effect of indexing or aggregation rather than as a first-class rebuildable product. That makes plot iteration expensive and makes the report tree feel accidental. The main design response was therefore to strengthen the contract between “machine-readable intermediate state” and “human-facing report views.” For Stage 1 filtering, the inventory JSON is now the stable handoff, and the report module owns both the flat and hierarchical views. That is a healthier architecture for rapid iteration because changing a Sankey or table no longer requires touching selection logic.
+
+The report-layout changes follow the same philosophy. A directory like `reports/filtering/` should feel like a browsable product surface, not a dump of every stamped artifact ever produced. Moving stamped artifacts under hidden `.history/` while exposing only `latest` links is a modest but important improvement in operator ergonomics. I also pushed the family structure further than the original code had: `reports/filtering/`, `reports/core-run-analysis/`, and `reports/aggregate-summary/` now exist as meaningful homes rather than as an aspiration in the docs. I migrated the current filter and aggregate outputs there, moved existing experiment-analysis trees under `reports/core-run-analysis/`, and tucked the old flat manual core-metric report directories under `reports/core-run-analysis/manual/` to reduce top-level clutter.
+
+One subtle but important lesson during this pass was that the pipeline documentation had drifted from the actual aggregate-summary CLI. The doc still described `--scope` and `--include_visuals`, but the implementation currently keys off `--experiment-name` and always renders the configured plots. I corrected the doc to match reality rather than “fixing” the code toward the stale prose. That tradeoff felt right because the user’s immediate goal was iterative reliability, and accurate operator docs are more valuable than preserving an imagined interface. If we later want a more explicit plot-only toggle for Stage 6, that should be an intentional design pass rather than cargo-culting old documentation.
+
+There is still some legacy weight in the tree. Existing experiment-analysis directories predated the new reproduce-script convention, so I backfilled simple `reproduce.sh` helpers from their saved summary metadata. That gets the current tree into a better state without forcing a full re-analysis pass today. The remaining rough edge is that some legacy artifacts outside the new family roots may still exist in backups or unrelated older directories, but the active path for future work is much clearer now.
+
+Design takeaways:
+1. Plot iteration becomes much cheaper once the indexing stage writes a stable inventory and the report stage can be rerun independently.
+2. Hidden `.history/` plus visible `latest` links is a strong default for generated research artifacts because it preserves provenance without overwhelming browsing.
+3. Report-directory reorganizations go better when they are paired with explicit `reproduce.sh` scripts; otherwise the new layout is cleaner to look at but harder to trust.

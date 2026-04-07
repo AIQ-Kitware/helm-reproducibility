@@ -14,7 +14,9 @@ from typing import Any
 import kwutil
 
 from helm_audit.infra.api import audit_root, default_report_root
+from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
+from helm_audit.infra.report_layout import aggregate_summary_reports_root, core_run_reports_root
 from helm_audit.utils.numeric import nested_get
 from helm_audit.utils.sankey import emit_sankey_artifacts
 
@@ -218,29 +220,6 @@ def _classify_failure(job_dpath: Path, row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _configure_plotly_chrome() -> None:
-    import importlib.util
-    chrome_candidates = [
-        audit_root() / ".cache/plotly-chrome/chrome-linux64/chrome",
-        Path.home() / ".plotly/chrome/chrome-linux64/chrome",
-    ]
-    spec = importlib.util.find_spec("choreographer")
-    if spec and spec.submodule_search_locations:
-        chrome_candidates.insert(
-            0,
-            Path(list(spec.submodule_search_locations)[0]) / "cli/browser_exe/chrome-linux64/chrome",
-        )
-    chrome_found = False
-    for cand in chrome_candidates:
-        if cand.exists():
-            os.environ.setdefault("BROWSER_PATH", str(cand))
-            os.environ.setdefault("PLOTLY_CHROME_PATH", str(cand))
-            chrome_found = True
-            break
-    if not chrome_found:
-        os.environ.setdefault("HELM_AUDIT_SKIP_STATIC_IMAGES", "1")
-
-
 def _raise_fd_limit(target: int = 8192) -> None:
     try:
         soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -260,7 +239,7 @@ def _fd_count() -> int | None:
 
 def _load_all_repro_rows() -> list[dict[str, Any]]:
     report_jsons = sorted(
-        default_report_root().glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json")
+        core_run_reports_root().glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json")
     )
     deduped: dict[tuple[str | None, str | None], dict[str, Any]] = {}
     for report_json in report_jsons:
@@ -383,7 +362,7 @@ def _write_plotly_bar(
     plotly_error = None
     if os.environ.get("HELM_AUDIT_SKIP_PLOTLY", "") not in {"1", "true", "yes"}:
         try:
-            _configure_plotly_chrome()
+            configure_plotly_chrome()
             import plotly.express as px
 
             fig = px.bar(rows, x=x, y=y, color=color, title=title, barmode="stack")
@@ -560,8 +539,9 @@ def _build_high_level_readme(
             "start_here:",
             "",
             "  understand_upstream_filtering:",
-            "    1. What runs were excluded at Stage 1 (discovery)? Run Stage 1 with --out_report_dpath",
-            "       to see filter_report/sankey_model_filter.latest.html (why runs were rejected).",
+            "    1. What runs were excluded at Stage 1 (discovery)? Export a Stage 1 inventory and run",
+            "       `python -m helm_audit.cli.reports filter --report-dpath reports/filtering --inventory-json ...`",
+            "       to see reports/filtering/interactive/sankey_model_filter.latest.html (why runs were rejected).",
             "    2. Read docs/pipeline.md for the full end-to-end workflow (stages 1-6).",
             "",
             "  explore_execution_coverage:",
@@ -642,6 +622,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
     write_latest_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.latest.sh")
+    write_latest_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.sh")
     for src_name in [
         "benchmark_summary.latest.csv",
         "run_inventory.latest.csv",
@@ -855,7 +836,7 @@ def _write_agreement_curve_plot(
         plotly_error = "no agreement curve data available"
     else:
         try:
-            _configure_plotly_chrome()
+            configure_plotly_chrome()
             import plotly.graph_objects as go
 
             # Assign a color per benchmark
@@ -971,7 +952,7 @@ def _write_per_metric_agreement_plot(
         plotly_error = "no per-metric agreement data available"
     else:
         try:
-            _configure_plotly_chrome()
+            configure_plotly_chrome()
             import plotly.graph_objects as go
             from plotly.subplots import make_subplots
 
@@ -1181,7 +1162,7 @@ def _write_coverage_matrix_plot(
         plotly_error = "no data for coverage matrix"
     else:
         try:
-            _configure_plotly_chrome()
+            configure_plotly_chrome()
             import plotly.graph_objects as go
 
             colorscale = [
@@ -1283,7 +1264,7 @@ def _write_failure_taxonomy_plot(
         plotly_error = "no failure data"
     else:
         try:
-            _configure_plotly_chrome()
+            configure_plotly_chrome()
             import plotly.graph_objects as go
 
             cat_colors = {
@@ -1788,13 +1769,14 @@ def _render_scope_summary(
     reproduce_sh_fpath = level_001 / f"reproduce_{generated_utc}.sh"
     _write_reproduce_sh(reproduce_sh_fpath, scope_kind, scope_value)
     write_latest_alias(reproduce_sh_fpath, level_001, "reproduce.latest.sh")
+    write_latest_alias(reproduce_sh_fpath, level_001, "reproduce.sh")
 
     symlink_to(level_002, level_001 / "next_level")
     symlink_to(level_001, level_002 / "up_level")
     experiment_names = {str(row.get("experiment_name")) for row in enriched_rows if row.get("experiment_name")}
     if len(experiment_names) == 1:
         exp_name = next(iter(experiment_names))
-        analysis_dpath = default_report_root() / f"experiment-analysis-{slugify(exp_name)}"
+        analysis_dpath = core_run_reports_root() / f"experiment-analysis-{slugify(exp_name)}"
         if analysis_dpath.exists():
             symlink_to(analysis_dpath, level_002 / "experiment-analysis")
 
@@ -1815,7 +1797,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--experiment-name", default=None)
     parser.add_argument("--index-fpath", default=None)
     parser.add_argument("--index-dpath", default=str(default_report_root() / "indexes"))
-    parser.add_argument("--summary-root", default=str(audit_root() / "reports-summary"))
+    parser.add_argument("--summary-root", default=str(aggregate_summary_reports_root()))
     parser.add_argument(
         "--breakdown-dims",
         nargs="*",
@@ -1831,7 +1813,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     rows = load_rows(index_fpath)
     _raise_fd_limit()
-    _configure_plotly_chrome()
+    configure_plotly_chrome()
     all_repro_rows = _load_all_repro_rows()
 
     if args.experiment_name:

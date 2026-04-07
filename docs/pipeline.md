@@ -9,6 +9,23 @@ This document covers the complete reproducibility audit pipeline: from discoveri
 
 ---
 
+## Report Layout
+
+Generated artifacts now live under the repo-level `reports/` tree:
+
+```text
+reports/
+  filtering/            ← Stage 1 discovery/filtering inventory + plots
+  core-run-analysis/    ← Stage 5 per-experiment and per-run reproducibility reports
+  aggregate-summary/    ← Stage 6 aggregate operator-facing summaries
+```
+
+Each report family keeps human-facing `*.latest.*` links in the visible directories and hides stamped history under `.history/`. Each generated report root should also contain:
+- `reproduce.latest.sh`: rerun the full computation that produced that report root
+- `rebuild_analysis.latest.sh` when the plotting/aggregation step can be rebuilt from saved machine-readable inputs without recomputing upstream work
+
+---
+
 ## Stage 0: Environment Setup
 
 Before running the pipeline, ensure:
@@ -31,8 +48,16 @@ uv pip install 'crfm-helm[all]' -U
 # HuggingFace credentials (required for model downloads)
 huggingface-cli login  # or pass --token to index_historic_helm_runs
 
-# Optional: plotly rendering (Chrome/Kaleido for JPG sidecar generation)
-# Chrome is searched at: ~/.plotly/chrome/ or via choreographer package
+# Optional but recommended: static Plotly export support for JPG/PNG sidecars
+# Python deps already include plotly + kaleido via pyproject.toml
+uv pip install -e .
+bash reproduce/setup/10_install_plotly_chrome_ubuntu2404.sh
+PYTHONPATH=. python -m helm_audit.cli.check_env --plotly-static-only
+
+# Chrome is searched in this order:
+#   1. .cache/plotly-chrome/chrome-linux64/chrome
+#   2. ~/.plotly/chrome/chrome-linux64/chrome
+#   3. the choreographer package cache, if present
 ```
 
 ---
@@ -47,7 +72,7 @@ python -m helm_audit.cli.index_historic_helm_runs \
   /data/crfm-helm-public \
   --out_fpath run_specs.yaml \
   --out_detail_fpath run_details.yaml \
-  --out_report_dpath filter_report
+  --out_inventory_json dev/analysis/filter_inventory.json
 ```
 
 **Key Arguments:**
@@ -58,7 +83,7 @@ python -m helm_audit.cli.index_historic_helm_runs \
 - `--include_max_eval_instances`: If True, infer `max_eval_instances` from per-instance data (slow; default False).
 - `--out_fpath`: Write `run_spec_name` list as YAML (fed to kwdagger scheduler).
 - `--out_detail_fpath`: Write full row data with all metadata as YAML.
-- `--out_report_dpath` (new): Write filter-step analysis: Sankey diagram + text report showing what was excluded and why.
+- `--out_inventory_json`: Write the full Stage 1 filter inventory as JSON for later analysis / plotting.
 - `--dedupe`: If True (default), deduplicate identical `(run_spec_name, max_eval_instances)` rows.
 
 **Filtering Logic:**
@@ -79,8 +104,40 @@ python -m helm_audit.cli.index_historic_helm_runs \
 **Outputs:**
 - `run_specs.yaml`: List of selected `run_spec_name` strings (one per line), ready to feed into kwdagger.
 - `run_details.yaml`: Full dict rows with model, scenario_class, max_eval_instances, etc.
-- `filter_report/sankey_*.{html,jpg,txt}`: Sankey showing run flow: `filter_reason → outcome`.
-- `filter_report/model_filter_report.txt`: Text summary of filter statistics.
+- `dev/analysis/filter_inventory.json` (or your chosen path): full machine-readable Stage 1 inventory for later plotting and analysis.
+
+### Stage 1a: Build Filter Reports From Saved Inventory
+
+Use this when you want to iterate on the filter analyses, Sankeys, or report directory structure without re-scanning HELM outputs:
+
+```bash
+PYTHONPATH=. python -m helm_audit.cli.reports filter \
+  --report-dpath reports/filtering \
+  --inventory-json dev/analysis/filter_inventory.json
+```
+
+This step owns all output under `reports/filtering/`. Stage 1 itself no longer writes into the report tree.
+
+Outputs from this analysis step:
+- `reports/filtering/interactive/sankey_model_filter.latest.html`, `reports/filtering/static/sankey_model_filter.latest.{jpg,txt}`: flat Stage 1 filter flow.
+- `reports/filtering/static/model_filter_report.latest.txt`: concise Stage 1 filter summary.
+- `reports/filtering/static/tables/*.latest.tsv`: run inventory plus grouped breakdown tables by model, benchmark, dataset slice, and scenario.
+- `reports/filtering/machine/model_filter_inventory.latest.json`: latest copied inventory inside the report bundle for later plot iteration.
+- `reports/filtering/analysis/*`: secondary analysis artifacts rebuilt from the saved inventory, including coverage fractions, chosen-vs-not-chosen explanations, and grouped candidate summaries.
+- `reports/filtering/.history/`: stamped history hidden from the main browsing surface.
+- `reports/filtering/reproduce.latest.sh`: rerun the reporting step.
+- `reports/filtering/rebuild_analysis.latest.sh`: rebuild the filter plots/tables from the saved inventory only.
+
+If you already have a report bundle, you can rerun just the analysis layer with:
+
+```bash
+bash reports/filtering/rebuild_analysis.latest.sh
+```
+
+For the richer secondary analysis, also inspect:
+- `reports/filtering/analysis/interactive/sankey_hierarchical_filter_path.latest.html`: cumulative eligibility funnel from all discovered runs to the selected subset.
+- `reports/filtering/analysis/static/filter_candidate_analysis.latest.{txt,md}`: narrative summary with coverage fractions and exclusion examples.
+- `reports/filtering/analysis/static/tables/*.latest.tsv`: grouped tables by model, benchmark, dataset slice, scenario, and exclusion reason.
 
 **Example Filter Report Sankey:**
 - Shows all runs entering from the left
@@ -205,11 +262,11 @@ helm-audit-rebuild-core \
   --left_run_b <local_run_dir> \
   --right_run_a <local_run_dir> \
   --right_run_b <repeat_run_dir> \
-  --report_dpath reports/core-metrics-<slug>
+  --report_dpath reports/core-run-analysis/manual/core-metrics-<slug>
 ```
 
 **Outputs:**
-- `reports/core-metrics-<slug>/core_metric_report.latest.json`: Full reproducibility metrics
+- `reports/core-run-analysis/manual/core-metrics-<slug>/core_metric_report.latest.json`: Full reproducibility metrics
   - `pairs`: list of pair comparisons (left, right, optional cross-machine)
   - Each pair includes:
     - `agreement_vs_abs_tol`: list of `{abs_tol, agree_ratio}` at 13 thresholds (0 to 1.0)
@@ -227,10 +284,11 @@ helm-audit-analyze-experiment \
 ```
 
 **Outputs:**
-- `experiment-analysis-<slug>/`: Directory tree with:
+- `reports/core-run-analysis/experiment-analysis-<slug>/`: Directory tree with:
   - `core-reports/`: One per run entry, containing `core_metric_report.latest.json`
   - `experiment_summary.latest.csv`: Cross-run summary table
   - `cross-machine-aiq-gpu/`: Optional pair reports comparing aiq-gpu vs. other machines
+  - `reproduce.latest.sh`: rerun the experiment-level report generation
 
 ---
 
@@ -240,18 +298,17 @@ helm-audit-analyze-experiment \
 
 **Command:**
 ```bash
-python -m helm_audit.workflows.build_reports_summary \
-  --scope all_results \
-  --include_visuals 1
+python -m helm_audit.workflows.build_reports_summary
 ```
 
 **Key Arguments:**
-- `--scope`: one of `all_results` (default), or a specific `experiment_name` slug for drill-down.
-- `--include_visuals`: If 1, render all Sankey and Plotly charts; if 0, tables only.
+- `--experiment-name`: optional drill-down for a single experiment; omit for the default `all-results` scope.
+- `--summary-root`: override the aggregate report family root (default: `reports/aggregate-summary`).
+- `--breakdown-dims`: optional list of breakdown dimensions to materialize.
 
 **Pipeline Inside build_reports_summary:**
 
-1. **Load all reproducibility rows** from `experiment-analysis-*/core-reports/*/core_metric_report.latest.json`
+1. **Load all reproducibility rows** from `reports/core-run-analysis/experiment-analysis-*/core-reports/*/core_metric_report.latest.json`
 2. **Build enriched rows** (job-level metadata + reproducibility status)
 3. **Emit six Sankey diagrams:**
    - `sankey_operational.{html,jpg}`: Full pipeline (group → lifecycle → outcome)
@@ -275,33 +332,46 @@ python -m helm_audit.workflows.build_reports_summary \
    - Artifact directory structure
    - Links to all plots and tables
 7. **Create symlinks** (`*.latest.*`) for easy access at scope root
+8. **Write `reproduce.latest.sh`** so aggregate views can be regenerated independently of rerunning experiments
 
 **Output Structure:**
 ```
-reports-summary/
-  all-results/
-    README.latest.txt           ← start here
-    level_001.latest/           → symlink to versioned level_001
-    level_002.latest/           → symlink to versioned level_002
-    *.latest.html / *.latest.jpg ← symlinks to interactive/static
-    .history/
-      20260404/
-        20260404T033318Z/
-          level_001/
-            machine/            ← JSON data
-            interactive/        ← HTML plots
-            static/             ← JPG/PNG/TXT/CSV
-            next_level -> ../level_002
-          level_002/
-            breakdowns/
-              by_benchmark/
-              by_experiment_name/
-              by_model/
-              by_suite/
-              by_machine_host/
-            up_level -> ../level_001
-            static/
+reports/
+  aggregate-summary/
+    all-results/
+      README.latest.txt           ← start here
+      reproduce.latest.sh         ← rerun just the aggregate summary
+      level_001.latest/           → symlink to versioned level_001
+      level_002.latest/           → symlink to versioned level_002
+      *.latest.html / *.latest.jpg ← symlinks to interactive/static
+      .history/
+        20260404/
+          20260404T033318Z/
+            level_001/
+              machine/            ← JSON data
+              interactive/        ← HTML plots
+              static/             ← JPG/PNG/TXT/CSV
+              next_level -> ../level_002
+            level_002/
+              breakdowns/
+                by_benchmark/
+                by_experiment_name/
+                by_model/
+                by_suite/
+                by_machine_host/
+              up_level -> ../level_001
+              static/
 ```
+
+### Stage 6a: Rebuild Aggregate Plots/Tables Only
+
+Use this when you already have Stage 5 reports and want to iterate on directory structure, aggregate tables, or Plotly/Sankey outputs:
+
+```bash
+PYTHONPATH=. python -m helm_audit.workflows.build_reports_summary
+```
+
+This step is independent of recomputing model executions. It only reads existing Stage 5 reports from `reports/core-run-analysis/experiment-analysis-*/`.
 
 **JPG Sidecar Generation:**
 - Every `.html` plot is rendered to a `.jpg` sidecar UNLESS:
@@ -328,7 +398,12 @@ reports-summary/
 python -m helm_audit.cli.index_historic_helm_runs \
   /data/crfm-helm-public \
   --out_fpath qwen_run_specs.yaml \
-  --out_report_dpath filter_report_qwen
+  --out_inventory_json dev/analysis/qwen_filter_inventory.json
+
+# Stage 1a: Build filter analysis from saved inventory
+python -m helm_audit.cli.reports filter \
+  --report-dpath reports/filtering/qwen \
+  --inventory-json dev/analysis/qwen_filter_inventory.json
 
 # Stage 2: Generate manifests
 helm-audit-make-manifest \
@@ -367,9 +442,9 @@ helm-audit-analyze-experiment \
 python -m helm_audit.workflows.build_reports_summary
 
 # Open reports
-firefox reports-summary/all-results/README.latest.txt
-firefox reports-summary/all-results/sankey_operational.latest.html
-firefox reports-summary/all-results/agreement_curve.latest.html
+firefox reports/aggregate-summary/all-results/README.latest.txt
+firefox reports/aggregate-summary/all-results/sankey_operational.latest.html
+firefox reports/aggregate-summary/all-results/agreement_curve.latest.html
 ```
 
 ---
@@ -383,7 +458,7 @@ See the filter report Sankey from Stage 1:
 - How many were filtered by model eligibility?
 - How many made it to execution but failed (see Stage 3 logs)?
 
-Open `filter_report/sankey_model_filter.latest.html` to visualize the breakdown.
+Open `reports/filtering/interactive/sankey_model_filter.latest.html` to visualize the breakdown.
 
 ### "agreement_curve_per_metric.html is missing"
 
@@ -392,10 +467,19 @@ This happens if re-running Stage 6 with Stage 5a reports generated BEFORE `per_m
 ### "Chrome not found" for JPG rendering
 
 Searched paths:
+- `.cache/plotly-chrome/chrome-linux64/chrome`
 - `~/.plotly/chrome/chrome-linux64/chrome`
 - `<choreographer-package>/chrome-linux64/chrome`
 
-Either install Kaleido (`pip install kaleido`) or download Chrome to one of these paths. HTMLs will render; JPGs will be skipped.
+On this repo's headless Ubuntu 24.04 workflow, use:
+
+```bash
+uv pip install -e .
+bash reproduce/setup/10_install_plotly_chrome_ubuntu2404.sh
+PYTHONPATH=. python -m helm_audit.cli.check_env --plotly-static-only
+```
+
+The installer downloads Chrome into the repo-local cache at `.cache/plotly-chrome/`, which is the first location searched by the shared Plotly helper. If Chrome is still absent, HTMLs will render and JPG/PNG sidecars will be skipped with `plotly_error` recorded in the generated report metadata.
 
 ---
 

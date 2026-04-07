@@ -32,3 +32,15 @@ def stamped_history_dir(root: Path, stamp: str | None = None) -> tuple[str, Path
     history_dpath = root / ".history" / stamp[:8]
     history_dpath.mkdir(parents=True, exist_ok=True)
     return stamp, history_dpath
+
+
+def history_publish_root(report_root: Path, visible_root: Path, stamp: str) -> Path:
+    report_root = report_root.expanduser().resolve()
+    visible_root = visible_root.expanduser().resolve()
+    try:
+        rel_visible = visible_root.relative_to(report_root)
+    except ValueError:
+        rel_visible = Path(visible_root.name)
+    history_root = report_root / ".history" / stamp[:8] / stamp / rel_visible
+    history_root.mkdir(parents=True, exist_ok=True)
+    return history_root

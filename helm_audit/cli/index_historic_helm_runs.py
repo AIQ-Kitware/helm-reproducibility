@@ -12,7 +12,7 @@ Ignore:
 
     ls /data/crfm-helm-public/thaiexam/benchmark_output/runs/v1.1.0/thai_exam:exam=tpat1,method=multiple_choice_joint,model=aisingapore_llama3-8b-cpt-sea-lionv2.1-instruct
 
-    python -m helm_audit.cli.index_historic_helm_runs /data/crfm-helm-public --out_fpath run_specs.yaml --out_detail_fpath run_details.yaml
+    python -m helm_audit.cli.index_historic_helm_runs /data/crfm-helm-public --out_fpath run_specs.yaml --out_detail_fpath run_details.yaml --out_inventory_json filter_inventory.json
 
     cat run_specs.yaml | grep -v together > run_specs2.yaml
 
@@ -45,6 +45,7 @@ Ignore:
 """
 
 from __future__ import annotations
+import json
 from pathlib import Path
 from typing import Iterable, Any
 
@@ -61,6 +62,7 @@ from magnet.backends.helm.cli.materialize_helm_run import (
     infer_num_instances,
     is_complete_run_dir,
 )
+from helm_audit.helm.run_entries import parse_run_entry_description, parse_run_name_to_kv
 
 
 class CompileHelmReproListConfig(scfg.DataConfig):
@@ -106,7 +108,12 @@ class CompileHelmReproListConfig(scfg.DataConfig):
 
     out_report_dpath = scfg.Value(
         None,
-        help="If provided, write filter-step analysis (Sankey + text report) to this directory.",
+        help="Deprecated. Reporting is now handled by helm_audit.cli.reports filter.",
+    )
+
+    out_inventory_json = scfg.Value(
+        None,
+        help="If provided, write the full filter inventory as JSON for later analysis.",
     )
 
     dedupe = scfg.Value(
@@ -137,8 +144,15 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         run_pattern = config.run_pattern
         require_per_instance_stats = config.require_per_instance_stats
         include_max_eval_instances = config.include_max_eval_instances
+        if config.out_report_dpath:
+            raise SystemExit(
+                '--out_report_dpath is no longer supported here. '
+                'Use --out_inventory_json to save the Stage 1 inventory, then run '
+                '`python -m helm_audit.cli.reports filter --report-dpath <reports/filtering> '
+                '--inventory-json <inventory.json>`.'
+            )
 
-        runs, n_structurally_incomplete = gather_runs(
+        runs, incomplete_rows = gather_runs(
             roots=roots,
             suite_pattern=suite_pattern,
             run_pattern=run_pattern,
@@ -211,42 +225,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
             'qwen/qwen2-72b-instruct',
             'qwen/qwen2.5-72b-instruct-turbo',
         }
-
-        if 1:
-            # check for dropped reasons
-            for r in model_rows:
-                if 'qwen' in r['name'].lower():
-                    tags = set(r.get('tags', []))
-                    reasons = []
-
-                    is_text_like = bool(tags & SOFT_TEXT_TAGS)
-                    has_excluded_tags = bool(tags & EXCLUDE_TAGS)
-                    size_ok = (r.get('num_parameters') is None or r['num_parameters'] <= MAX_PARAMS)
-                    access_ok = (r.get('access') == 'open')
-                    has_local_hf_path = (
-                        r.get('has_hf_client', False) or
-                        r['name'] in KNOWN_HF_OVERRIDES
-                    )
-
-                    if not is_text_like:
-                        reasons.append(f"missing_soft_text_tags={SOFT_TEXT_TAGS - tags}")
-                    if has_excluded_tags:
-                        reasons.append(f"excluded_tags={tags & EXCLUDE_TAGS}")
-                    if not size_ok:
-                        reasons.append(f"num_parameters={r.get('num_parameters')}")
-                    if not access_ok:
-                        reasons.append(f"access={r.get('access')}")
-                    if not has_local_hf_path:
-                        reasons.append(
-                            f"no_local_hf_path has_hf_client={r.get('has_hf_client', False)} "
-                            f"override={r['name'] in KNOWN_HF_OVERRIDES}"
-                        )
-
-                    print(r['name'])
-                    print('  deployment_names =', r.get('deployment_names'))
-                    print('  clients =', r.get('clients'))
-                    print('  reasons =', reasons)
-
+        
         chosen_model_rows = []
         for r in model_rows:
             tags = set(r.get('tags', []))
@@ -313,7 +292,27 @@ class CompileHelmReproListConfig(scfg.DataConfig):
                 'model': r['name'],
                 'n_runs': model_histo.get(r['name'], 0),
                 'failure_reasons': failure_reasons,
+                'failure_reason_details': build_failure_reason_details(
+                    tags=tags,
+                    is_text_like=is_text_like,
+                    has_excluded_tags=has_excluded_tags,
+                    size_ok=size_ok,
+                    access_ok=access_ok,
+                    has_local_hf_path=has_local_hf_path,
+                    num_parameters=r.get('num_parameters'),
+                    access=r.get('access'),
+                    has_hf_client=r.get('has_hf_client', False),
+                    model_name=r['name'],
+                    known_hf_overrides=KNOWN_HF_OVERRIDES,
+                    max_params=MAX_PARAMS,
+                    exclude_tags=EXCLUDE_TAGS,
+                ),
                 'eligible': eligible,
+                'num_parameters': r.get('num_parameters'),
+                'access': r.get('access'),
+                'tags': sorted(tags),
+                'has_hf_client': r.get('has_hf_client', False),
+                'size_threshold_params': MAX_PARAMS,
             })
         # logger.info(f'chosen_rows = {ub.urepr(chosen_rows, nl=1)}')
 
@@ -327,92 +326,25 @@ class CompileHelmReproListConfig(scfg.DataConfig):
             logger.info(f'model_histo = {ub.urepr(model_histo, nl=1)}')
 
         # Generate filter-step report if requested
-        if config.out_report_dpath:
-            from pathlib import Path as PathlibPath
-            from helm_audit.utils.sankey import emit_sankey_artifacts
-
-            report_dpath = PathlibPath(config.out_report_dpath).expanduser().resolve()
-            report_dpath.mkdir(parents=True, exist_ok=True)
-
-            # Build sankey rows: one row per run per filter failure (if failed), or one row per selected run
-            sankey_rows = []
-            for _ in range(n_structurally_incomplete):
-                sankey_rows.append({'filter_reason': 'structurally-incomplete', 'outcome': 'excluded'})
-
-            for mrow in model_filter_rows:
-                n_runs = mrow['n_runs']
-                if mrow['eligible']:
-                    for _ in range(n_runs):
-                        sankey_rows.append({'filter_reason': 'selected', 'outcome': 'selected'})
-                else:
-                    for reason in mrow['failure_reasons']:
-                        for _ in range(n_runs):
-                            sankey_rows.append({'filter_reason': reason, 'outcome': 'excluded'})
-
-            # Create subdirectories for artifacts
-            interactive_dpath = report_dpath / 'interactive'
-            static_dpath = report_dpath / 'static'
-            machine_dpath = report_dpath / 'machine'
-
-            # Emit sankey artifacts
-            sankey_result = emit_sankey_artifacts(
-                rows=sankey_rows,
-                report_dpath=report_dpath,
-                stamp=__import__('datetime').datetime.now(__import__('datetime').UTC).strftime('%Y%m%dT%H%M%SZ'),
-                kind='model_filter',
-                title='Run Selection Filter: Which HELM Runs Were Included',
-                stage_defs={
-                    'filter_reason': [
-                        'selected: model passed all 5 eligibility criteria and had complete run data',
-                        'structurally-incomplete: run directory missing required files (run_spec.json, stats.json, etc)',
-                        'not-text-like: model has no text-compatible tags (vision, audio, or image model)',
-                        'excluded-tags: model tagged as vision/audio/image/code which we exclude',
-                        'too-large: model size exceeds 10 billion parameters (conservative for local execution)',
-                        'not-open-access: model access is not "open" in HELM registry',
-                        'no-hf-deployment: model has no HuggingFace deployment and not in known overrides',
-                    ],
-                    'outcome': [
-                        'selected: run was included in reproduction list',
-                        'excluded: run was excluded from reproduction list',
-                    ],
-                },
-                stage_order=[('filter_reason', 'Exclusion Criterion'), ('outcome', 'Outcome')],
-                machine_dpath=machine_dpath,
-                interactive_dpath=interactive_dpath,
-                static_dpath=static_dpath,
+        inventory_rows = None
+        if config.out_inventory_json:
+            inventory_rows = build_filter_inventory_rows(
+                complete_rows=rows,
+                incomplete_rows=incomplete_rows,
+                model_filter_rows=model_filter_rows,
+                chosen_model_names=chosen_model_names,
             )
-            if sankey_result.get('plotly_error'):
-                logger.warning('Sankey rendering error: {}', sankey_result.get('plotly_error'))
-            if sankey_result.get('html'):
-                logger.info('Wrote sankey HTML: {}', sankey_result.get('html'))
-            if sankey_result.get('jpg'):
-                logger.info('Wrote sankey JPG: {}', sankey_result.get('jpg'))
-
-            # Write text report
-            text_lines = ['Model Selection Filter Report', '']
-            text_lines.append(f'Total discovered runs: {n_structurally_incomplete + len(rows)}')
-            text_lines.append(f'Structurally complete runs: {len(rows)}')
-            text_lines.append(f'Structurally incomplete runs: {n_structurally_incomplete}')
-            text_lines.append('')
-            text_lines.append(f'Total models in complete runs: {len(model_rows)}')
-            text_lines.append(f'Selected models (passed all filters): {len(chosen_model_rows)}')
-            text_lines.append(f'Selected runs: {len(chosen_rows)}')
-            text_lines.append('')
-            text_lines.append('Filter Criteria Statistics:')
-
-            # Count runs affected by each filter
-            filter_counts = {}
-            for mrow in model_filter_rows:
-                for reason in mrow['failure_reasons']:
-                    filter_counts[reason] = filter_counts.get(reason, 0) + mrow['n_runs']
-
-            for reason in sorted(filter_counts.keys()):
-                text_lines.append(f'  {reason}: {filter_counts[reason]} runs')
-
-            static_dpath.mkdir(parents=True, exist_ok=True)
-            report_txt_fpath = static_dpath / 'model_filter_report.txt'
-            report_txt_fpath.write_text('\n'.join(text_lines) + '\n')
-            logger.success('Wrote filter report to: {}', report_dpath)
+            inventory_fpath = Path(config.out_inventory_json).expanduser().resolve()
+            inventory_fpath.parent.mkdir(parents=True, exist_ok=True)
+            inventory_fpath.write_text(
+                json.dumps(
+                    kwutil.Json.ensure_serializable(inventory_rows),
+                    indent=2,
+                    ensure_ascii=False,
+                    default=str,
+                ) + '\n'
+            )
+            logger.success("Wrote {}", inventory_fpath)
 
         if config.out_detail_fpath:
             text = kwutil.Yaml.dumps(chosen_rows)
@@ -434,7 +366,7 @@ def gather_runs(
     run_pattern: str = "*:*",
     require_per_instance_stats: bool = False,
     include_max_eval_instances: bool = True,
-) -> tuple[list[HelmRun], int]:
+) -> tuple[list[HelmRun], list[dict[str, Any]]]:
 
     # Discover all benchmark_output dirs under provided roots
     logger.info('Discover benchmarks')
@@ -444,7 +376,7 @@ def gather_runs(
         logger.warning("No benchmark_output dirs found under roots={}", roots)
 
     runs: list[HelmRun] = []
-    n_structurally_incomplete = 0
+    incomplete_rows: list[dict[str, Any]] = []
     for bo in ub.ProgIter(bo_dirs, desc='Check dirs'):
         try:
             outputs = HelmOutputs.coerce(bo)
@@ -461,14 +393,14 @@ def gather_runs(
                 #     ...
                 # Only include if it looks "complete enough"
                 if not is_complete_run_dir(run_dir, require_per_instance_stats=require_per_instance_stats):
-                    n_structurally_incomplete += 1
+                    incomplete_rows.append(build_incomplete_inventory_row(run_dir))
                     continue
 
                 runs.append(run)
 
     # Stable order
     logger.info('Found {} run directories', len(runs))
-    return runs, n_structurally_incomplete
+    return runs, incomplete_rows
 
 
 def build_run_table(
@@ -538,6 +470,194 @@ def dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(key)
         out.append(r)
     return out
+
+
+def format_params_human(num_params: float | int | None) -> str:
+    if num_params is None:
+        return 'unknown'
+    value = float(num_params)
+    if value >= 1e9:
+        return f'{value / 1e9:.1f}B'
+    if value >= 1e6:
+        return f'{value / 1e6:.1f}M'
+    return str(int(value))
+
+
+def build_failure_reason_details(
+    *,
+    tags: set[str],
+    is_text_like: bool,
+    has_excluded_tags: bool,
+    size_ok: bool,
+    access_ok: bool,
+    has_local_hf_path: bool,
+    num_parameters: float | int | None,
+    access: str | None,
+    has_hf_client: bool,
+    model_name: str,
+    known_hf_overrides: set[str],
+    max_params: float,
+    exclude_tags: set[str],
+) -> dict[str, str]:
+    details: dict[str, str] = {}
+    if not is_text_like:
+        details['not-text-like'] = (
+            'Model does not advertise any of the required text-compatible HELM tags.'
+        )
+    if has_excluded_tags:
+        details['excluded-tags'] = (
+            'Model carries excluded modality tags: ' + ', '.join(sorted(tags & exclude_tags))
+        )
+    if not size_ok:
+        details['too-large'] = (
+            f"Model size {format_params_human(num_parameters)} exceeds the local reproduction budget "
+            f"of {format_params_human(max_params)} parameters."
+        )
+    if not access_ok:
+        details['not-open-access'] = (
+            f'Model access is {access!r}; the filter requires HELM access="open".'
+        )
+    if not has_local_hf_path:
+        details['no-hf-deployment'] = (
+            f'Model has_hf_client={has_hf_client} and override={model_name in known_hf_overrides}; '
+            'no runnable HuggingFace-style local deployment path is currently available.'
+        )
+    return details
+
+
+def short_scenario_name(scenario_class: str | None) -> str:
+    if not scenario_class:
+        return 'UnknownScenario'
+    return scenario_class.rsplit('.', 1)[-1]
+
+
+def describe_run_spec(run_spec_name: str, scenario_class: str | None = None) -> dict[str, Any]:
+    benchmark = run_spec_name.split(':', 1)[0]
+    kv = parse_run_name_to_kv(run_spec_name)[1]
+    try:
+        benchmark, parsed_kv = parse_run_entry_description(run_spec_name)
+        kv = {str(k): parsed_kv[k] for k in parsed_kv}
+    except Exception:
+        pass
+
+    dataset_key = None
+    for key in [
+        'dataset',
+        'subset',
+        'subject',
+        'task',
+        'demographic',
+        'domain',
+        'language_pair',
+        'lang',
+        'mode',
+        'difficulty',
+        'k',
+        'level',
+    ]:
+        if key in kv:
+            dataset_key = key
+            break
+    dataset = benchmark if dataset_key is None else f'{dataset_key}={kv[dataset_key]}'
+
+    non_model_items = [
+        f'{key}={value}' if value is not True else str(key)
+        for key, value in kv.items()
+        if key != 'model'
+    ]
+    setting = benchmark if not non_model_items else f'{benchmark}:' + ','.join(non_model_items)
+    return {
+        'benchmark': benchmark,
+        'dataset': dataset,
+        'dataset_key': dataset_key,
+        'setting': setting,
+        'scenario': short_scenario_name(scenario_class) if scenario_class else benchmark,
+        'run_params': kv,
+    }
+
+
+def build_incomplete_inventory_row(run_dir: Path) -> dict[str, Any]:
+    run_name = run_dir.name
+    benchmark, kv = parse_run_name_to_kv(run_name)
+    model = kv.get('model')
+    if isinstance(model, str):
+        model = model.replace('_', '/')
+    dataset_key = None
+    for key in ['dataset', 'subset', 'subject', 'task', 'demographic', 'domain', 'language_pair', 'lang', 'mode', 'difficulty', 'k', 'level']:
+        if key in kv:
+            dataset_key = key
+            break
+    dataset = benchmark if dataset_key is None else f'{dataset_key}={kv[dataset_key]}'
+    return {
+        'run_spec_name': run_name,
+        'run_dir': str(run_dir),
+        'max_eval_instances': None,
+        'model': model,
+        'scenario_class': None,
+        'benchmark': benchmark or 'unknown',
+        'dataset': dataset,
+        'dataset_key': dataset_key,
+        'setting': run_name,
+        'scenario': benchmark or 'unknown',
+        'run_params': kv,
+        'selection_status': 'excluded',
+        'outcome': 'excluded',
+        'considered_for_selection': False,
+        'eligible_candidate': False,
+        'candidate_pool': 'structurally-incomplete',
+        'eligible_model': False,
+        'failure_reasons': ['structurally-incomplete'],
+        'failure_reason_summary': 'structurally-incomplete',
+        'selection_explanation': 'Excluded before candidate selection because the run directory was structurally incomplete.',
+        'is_structurally_incomplete': True,
+    }
+
+
+def build_filter_inventory_rows(
+    *,
+    complete_rows: list[dict[str, Any]],
+    incomplete_rows: list[dict[str, Any]],
+    model_filter_rows: list[dict[str, Any]],
+    chosen_model_names: set[str],
+) -> list[dict[str, Any]]:
+    model_info = {row['model']: row for row in model_filter_rows}
+    inventory_rows: list[dict[str, Any]] = []
+    for row in complete_rows:
+        info = describe_run_spec(row['run_spec_name'], row.get('scenario_class'))
+        model_meta = model_info.get(row['model'], {})
+        failure_reasons = list(model_meta.get('failure_reasons', []))
+        selected = row['model'] in chosen_model_names
+        inventory_rows.append({
+            **row,
+            **info,
+            'selection_status': 'selected' if selected else 'excluded',
+            'outcome': 'selected' if selected else 'excluded',
+            'considered_for_selection': True,
+            'eligible_candidate': bool(model_meta.get('eligible', False)),
+            'candidate_pool': 'eligible-model' if bool(model_meta.get('eligible', False)) else 'complete-run',
+            'eligible_model': bool(model_meta.get('eligible', False)),
+            'failure_reasons': failure_reasons,
+            'failure_reason_details': dict(model_meta.get('failure_reason_details', {})),
+            'failure_reason_summary': 'selected' if selected else '|'.join(failure_reasons),
+            'selection_explanation': (
+                'Selected because the run was structurally complete and its model passed all eligibility filters.'
+                if selected else
+                'Excluded after consideration because the model failed: '
+                + '; '.join(
+                    model_meta.get('failure_reason_details', {}).get(reason, reason)
+                    for reason in failure_reasons
+                ) + '.'
+            ),
+            'model_num_parameters': model_meta.get('num_parameters'),
+            'model_access': model_meta.get('access'),
+            'model_tags': model_meta.get('tags', []),
+            'model_has_hf_client': model_meta.get('has_hf_client'),
+            'size_threshold_params': model_meta.get('size_threshold_params'),
+            'is_structurally_incomplete': False,
+        })
+    inventory_rows.extend(incomplete_rows)
+    inventory_rows.sort(key=lambda row: (row['selection_status'], str(row.get('model')), row['run_spec_name']))
+    return inventory_rows
 
 
 __cli__ = CompileHelmReproListConfig

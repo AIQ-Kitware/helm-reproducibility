@@ -4,6 +4,8 @@ import argparse
 import csv
 import datetime as datetime_mod
 import json
+import shlex
+import sys
 from collections import Counter
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,7 @@ from helm_audit.reports.aggregate import _find_curve_value, _find_pair
 from helm_audit.infra.api import audit_root, default_report_root
 from helm_audit.utils.numeric import nested_get
 from helm_audit.infra.fs_publish import write_latest_alias
+from helm_audit.infra.report_layout import core_run_reports_root, write_reproduce_script
 from helm_audit.reports import pair_report
 from helm_audit.reports.paper_labels import load_paper_label_manager
 from helm_audit.workflows.rebuild_core_report import (
@@ -153,7 +156,7 @@ def main(argv: list[str] | None = None) -> None:
     run_entries = sorted({r.get('run_entry') for r in experiment_rows if r.get('run_entry')})
     benchmark_completion = _benchmark_completion_summary(experiment_rows)
 
-    out_dpath = default_report_root() / f'experiment-analysis-{slugify(args.experiment_name)}'
+    out_dpath = core_run_reports_root() / f'experiment-analysis-{slugify(args.experiment_name)}'
     out_dpath.mkdir(parents=True, exist_ok=True)
     reports_dpath = out_dpath / 'core-reports'
     reports_dpath.mkdir(parents=True, exist_ok=True)
@@ -380,6 +383,25 @@ def main(argv: list[str] | None = None) -> None:
     write_latest_alias(json_fpath, out_dpath, 'experiment_summary.latest.json')
     write_latest_alias(csv_fpath, out_dpath, 'experiment_summary.latest.csv')
     write_latest_alias(txt_fpath, out_dpath, 'experiment_summary.latest.txt')
+    reproduce_fpath = write_reproduce_script(out_dpath / 'reproduce.latest.sh', [
+        '#!/usr/bin/env bash',
+        'set -euo pipefail',
+        f'REPO_ROOT={shlex.quote(str(audit_root()))}',
+        'cd "$REPO_ROOT"',
+        'PYTHONPATH="$REPO_ROOT" '
+        + ' '.join(shlex.quote(part) for part in [
+            sys.executable,
+            '-m',
+            'helm_audit.workflows.analyze_experiment',
+            '--experiment-name',
+            args.experiment_name,
+            '--index-fpath',
+            str(index_fpath),
+            *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
+        ])
+        + ' "$@"',
+    ])
+    write_latest_alias(reproduce_fpath, out_dpath, 'reproduce.sh')
 
     print(f'Wrote experiment summary json: {json_fpath}')
     print(f'Wrote experiment summary csv: {csv_fpath}')

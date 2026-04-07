@@ -56,10 +56,21 @@ generated `kwdagger` invocation and `--run=1` to execute it intentionally.
 Start in:
 
 - [`reproduce/README.md`](reproduce/README.md)
+- [`docs/pipeline.md`](docs/pipeline.md)
 
 Those runbooks are the primary operator surface now. They are intentionally
 small and shell-light: each step calls a Python CLI entrypoint rather than
 relying on repo-specific shell glue.
+
+If you want Plotly JPG/PNG sidecars on a headless Ubuntu 24.04 VM, the repo now
+documents and scripts the extra Chrome dependency. Use
+[`reproduce/setup/10_install_plotly_chrome_ubuntu2404.sh`](reproduce/setup/10_install_plotly_chrome_ubuntu2404.sh),
+then verify with `PYTHONPATH=. python -m helm_audit.cli.check_env --plotly-static-only`.
+
+Generated reports are converging on a family layout under [`reports/`](reports):
+- `reports/filtering/`
+- `reports/core-run-analysis/`
+- `reports/aggregate-summary/`
 
 ## Notes
 
