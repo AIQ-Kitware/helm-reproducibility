@@ -1815,7 +1815,7 @@ def main(argv: list[str] | None = None) -> None:
         else latest_index_csv(Path(args.index_dpath).expanduser().resolve())
     )
     rows = load_rows(index_fpath)
-    _raise_fd_limit()
+    _raise_fd_limit()  # Note: this probably is not necessary, as fd limits are usually due to a VM issue.
     configure_plotly_chrome()
     all_repro_rows = _load_all_repro_rows()
 
@@ -1845,7 +1845,7 @@ def main(argv: list[str] | None = None) -> None:
         breakdown_dims=list(args.breakdown_dims),
         max_items_per_breakdown=args.max_items_per_breakdown,
     )
-    print(f"Wrote executive summary root: {scope_root}")
+    logger.info(f"Wrote executive summary root: {scope_root}")
 
 
 if __name__ == "__main__":

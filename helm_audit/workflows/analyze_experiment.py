@@ -293,7 +293,9 @@ def main(argv: list[str] | None = None) -> None:
     history_dpath = out_dpath / '.history' / stamp[:8]
     history_dpath.mkdir(parents=True, exist_ok=True)
 
-    table = pd.DataFrame(summary_rows).sort_values('run_spec_name')
+    table = pd.DataFrame(summary_rows)
+    if 'run_spec_name' in table.columns:
+        table = table.sort_values('run_spec_name')
     json_fpath = history_dpath / f'experiment_summary_{stamp}.json'
     csv_fpath = history_dpath / f'experiment_summary_{stamp}.csv'
     txt_fpath = history_dpath / f'experiment_summary_{stamp}.txt'
@@ -314,6 +316,7 @@ def main(argv: list[str] | None = None) -> None:
     json_fpath.write_text(json.dumps(payload, indent=2))
     logger.debug(f'Write to: {json_fpath}')
     table.to_csv(csv_fpath, index=False)
+    logger.debug(f'Write to: {csv_fpath}')
 
     lines = []
     lines.append('Experiment Analysis Summary')
@@ -324,6 +327,8 @@ def main(argv: list[str] | None = None) -> None:
     lines.append(f'n_run_entries: {len(run_entries)}')
     lines.append(f'n_built_reports: {len(summary_rows)}')
     lines.append(f'n_skipped_run_entries: {len(skipped_run_entries)}')
+    if not summary_rows:
+        lines.append('warning: no per-run reports were built; inspect skipped_run_entries below.')
     lines.append('')
     lines.append('benchmark_completion:')
     for row in benchmark_completion:
@@ -406,9 +411,9 @@ def main(argv: list[str] | None = None) -> None:
     ])
     write_latest_alias(reproduce_fpath, out_dpath, 'reproduce.sh')
 
-    print(f'Wrote experiment summary json: {json_fpath}')
-    print(f'Wrote experiment summary csv: {csv_fpath}')
-    print(f'Wrote experiment summary txt: {txt_fpath}')
+    logger.info(f'Wrote experiment summary json: {json_fpath}')
+    logger.info(f'Wrote experiment summary csv: {csv_fpath}')
+    logger.info(f'Wrote experiment summary txt: {txt_fpath}')
 
 
 if __name__ == '__main__':

@@ -217,7 +217,6 @@ helm-audit-run \
 
 **Command (execute mode):**
 ```bash
-export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 helm-audit-run \
   "$AUDIT_STORE_ROOT/configs/manifests/historic_grid.generated.yaml" \
   --run 1
@@ -255,6 +254,8 @@ rsync -avz --progress user@<gpu_host>:results/ /home/joncrall/data/helm_runs/
 
 **Command:**
 ```bash
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
+
 helm-audit-index \
   --results-root /data/crfm-helm-audit \
   --report-dpath "$AUDIT_STORE_ROOT/indexes"
@@ -283,6 +284,7 @@ helm-audit-index \
 
 **Command:**
 ```bash
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 helm-audit-rebuild-core \
   --run-entry "boolq:model=eleutherai/pythia-6.9b,data_augmentation=canonical" \
   --experiment-name audit-historic-grid \
@@ -303,6 +305,8 @@ helm-audit-rebuild-core \
 
 **Command:**
 ```bash
+
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 helm-audit-analyze-experiment \
   --experiment-name audit-historic-grid \
   --index-dpath "$AUDIT_STORE_ROOT/indexes"
@@ -323,6 +327,7 @@ helm-audit-analyze-experiment \
 
 **Command:**
 ```bash
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 python -m helm_audit.workflows.build_reports_summary \
   --index-dpath "$AUDIT_STORE_ROOT/indexes"
 ```
@@ -394,6 +399,7 @@ reports/
 Use this when you already have Stage 5 reports and want to iterate on directory structure, aggregate tables, or Plotly/Sankey outputs:
 
 ```bash
+export AUDIT_STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 PYTHONPATH=. python -m helm_audit.workflows.build_reports_summary \
   --index-dpath "$AUDIT_STORE_ROOT/indexes"
 ```
