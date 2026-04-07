@@ -8,6 +8,7 @@ from helm_audit.integrations.kwdagger_bridge import (
     kwdagger_schedule_argv,
     prepare_schedule_request,
 )
+from helm_audit.infra.paths import repo_root
 from helm_audit.manifests import builders as manifest_builders
 from helm_audit.workflows import run_from_manifest as run_workflow
 
@@ -113,4 +114,17 @@ def test_kwdagger_manifest_propagates_model_override(tmp_path: Path):
     request = prepare_schedule_request(manifest_fpath, run=False)
     params_text = request.params_text
     assert "helm.model_deployments_fpath" in params_text
-    assert "configs/debug/repro_model_overrides.yaml" in params_text
+    assert str((repo_root() / "configs/debug/repro_model_overrides.yaml").resolve()) in params_text
+
+
+def test_qwen35_vllm_manifest_propagates_local_override_and_local_path():
+    manifest_fpath = repo_root() / "configs/qwen35_vllm_smoke_manifest.yaml"
+    request = prepare_schedule_request(manifest_fpath, run=False)
+    params_text = request.params_text
+    assert "qwen/qwen3.5-9b" in params_text
+    assert "helm.local_path" in params_text
+    assert "prod_env" in params_text
+    assert "helm.model_deployments_fpath" in params_text
+    assert str(
+        (repo_root() / "configs/local_models/qwen35_9b_vllm/model_deployments.yaml").resolve()
+    ) in params_text

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from helm_audit.infra.api import audit_root
 from helm_audit.infra.yaml_io import dump_yaml, load_manifest
 from helm_audit.infra.paths import experiment_result_dpath
 
@@ -28,6 +29,15 @@ class KWDaggerScheduleRequest:
     manifest: dict[str, Any]
     runtime: KWDaggerRuntime
     params_text: str
+
+
+def _resolve_manifest_override_path(value: str | None) -> str | None:
+    if value is None:
+        return None
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = audit_root() / path
+    return str(path.resolve())
 
 
 def build_schedule_params(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -70,6 +80,10 @@ def prepare_schedule_request(
 ) -> KWDaggerScheduleRequest:
     manifest_path = Path(manifest_fpath).expanduser().resolve()
     manifest = load_manifest(manifest_path)
+    manifest = dict(manifest)
+    manifest["model_deployments_fpath"] = _resolve_manifest_override_path(
+        manifest.get("model_deployments_fpath", None)
+    )
     experiment_name = str(manifest["experiment_name"])
     runtime_queue_name = (queue_name or f"audit-{experiment_name}").translate(
         str.maketrans({c: "-" for c in " !@#$%^&*()+={}[]|\\:;\"'<>,?/~`"})

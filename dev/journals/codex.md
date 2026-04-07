@@ -161,3 +161,22 @@ Design takeaways:
 1. Plot iteration becomes much cheaper once the indexing stage writes a stable inventory and the report stage can be rerun independently.
 2. Hidden `.history/` plus visible `latest` links is a strong default for generated research artifacts because it preserves provenance without overwhelming browsing.
 3. Report-directory reorganizations go better when they are paired with explicit `reproduce.sh` scripts; otherwise the new layout is cleaner to look at but harder to trust.
+
+## 2026-04-07 01:04:46 +0000
+
+Summary of user intent: implement a concrete local-vLLM execution path for `qwen/qwen3.5-9b` so this repo can drive HELM smoke benchmarks through the existing `helm-audit-run` to `kwdagger` to `materialize_helm_run.py` flow, with checked-in configs, a runbook, and lightweight verification that the intended deployment override is actually being used.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This session is mostly about tightening a seam that already existed rather than inventing a new one. The key decision was to resist adding new manifest fields or a separate scheduler path. The repository already had the right conceptual hook in `model_deployments_fpath`, and the downstream notes already documented that `materialize_helm_run.py` stages that file into `<job_dir>/prod_env/model_deployments.yaml`. That made the highest-value implementation a productization pass: add a checked-in Qwen3.5 vLLM override bundle, give operators a dedicated smoke manifest and runbook, and add verification that the scheduled job still points at the local deployment by the time HELM writes `run_spec.json`.
+
+I spent time validating whether the fallback path was actually needed before editing anything. That check paid off. The installed HELM checkout on this machine already contains `qwen/qwen3.5-9b` in `model_metadata.yaml` and `tokenizer_configs.yaml`, and its `VLLMChatClient` explicitly uses `api_key="EMPTY"`. That means the minimal path is the honest one here. The biggest risk was not missing HELM support; it was path resolution drift. Existing manifests in this repo already reference `model_deployments_fpath` using repo-root-relative paths, so blindly resolving relative to the manifest file would have broken older generated manifests under `configs/generated/`. The safer choice is to normalize relative override paths against the repo root before they enter the kwdagger params. That preserves the current convention and makes the new checked-in manifest reliable.
+
+The tradeoff I accepted is that the end-to-end runtime validation will still depend on an external local vLLM process and the downstream MAGNeT materializer behavior. I can verify the repo-controlled parts aggressively, but I cannot prove a real smoke benchmark without the server being up and the downstream integration being installed in the active environment. To reduce that operational uncertainty, I added small helper scripts close to the config bundle: one to launch vLLM with sane defaults, one to confirm the OpenAI-compatible chat endpoint works, and one to verify that a completed HELM run directory recorded the expected local deployment and wrote the expected stats files. I’m confident this keeps the human workflow small and inspectable.
+
+What might still break: if operators run `helm-audit-run` from an unusual environment where the repo root cannot be inferred cleanly, the new repo-root-relative normalization could behave differently than expected. Also, if a future HELM update changes the logical model name or the vLLM client contract, the local override file will need to track that upstream shape. Right now the implementation is intentionally conservative and closely aligned with the installed HELM checkout, which is the right bias for a reproducibility repo.
+
+Design takeaways:
+1. When the downstream integration already has the right seam, productizing the seam is usually better than widening it.
+2. Relative path conventions become part of the API surface once manifests are checked in and shared across runbooks.
+3. For local-model workflows, artifact verification is as important as launch instructions because deployment drift is often silent until comparison time.
