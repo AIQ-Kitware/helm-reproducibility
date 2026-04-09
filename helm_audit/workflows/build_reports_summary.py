@@ -268,6 +268,11 @@ def _build_end_to_end_funnel_rows(
             sankey_rows.append(flow)
             continue
         flow["structural_gate"] = "kept: structurally complete"
+        if "missing-model-metadata" in reasons:
+            flow["metadata_gate"] = "excluded: missing model metadata"
+            sankey_rows.append(flow)
+            continue
+        flow["metadata_gate"] = "kept: model metadata resolved"
         if "not-open-access" in reasons:
             flow["open_weight_gate"] = "excluded: not open weight"
             sankey_rows.append(flow)
@@ -325,6 +330,11 @@ def _build_filter_to_attempt_rows(
             sankey_rows.append(flow)
             continue
         flow["structural_gate"] = "kept: structurally complete"
+        if "missing-model-metadata" in reasons:
+            flow["metadata_gate"] = "excluded: missing model metadata"
+            sankey_rows.append(flow)
+            continue
+        flow["metadata_gate"] = "kept: model metadata resolved"
         if "not-open-access" in reasons:
             flow["open_weight_gate"] = "excluded: not open weight"
             sankey_rows.append(flow)
@@ -399,7 +409,9 @@ def _build_filter_to_attempt_root() -> tuple[sankey_builder.Root, list[str], dic
     root = sankey_builder.Root(label="All discovered historic HELM runs")
     structural = root.group(by="structural_gate", name="Structural Gate")
     structural["excluded: structurally incomplete"].connect(None)
-    open_weight = structural["kept: structurally complete"].group(by="open_weight_gate", name="Open-Weight Gate")
+    metadata = structural["kept: structurally complete"].group(by="metadata_gate", name="Metadata Gate")
+    metadata["excluded: missing model metadata"].connect(None)
+    open_weight = metadata["kept: model metadata resolved"].group(by="open_weight_gate", name="Open-Weight Gate")
     open_weight["excluded: not open weight"].connect(None)
     tag = open_weight["kept: open weight"].group(by="tag_gate", name="Tag Gate")
     tag["excluded: unsuitable text/modality tags"].connect(None)
@@ -416,6 +428,7 @@ def _build_filter_to_attempt_root() -> tuple[sankey_builder.Root, list[str], dic
 
     stage_names = [
         "Structural Gate",
+        "Metadata Gate",
         "Open-Weight Gate",
         "Tag Gate",
         "Deployment Gate",
@@ -427,6 +440,10 @@ def _build_filter_to_attempt_root() -> tuple[sankey_builder.Root, list[str], dic
         "Structural Gate": [
             "excluded: structurally incomplete",
             "kept: structurally complete",
+        ],
+        "Metadata Gate": [
+            "excluded: missing model metadata",
+            "kept: model metadata resolved",
         ],
         "Open-Weight Gate": [
             "excluded: not open weight",
@@ -490,7 +507,9 @@ def _build_end_to_end_funnel_root() -> tuple[sankey_builder.Root, list[str], dic
     root = sankey_builder.Root(label="All discovered historic HELM runs")
     structural = root.group(by="structural_gate", name="Structural Gate")
     structural["excluded: structurally incomplete"].connect(None)
-    open_weight = structural["kept: structurally complete"].group(by="open_weight_gate", name="Open-Weight Gate")
+    metadata = structural["kept: structurally complete"].group(by="metadata_gate", name="Metadata Gate")
+    metadata["excluded: missing model metadata"].connect(None)
+    open_weight = metadata["kept: model metadata resolved"].group(by="open_weight_gate", name="Open-Weight Gate")
     open_weight["excluded: not open weight"].connect(None)
     tag = open_weight["kept: open weight"].group(by="tag_gate", name="Tag Gate")
     tag["excluded: unsuitable text/modality tags"].connect(None)
@@ -513,6 +532,7 @@ def _build_end_to_end_funnel_root() -> tuple[sankey_builder.Root, list[str], dic
 
     stage_names = [
         "Structural Gate",
+        "Metadata Gate",
         "Open-Weight Gate",
         "Tag Gate",
         "Deployment Gate",
@@ -526,6 +546,10 @@ def _build_end_to_end_funnel_root() -> tuple[sankey_builder.Root, list[str], dic
         "Structural Gate": [
             "excluded: structurally incomplete",
             "kept: structurally complete",
+        ],
+        "Metadata Gate": [
+            "excluded: missing model metadata",
+            "kept: model metadata resolved",
         ],
         "Open-Weight Gate": [
             "excluded: not open weight",

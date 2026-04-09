@@ -93,6 +93,45 @@ def test_build_filter_inventory_rows_marks_selected_and_excluded():
     assert "Selected because" in selected_row["selection_explanation"]
 
 
+def test_build_filter_inventory_rows_marks_missing_model_metadata_explicitly():
+    complete_rows = [
+        {
+            "run_spec_name": "cub200:model=openai/dalle-2,data_augmentation=canonical",
+            "run_dir": "/tmp/missing-model",
+            "max_eval_instances": None,
+            "model": "openai/dalle-2",
+            "scenario_class": "helm.benchmark.scenarios.cub200_scenario.CUB200Scenario",
+        },
+    ]
+    inventory = build_filter_inventory_rows(
+        complete_rows=complete_rows,
+        incomplete_rows=[],
+        model_filter_rows=[
+            {
+                "model": "openai/dalle-2",
+                "n_runs": 1,
+                "failure_reasons": ["missing-model-metadata"],
+                "failure_reason_details": {
+                    "missing-model-metadata": "HELM could not resolve model metadata for this model name."
+                },
+                "eligible": False,
+                "num_parameters": None,
+                "access": None,
+                "tags": [],
+                "has_hf_client": False,
+                "size_threshold_params": 10e9,
+            }
+        ],
+        chosen_model_names=set(),
+    )
+    row = inventory[0]
+    assert row["selection_status"] == "excluded"
+    assert row["eligible_model"] is False
+    assert row["failure_reasons"] == ["missing-model-metadata"]
+    assert "missing-model-metadata" in row["failure_reason_summary"]
+    assert "HELM could not resolve model metadata" in row["selection_explanation"]
+
+
 def test_emit_filter_report_artifacts_writes_tables(tmp_path: Path):
     inventory_rows = [
         {

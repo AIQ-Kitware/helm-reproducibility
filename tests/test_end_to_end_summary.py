@@ -119,6 +119,25 @@ def test_filter_to_attempt_rows_split_selected_and_attempted_states():
     assert {row["attempt_stage"] for row in selected_rows} == {ATTEMPTED_LABEL, NOT_ATTEMPTED_LABEL}
 
 
+def test_filter_to_attempt_rows_surface_missing_model_metadata_explicitly():
+    filter_inventory_rows = [
+        {
+            "run_spec_name": "cub200:model=openai/dalle-2",
+            "selection_status": "excluded",
+            "candidate_pool": "complete-run",
+            "failure_reasons": ["missing-model-metadata"],
+            "is_structurally_incomplete": False,
+        },
+    ]
+    rows = _build_filter_to_attempt_rows(filter_inventory_rows, [])
+    assert rows == [
+        {
+            "structural_gate": "kept: structurally complete",
+            "metadata_gate": "excluded: missing model metadata",
+        }
+    ]
+
+
 def test_attempted_to_repro_rows_start_from_attempted_runs_only():
     filter_inventory_rows = [
         {

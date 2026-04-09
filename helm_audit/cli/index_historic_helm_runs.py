@@ -66,6 +66,9 @@ from magnet.backends.helm.cli.materialize_helm_run import (
 from helm_audit.helm.run_entries import parse_run_entry_description, parse_run_name_to_kv
 
 
+MISSING_MODEL_METADATA_REASON = 'missing-model-metadata'
+
+
 class CompileHelmReproListConfig(scfg.DataConfig):
     roots = scfg.Value(
         ['/data/crfm-helm-public'],
@@ -178,6 +181,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         from helm.benchmark import  model_deployment_registry
         config_registry.register_builtin_configs_from_helm_package()
         model_rows = []
+        missing_model_metadata: dict[str, str] = {}
         for model_name, count in model_histo.items():
             HF_CLIENT = 'helm.clients.huggingface_client.HuggingFaceClient'
             try:
@@ -195,6 +199,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
                 model_rows.append(model_row)
             except (TypeError, ValueError) as ex:
                 logger.warning(f'missing: model_name = {ub.urepr(model_name, nl=1)} {ex}')
+                missing_model_metadata[model_name] = str(ex)
         if 0:
             ub.dict_hist([r.get('client') for r in model_rows])
 
@@ -313,6 +318,24 @@ class CompileHelmReproListConfig(scfg.DataConfig):
                 'access': r.get('access'),
                 'tags': sorted(tags),
                 'has_hf_client': r.get('has_hf_client', False),
+                'size_threshold_params': MAX_PARAMS,
+            })
+        for model_name, error_text in missing_model_metadata.items():
+            model_filter_rows.append({
+                'model': model_name,
+                'n_runs': model_histo.get(model_name, 0),
+                'failure_reasons': [MISSING_MODEL_METADATA_REASON],
+                'failure_reason_details': {
+                    MISSING_MODEL_METADATA_REASON: (
+                        'HELM could not resolve model metadata for this model name via '
+                        f'model_deployment_registry: {error_text}'
+                    ),
+                },
+                'eligible': False,
+                'num_parameters': None,
+                'access': None,
+                'tags': [],
+                'has_hf_client': False,
                 'size_threshold_params': MAX_PARAMS,
             })
         # logger.info(f'chosen_rows = {ub.urepr(chosen_rows, nl=1)}')
