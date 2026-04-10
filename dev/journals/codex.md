@@ -253,6 +253,57 @@ Design takeaways:
 2. For filesystem-backed reporting, a fake-figure test is often the cleanest way to validate artifact plumbing.
 3. Keeping the command surface unchanged is a good sign the implementation stayed in the right layer.
 
+## 2026-04-10 00:28:39 +0000
+
+Summary of user intent: add a histogram of excluded reasons restricted to open-access models in the Stage 1 filter report.
+
+Model and configuration: GPT-5.4, reasoning_effort=medium, collaboration mode `Default`.
+
+The important subtlety here was that “excluded reasons” is only meaningful if the denominator is clear. The filter inventory already tracks `model_access`, so I used that directly instead of trying to infer openness from reasons like `not-open-access`. That keeps the histogram honest: it now counts only rows whose model access is `open`, then tallies the reasons that still blocked selection. This lets the report answer a cleaner diagnostic question: among models we were actually allowed to consider, what was still keeping runs out?
+
+I threaded the new view through both the report text and the artifact table/chart outputs, and I kept the visual style consistent with the existing Stage 1 plots. I also added a dedicated regression test so the open-access-only table ignores restricted models entirely, which matters because that distinction is easy to lose if someone later refactors the inventory shape or the chart helper. The user’s note about PNG vs JPG mattered too, so I left the earlier Sankey PNG support in place; the filter report now produces image artifacts in the formats operators expect without any extra command switches.
+
+The main tradeoff was whether to collapse this into the existing all-model exclusion histogram. I chose not to, because that would mix two different stories: access policy versus the residual reasons among open models. Keeping them separate makes the report easier to trust and avoids implying that `not-open-access` is just another ordinary exclusion among open-access models.
+
+Design takeaways:
+1. If a diagnostic chart has a hidden denominator shift, it should be named and implemented as a separate view.
+2. Use the metadata the pipeline already has instead of reverse-engineering semantics from the exclusion labels.
+3. A small “restricted subset” chart often answers a more actionable question than a larger universal histogram.
+
+## 2026-04-10 00:36:22 +0000
+
+Summary of user intent: add a second open-access exclusion plot that breaks the excluded bars out by open model name and uses reason as the color, then regenerate the filter report bundle so the new artifact is actually published.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, reasoning_effort=medium, working in the shared repo checkout with local shell/tool execution.
+
+This was a small but worthwhile refinement to the filter analysis story. The earlier open-access-only histogram answered “what reasons remain once we limit ourselves to open models,” but it still flattened away the model identity. The new view keeps the same open-access denominator while showing which open models are being hit by which reasons. That matters because the maintenance question is usually not just “what reason dominates?” but “is one open model getting singled out by one or two reasons, or is the pattern broad across the open set?” I chose to implement this as a separate stacked bar instead of overloading the original chart, because the two charts answer different questions and mixing them would make both harder to trust.
+
+The main code change was straightforward once I confirmed the shared helper already existed. I added a dedicated open-access-by-model row builder, threaded the resulting table through both the analysis artifact writer and the report text, and then mapped it to a stacked Plotly bar with `model` on the x-axis and `failure_reason` as the color. I also added a focused regression test that proves restricted models are ignored entirely. That test is important because the open-access denominator is the whole point of the new chart; if someone later “simplifies” the helper and accidentally includes limited models, the story becomes misleading even if the chart still renders.
+
+The regeneration pass was the real validation. Running the full filter CLI confirmed the new plot follows the same publication path as the rest of the bundle: it produced stamped history files, latest HTML aliases, and latest PNG aliases under the analysis report tree. I checked the newest symlinks after the run so I know the image is actually discoverable where operators expect it. The only real risk I’m leaving behind is the existing file-tree sprawl in the report layout, but that is preexisting and this change fits cleanly into it.
+
+Design takeaways:
+1. When a chart is about a filtered subset, a second breakdown by model often reveals more than a single overall frequency plot.
+2. Denominator-specific charts should be separate artifacts, not parameter tweaks on a universal chart.
+3. The regeneration command is part of the feature: it proves the latest aliases and publication paths still work after the code change.
+
+## 2026-04-10 00:31:50 +0000
+
+Summary of user intent: run the filter-report regeneration command, fix any errors, and make regeneration the default follow-through for future new plot requests.
+
+Model and configuration: GPT-5.4, reasoning_effort=medium, collaboration mode `Default`.
+
+The regeneration pass surfaced exactly the kind of integration bug that unit tests often miss: I had wired a new open-access exclusion histogram into the filter report outputs, but I forgot to define the corresponding row set inside the analysis artifact function. Running the real CLI was valuable because it verified the full publishing path, including history directories and latest aliases, and it made the failure obvious at the point where the report bundle was being assembled. Once fixed, the same regeneration command completed successfully and produced the expected PNG/JPG plus HTML aliases.
+
+I also confirmed the on-disk layout after the rerun. The new plots are being published to `reports/filtering/analysis/static/figures/*.latest.png` and the Sankey is now publishing both `.latest.jpg` and `.latest.png` under `reports/filtering/static/`. That matters because the user explicitly said PNG or JPG is acceptable, but the default workflow should still regenerate the whole bundle so operators do not have to guess whether a plot exists or whether a stale alias is hiding a broken render.
+
+Going forward, I should treat “new plot request” as implying a regeneration pass unless the user explicitly asks for code only. That keeps the toolchain honest and prevents a subtle class of bugs where a chart is implemented but never exercised through the actual CLI entrypoint. The tradeoff is slightly more runtime per request, but for report generation that’s the right default.
+
+Design takeaways:
+1. For report work, the CLI regeneration pass is part of the feature, not just validation.
+2. History-path alias checks are worth doing after render fixes because they catch stale or missing publication surfaces.
+3. A chart implementation is only done when the real bundle command can rebuild it cleanly from the saved inventory.
+
 Follow-up in the same session: the first real run against `helm-audit-analyze-experiment --index-dpath "$AUDIT_STORE_ROOT/indexes"` exposed an empty-summary edge case. If every run entry gets skipped during per-run report generation, `summary_rows` is empty and Pandas raises on `sort_values('run_spec_name')` because the empty frame has no such column. This was not a path-migration bug after all; the new store-root defaults simply made it easier to hit an experiment state with zero built reports. I patched the workflow to tolerate that case, still emit the JSON/CSV/TXT summary artifacts, and include a warning in the text summary pointing the operator at `skipped_run_entries`. The important lesson is that path cleanup often surfaces latent control-flow assumptions, especially around “at least one artifact was built.”
 
 Second follow-up in the same session: the user tightened the pipeline doc toward copy-pasteability and correctly noticed that the document still did not present “rebuild the whole analysis from existing data” as a first-class workflow. The ingredients were present, but the story was fragmented across Stage 4, Stage 5b, and Stage 6, with stale runbook scripts still pointing at older compare-batch behavior. I treated that as an operator-experience bug more than a wording bug. The fix was to add an explicit analysis-only rebuild path in `docs/pipeline.md`, including both a single-experiment recipe and a loop that rebuilds Stage 5b for every experiment named in the latest index before refreshing the all-results summary. I also updated the thin runbook scripts so `historic_grid/20_rebuild_reports.sh` now performs index → analyze-experiment → build-summary, and the machine-compare helpers use the store-backed index location by default. This keeps the scripts and the docs aligned, which matters a lot when the intended use case is “start reading from the middle of the doc and paste the commands that are there.”
@@ -264,3 +315,54 @@ Fourth follow-up in the same session: after seeing the first end-to-end Sankey, 
 Fifth follow-up in the same session: the user wanted the funnel split into two operator-facing views instead of one overloaded artifact, and that was the right call. The single end-to-end Sankey is useful once you already understand the pipeline, but it is too much for the first question, which is simply “how did the historic HELM universe narrow to the runs we actually attempted?” I added a dedicated `filter_to_attempt` Sankey that stops exactly there, and a second `attempted_to_repro` Sankey that starts from attempted runs and traces execution, analysis, and reproduction outcomes. I also renamed the residual selection bucket from the misleading “excluded after explicit gates” to “not selected for attempted runs.” That wording is intentionally conservative because the inventory does not record a more specific causal reason for those rows; many of them are complete runs with no failure reason metadata at all, so pretending otherwise would overstate what the data can support. The practical takeaway is that the new split is better for browsing and iteration, but if we later want a more precise story for that residual bucket, the place to improve is the Stage 1 inventory schema rather than the Sankey renderer.
 
 Sixth follow-up in the same session: the user noticed a real operator regression in the plotting path. The code advertised `.latest.jpg` aliases for Sankeys, but the recent rebuilds only produced HTML because static image generation had been silently disabled by default whenever Chrome was not discovered up front. That was too implicit. If an HTML report exists, the system should at least attempt the JPG render and then surface a concrete error if it fails. I removed the implicit environment mutation in `plotly_env.py` so static rendering is now opt-out instead of auto-disabled, then rebuilt the aggregate summary without the skip flag. The result is the behavior we actually want: every Sankey HTML now has a matching JPG attempt, and on this machine the attempts succeed. The design lesson is that “skip expensive optional work” defaults are dangerous when they also hide missing outputs that the surrounding report layout advertises as first-class artifacts.
+
+## 2026-04-10 00:49:50 +0000
+
+Summary of user intent: add two narrower open-access exclusion charts, one limited to open/text-compatible models and one that also excludes too-large models, then rerun the filter report generator and fix any resulting errors.
+
+Model and configuration: GPT-5.4, reasoning_effort=medium, collaboration mode `Default`.
+
+This pass was mostly about sharpening the denominator story without overcomplicating the report surface. The existing open-access-by-model chart already answered a useful question, but the user wanted two even narrower subsets that mirror the Stage 1 gate order more closely. I interpreted that as “open-access, text-compatible” and “open-access, text-compatible, size-ok,” because the filter inventory already gives us `model_access` plus the exclusion reasons needed to remove tag-gate and size-gate failures. I chose to implement these as separate stacked bars rather than variants of the same chart because they answer different diagnostic questions and should remain independently citable.
+
+The main risk was plumbing: once a chart exists in the report text and artifact table code, it is easy to forget the same row builders inside the analysis artifact writer. That is exactly what happened on the first regeneration attempt. The CLI failure was helpful because it exposed the missing variable in the real bundle path rather than letting us assume the chart was wired just because the helper existed and the tests passed. After adding the missing row builders, the same regeneration command completed successfully and published latest HTML/PNG aliases for both new charts.
+
+I also kept the test coverage focused on the row builders rather than the Plotly rendering itself. The tests prove that restricted models stay out of the open-access subsets and that the narrower filters behave as intended when tag-gate and size-gate reasons are excluded. That is the right level of protection here because the publishing path is already exercised by the regeneration command, while the semantics live in the inventory slicing helpers.
+
+Design takeaways:
+1. Narrower denominator views are most useful when they mirror the existing gate order, not when they invent a new taxonomy.
+2. When adding a chart, patch both the narrative/report surface and the artifact writer in the same pass.
+3. Running the real regeneration command is still the fastest way to catch a missing row builder or alias publication bug.
+
+## 2026-04-10 00:58:41 +0000
+
+Summary of user intent: make every plot in the filter analysis file advertise its total datapoint count in the title using an `n={num}` suffix, then regenerate the report bundle so the published HTML/PNG titles update too.
+
+Model and configuration: GPT-5.4, reasoning_effort=medium, collaboration mode `Default`.
+
+I treated this as a report-consistency change rather than a pile of title edits. The important design move was to push the `n=` suffix into the shared chart helpers so every bar chart picks it up automatically from the rows it is actually plotting. That keeps the convention honest and reduces the chance that one call site drifts from the rest. I also threaded the same suffix into both Sankey titles in this file, because those are also plots and they were easy to miss if I only patched the bar helpers.
+
+The main risk was whether “n” should mean the full candidate universe or the number of rows actually plotted. I chose the plotted row count because the helpers receive the exact rows being rendered, and that is the denominator the figure is literally built from. For truncated views like top-20 or top-120 slices, that means the title reflects the plotted sample rather than the hidden upstream population. That is not perfect for every possible interpretation, but it is consistent and mechanically true. If we later want a more explicit “shown vs source” convention, that should be a separate report decision rather than an overloaded title suffix.
+
+The real CLI regeneration again paid for itself. It verified that the new title formatting did not break any publication paths, and it confirmed that the latest aliases were regenerated alongside the new figure titles. I also added a tiny test for the title helper itself so the suffix convention is less likely to disappear during a future refactor.
+
+Design takeaways:
+1. Cross-cutting title conventions belong in helpers, not in every chart call site.
+2. For a plotted figure, the safest `n` is the number of rows actually rendered.
+3. Even a seemingly cosmetic title change should be verified through the real regeneration command because it can still touch the rendering path.
+
+## 2026-04-10 01:01:03 +0000
+
+Summary of user intent: make the filter-report bar charts easier to read in the raster outputs by widening the x axis so bar labels are less likely to be truncated, then regenerate the report bundle.
+
+Model and configuration: GPT-5.4, reasoning_effort=medium, collaboration mode `Default`.
+
+This was a straightforward readability improvement, but I treated it as a helper-level layout problem rather than a per-chart tweak. The key decision was to make the bar helpers compute a wider canvas from the number and length of the plotted x-axis categories. That keeps the PNG/JPG output consistent across every bar chart in the file and avoids the maintenance burden of hand-tuning widths for each plot. I also added a larger bottom margin and a rotated x tick angle, because width alone is not enough when the labels are long.
+
+The tradeoff is that some charts now render on a noticeably wider canvas than before, which makes the HTML and PNG a little heavier. I think that is the correct cost here: these plots are diagnostic artifacts, and label readability matters more than compactness. The wider render time is acceptable, especially because the generation flow already writes stamped history files and latest aliases rather than interactive live views.
+
+The regeneration pass confirmed the change was safe. The wider charts rendered successfully, and the latest PNG/HTML aliases were refreshed for the affected plots, including the stacked bar views and the hierarchical filter Sankey. That gives us confidence that the layout helper is compatible with the current publication path and not just with a local preview.
+
+Design takeaways:
+1. If many plots need the same readability fix, put it in the shared chart helper.
+2. Long x labels usually need both more width and a rotated tick angle.
+3. A slightly larger PNG is a good trade when it makes the bars and labels legible without manual zooming.
