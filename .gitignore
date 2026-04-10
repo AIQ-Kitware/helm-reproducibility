@@ -19,12 +19,12 @@ dist/
 
 # Generated experiment outputs
 ./reports/
-results/
-data/
-audit-smoke/
-audit-smoke-apples/
-benchmark_sankeys/
-helm_id_*/
+./results/
+./data/
+./audit-smoke/
+./audit-smoke-apples/
+./benchmark_sankeys/
+./helm_id_*/
 
 # Misc local scratch
 tmp/
