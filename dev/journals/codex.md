@@ -381,3 +381,20 @@ Design takeaways:
 1. A readability fix should have a ceiling, not just an expansion rule.
 2. For diagnostic plots, aspect ratio is often a better control than raw pixel width.
 3. The shared helper remains the right place for these layout decisions because it keeps every chart in the file aligned.
+
+## 2026-04-10 23:41:25 +0000
+
+Summary of user intent: turn the filtered-out `openai/gpt-oss-20b` historic HELM candidates into a real local-vLLM reproduction path, with one quick smoke batch and one longer overnight batch that lands in the same writable results/index/report pipeline as the rest of the broader historic reproduction work.
+
+Model and configuration: Codex, GPT-5 family, collaboration mode `Default`.
+
+This session is about connecting three pieces that were already individually true but not yet productized together: the filter inventory already identified ten `openai/gpt-oss-20b` runs that were excluded only because they lacked a local runnable deployment; the local vLLM service templates already include a `helm-gpt-oss-20b` profile and alias; and the audit pipeline already knows how to inject a per-job `model_deployments.yaml` override into `prod_env`. The useful work is therefore not inventing a new mechanism, but making that existing seam legible and repeatable for this specific model family.
+
+The main design choice is to keep the new batch as its own explicit experiment rather than silently splicing it into an existing generated historic-grid manifest. Operationally that is safer because it keeps queue names, result directories, and reruns easy to reason about, while still letting the aggregate indexing and reporting layers merge the outputs alongside the wider reproduction corpus under `/data/crfm-helm-audit` and `/data/crfm-helm-audit-store`. I want future maintainers to be able to answer both questions cleanly: "what is the dedicated gpt-oss batch?" and "how does it contribute to the whole reproduction effort?"
+
+I also checked the local editable HELM checkout rather than assuming upstream package contents from memory. That paid off. `openai/gpt-oss-20b` is already present in HELM model metadata, and the built-in Together deployment uses tokenizer `openai/o200k_harmony`. That means the honest minimal override is: preserve the logical model name and tokenizer, but replace the deployment/client path with a local `VLLMChatClient`. The main uncertainty is not registry support anymore; it is runtime behavior once the local server is actually up, especially for the chain-of-thought and safety benchmarks. Since no server was listening on `localhost:8000` during this pass, the right scope is to verify manifest scheduling and leave the smoke execution itself ready but not faked.
+
+Design takeaways:
+1. When a filter reason is "no local deployment", the best fix is often a deployment override bundle, not a new analysis concept.
+2. Dedicated experiment names are still compatible with whole-project aggregation if the indexing/report pipeline already merges across experiments.
+3. For HELM overrides, tokenizer fidelity matters just as much as model-name fidelity; preserve upstream registry values unless there is a concrete reason to diverge.

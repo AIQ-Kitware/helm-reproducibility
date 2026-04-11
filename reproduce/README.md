@@ -16,6 +16,7 @@ Current scenarios:
 - `historic_grid/`: historic public-run manifest and rebuild flow
 - `machine_compare/`: cross-machine indexing, analysis, and pairwise compare
 - `qwen35_vllm/`: local vLLM smoke run for `qwen/qwen3.5-9b` through the existing `kwdagger` and materialized HELM path
+- `gpt_oss_20b_vllm/`: local vLLM smoke plus targeted overnight batch for the `openai/gpt-oss-20b` runs that were filtered out only because they had no local deployment path
 
 The shell files here are intentionally thin. They are runbook steps, not the
 implementation. Each one should delegate to a `helm_audit` Python CLI such as
