@@ -398,3 +398,12 @@ Design takeaways:
 1. When a filter reason is "no local deployment", the best fix is often a deployment override bundle, not a new analysis concept.
 2. Dedicated experiment names are still compatible with whole-project aggregation if the indexing/report pipeline already merges across experiments.
 3. For HELM overrides, tokenizer fidelity matters just as much as model-name fidelity; preserve upstream registry values unless there is a concrete reason to diverge.
+
+Follow-up in the same session: the first `gpt-oss-20b` smoke run surfaced two different classes of mismatch. The first was operational: I had initially targeted raw vLLM on `localhost:8000`, but the user's actual working setup routes through LiteLLM on `localhost:14000` with `LITELLM_MASTER_KEY`. I moved the runbook to generate a machine-local bundle from that env so the checked-in repo no longer pretends the endpoint and auth are static. The second mismatch was a response-shape issue: once requests were reaching the server, the `bbq` smoke run failed because this OpenAI-compatible path produced a chat completion whose `message.content` was `null`, and HELM's metric layer later called `.strip()` on the resulting non-string output.
+
+My first instinct was to harden the local HELM checkout, but the user correctly pushed back on relying on a local HELM fork. I reverted that change and instead moved the workaround fully into the deployment override layer by switching the generated `gpt-oss` deployment to `OpenAILegacyCompletionsClient`, which matches the earlier Qwen notes and avoids the fragile chat-content path entirely. That is a better reproduction story: we still preserve the logical model and tokenizer identity, but we only vary the local deployment transport, not HELM core behavior. The residual risk is that the LiteLLM endpoint may not support the legacy completions API for every `gpt-oss` scenario; if that happens, the next step should be a provider-level normalization shim or scenario-specific exclusions, not a silent HELM patch.
+
+Design takeaways:
+1. OpenAI-compatible endpoints are similar enough to get far, but different enough that client adapters should defensively normalize response shapes.
+2. If policy or maintenance constraints rule out patching the evaluator, prefer transport/client substitutions in `model_deployments.yaml` before touching benchmark code.
+3. If a runbook depends on local secrets or service ports, generate machine-local bundles at runtime instead of freezing those assumptions into source-controlled YAML.

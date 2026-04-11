@@ -1,6 +1,6 @@
 schema_version: 1
 experiment_name: audit-gpt-oss-20b-vllm-smoke
-description: Smoke-test HELM batch for openai/gpt-oss-20b through a local vLLM server.
+description: Checked-in reference manifest for the gpt-oss smoke batch. The runnable repro flow uses reproduce/gpt_oss_20b_vllm/05_write_bundle.sh to generate a machine-local LiteLLM-backed manifest.
 run_entries:
   - ifeval:model=openai/gpt-oss-20b
   - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b

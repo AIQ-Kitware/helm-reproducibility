@@ -1,6 +1,6 @@
 schema_version: 1
 experiment_name: audit-historic-grid-gpt-oss-20b-vllm
-description: Targeted historic-grid extension for the openai/gpt-oss-20b runs that were previously filtered out only because they lacked a runnable local deployment.
+description: Checked-in reference manifest for the targeted gpt-oss historic-grid extension. The runnable repro flow uses reproduce/gpt_oss_20b_vllm/05_write_bundle.sh to generate a machine-local LiteLLM-backed manifest.
 run_entries:
   - anthropic_red_team:model=openai/gpt-oss-20b
   - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b

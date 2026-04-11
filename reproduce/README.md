@@ -38,3 +38,4 @@ The `gpt_oss_20b_vllm/` runbook assumes:
 - the local service is exposed through LiteLLM on `http://localhost:14000/v1`
 - `LITELLM_MASTER_KEY` is available, either already exported or via `/data/service/service-repo/vllm/generated/.env`
 - the runbook writes a machine-local bundle under `$AUDIT_STORE_ROOT/local-bundles/gpt_oss_20b_vllm/` so secrets and absolute paths do not need to live in checked-in YAML
+- the local `gpt-oss` deployment should use the legacy completions path, not chat completions, because the observed chat response shape returned `message.content: null` for this backend/model combination

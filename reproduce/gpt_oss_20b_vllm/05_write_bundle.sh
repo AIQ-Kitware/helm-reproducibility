@@ -26,7 +26,7 @@ model_deployments:
     tokenizer_name: openai/o200k_harmony
     max_sequence_length: 32768
     client_spec:
-      class_name: "helm.clients.openai_client.OpenAIClient"
+      class_name: "helm.clients.openai_client.OpenAILegacyCompletionsClient"
       args:
         base_url: "${LITELLM_BASE_URL}/v1"
         api_key: "${LITELLM_MASTER_KEY}"
