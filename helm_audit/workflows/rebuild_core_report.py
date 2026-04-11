@@ -12,7 +12,7 @@ from typing import Any
 
 from helm_audit.infra.api import audit_root, default_index_root, env_defaults
 from helm_audit.infra.fs_publish import safe_unlink, symlink_to, write_latest_alias
-from helm_audit.infra.report_layout import core_run_reports_root, write_reproduce_script
+from helm_audit.infra.report_layout import core_run_reports_root, portable_repo_root_lines, write_reproduce_script
 from helm_audit.reports import core_metrics, pair_samples
 from helm_audit.workflows.compare_batch import (
     collect_historic_candidates,
@@ -211,31 +211,31 @@ def main(argv: list[str] | None = None) -> None:
         label=args.right_label,
         report_dpath=report_dpath,
     )
+    cmd_parts = [
+        '-m',
+        'helm_audit.workflows.rebuild_core_report',
+        '--run-entry',
+        args.run_entry,
+        '--index-fpath',
+        str(index_fpath),
+        '--precomputed-root',
+        str(args.precomputed_root),
+        '--report-dpath',
+        str(report_dpath),
+        '--left-label',
+        args.left_label,
+        '--right-label',
+        args.right_label,
+        *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
+        *( ['--experiment-name', args.experiment_name] if args.experiment_name else [] ),
+    ]
     reproduce_fpath = write_reproduce_script(report_dpath / 'reproduce.latest.sh', [
         '#!/usr/bin/env bash',
         'set -euo pipefail',
-        f'REPO_ROOT={shlex.quote(str(audit_root()))}',
+        *portable_repo_root_lines(),
         'cd "$REPO_ROOT"',
-        'PYTHONPATH="$REPO_ROOT" '
-        + ' '.join(shlex.quote(part) for part in [
-            sys.executable,
-            '-m',
-            'helm_audit.workflows.rebuild_core_report',
-            '--run-entry',
-            args.run_entry,
-            '--index-fpath',
-            str(index_fpath),
-            '--precomputed-root',
-            str(args.precomputed_root),
-            '--report-dpath',
-            str(report_dpath),
-            '--left-label',
-            args.left_label,
-            '--right-label',
-            args.right_label,
-            *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
-            *( ['--experiment-name', args.experiment_name] if args.experiment_name else [] ),
-        ])
+        'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" '
+        + ' '.join(shlex.quote(part) for part in cmd_parts)
         + ' "$@"',
     ])
     write_latest_alias(reproduce_fpath, report_dpath, 'reproduce.sh')

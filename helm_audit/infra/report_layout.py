@@ -18,6 +18,22 @@ def aggregate_summary_reports_root() -> Path:
     return reports_root() / "aggregate-summary"
 
 
+def portable_repo_root_lines() -> list[str]:
+    return [
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        'REPO_ROOT="$SCRIPT_DIR"',
+        'while [[ ! -f "$REPO_ROOT/pyproject.toml" || ! -d "$REPO_ROOT/helm_audit" ]]; do',
+        '  NEXT="$(dirname "$REPO_ROOT")"',
+        '  if [[ "$NEXT" == "$REPO_ROOT" ]]; then',
+        '    echo "Could not locate helm_audit repo root from $SCRIPT_DIR" >&2',
+        '    exit 1',
+        '  fi',
+        '  REPO_ROOT="$NEXT"',
+        'done',
+        'PYTHON_BIN="${PYTHON_BIN:-python}"',
+    ]
+
+
 def write_reproduce_script(script_fpath: Path, lines: list[str]) -> Path:
     script_fpath.parent.mkdir(parents=True, exist_ok=True)
     text = "\n".join(lines).rstrip() + "\n"

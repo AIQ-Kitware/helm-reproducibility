@@ -17,7 +17,7 @@ from helm_audit.reports.aggregate import _find_curve_value, _find_pair
 from helm_audit.infra.api import audit_root, default_index_root
 from helm_audit.utils.numeric import nested_get
 from helm_audit.infra.fs_publish import write_latest_alias
-from helm_audit.infra.report_layout import core_run_reports_root, write_reproduce_script
+from helm_audit.infra.report_layout import core_run_reports_root, portable_repo_root_lines, write_reproduce_script
 from helm_audit.reports import pair_report
 from helm_audit.reports.paper_labels import load_paper_label_manager
 from helm_audit.workflows.rebuild_core_report import (
@@ -391,22 +391,22 @@ def main(argv: list[str] | None = None) -> None:
     write_latest_alias(json_fpath, out_dpath, 'experiment_summary.latest.json')
     write_latest_alias(csv_fpath, out_dpath, 'experiment_summary.latest.csv')
     write_latest_alias(txt_fpath, out_dpath, 'experiment_summary.latest.txt')
+    cmd_parts = [
+        '-m',
+        'helm_audit.workflows.analyze_experiment',
+        '--experiment-name',
+        args.experiment_name,
+        '--index-fpath',
+        str(index_fpath),
+        *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
+    ]
     reproduce_fpath = write_reproduce_script(out_dpath / 'reproduce.latest.sh', [
         '#!/usr/bin/env bash',
         'set -euo pipefail',
-        f'REPO_ROOT={shlex.quote(str(audit_root()))}',
+        *portable_repo_root_lines(),
         'cd "$REPO_ROOT"',
-        'PYTHONPATH="$REPO_ROOT" '
-        + ' '.join(shlex.quote(part) for part in [
-            sys.executable,
-            '-m',
-            'helm_audit.workflows.analyze_experiment',
-            '--experiment-name',
-            args.experiment_name,
-            '--index-fpath',
-            str(index_fpath),
-            *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
-        ])
+        'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" '
+        + ' '.join(shlex.quote(part) for part in cmd_parts)
         + ' "$@"',
     ])
     write_latest_alias(reproduce_fpath, out_dpath, 'reproduce.sh')

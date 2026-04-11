@@ -17,7 +17,7 @@ import kwutil
 from helm_audit.infra.api import audit_root, default_index_root, default_store_root
 from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
-from helm_audit.infra.report_layout import aggregate_summary_reports_root, core_run_reports_root
+from helm_audit.infra.report_layout import aggregate_summary_reports_root, core_run_reports_root, portable_repo_root_lines
 from helm_audit.utils.numeric import nested_get
 from helm_audit.utils.sankey import emit_sankey_artifacts
 from helm_audit.utils import sankey_builder
@@ -1864,9 +1864,7 @@ def _write_reproduce_sh(
     index_path: Path | None = None,
     filter_inventory_json: Path | None = None,
 ) -> None:
-    repo_root = str(audit_root())
-    python_exe = sys.executable
-    cmd = f"PYTHONPATH={repo_root} {python_exe} -m helm_audit.workflows.build_reports_summary"
+    cmd = 'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" -m helm_audit.workflows.build_reports_summary'
     if scope_kind not in ("all_results", None) and scope_value:
         cmd += f" --experiment-name {scope_value}"
     if index_path is not None:
@@ -1878,7 +1876,8 @@ def _write_reproduce_sh(
         "# Regenerate this summary report from the current index and analysis data.",
         f"# scope: {scope_kind}" + (f" / {scope_value}" if scope_value else ""),
         "set -euo pipefail",
-        f"cd {repo_root}",
+        *portable_repo_root_lines(),
+        'cd "$REPO_ROOT"',
         cmd,
     ]
     fpath.write_text("\n".join(lines) + "\n")

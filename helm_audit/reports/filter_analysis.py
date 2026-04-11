@@ -15,7 +15,7 @@ import kwutil
 from helm_audit.cli.index_historic_helm_runs import CLOSED_JUDGE_REQUIRED_REASON
 from helm_audit.infra.api import audit_root
 from helm_audit.infra.fs_publish import history_publish_root, write_latest_alias
-from helm_audit.infra.report_layout import filtering_reports_root, write_reproduce_script
+from helm_audit.infra.report_layout import filtering_reports_root, portable_repo_root_lines, write_reproduce_script
 from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.utils.sankey import emit_sankey_artifacts
 from loguru import logger
@@ -576,35 +576,37 @@ def _shell_quote(parts: list[str]) -> str:
 
 
 def write_filter_rebuild_script(report_dpath: Path, *, inventory_json: Path | None = None) -> Path:
-    repo_root = audit_root()
-    python_exe = sys.executable
+    _ = inventory_json
     cmd = [
-        python_exe,
+        '"${PYTHON_BIN}"',
         '-m',
         'helm_audit.cli.reports',
         'filter',
         '--report-dpath',
-        str(report_dpath),
+        '"${REPORT_DPATH}"',
+        '--inventory-json',
+        '"${REPORT_DPATH}/machine/model_filter_inventory.latest.json"',
     ]
-    if inventory_json is not None:
-        cmd.extend(['--inventory-json', str(inventory_json)])
     script = write_reproduce_script(report_dpath / 'rebuild_analysis.latest.sh', [
         '#!/usr/bin/env bash',
         'set -euo pipefail',
-        f'REPO_ROOT={shlex.quote(str(repo_root))}',
+        *portable_repo_root_lines(),
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        'REPORT_DPATH="$SCRIPT_DIR"',
         'cd "$REPO_ROOT"',
-        f'PYTHONPATH="$REPO_ROOT" {_shell_quote(cmd)} "$@"',
+        f'PYTHONPATH="$REPO_ROOT" {" ".join(cmd)} "$@"',
     ])
     write_latest_alias(script, report_dpath, 'rebuild_analysis.sh')
     return script
 
 
 def write_filter_reproduce_script(report_dpath: Path, *, source_command: str | None = None) -> Path:
-    repo_root = audit_root()
     lines = [
         '#!/usr/bin/env bash',
         'set -euo pipefail',
-        f'REPO_ROOT={shlex.quote(str(repo_root))}',
+        *portable_repo_root_lines(),
+        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
+        'REPORT_DPATH="$SCRIPT_DIR"',
         'cd "$REPO_ROOT"',
     ]
     if source_command:
@@ -617,7 +619,7 @@ def write_filter_reproduce_script(report_dpath: Path, *, source_command: str | N
         lines.extend([
             '',
             '# Rebuild the filter report bundle from the latest saved inventory.',
-            f'PYTHONPATH="$REPO_ROOT" {_shell_quote([sys.executable, "-m", "helm_audit.cli.reports", "filter", "--report-dpath", str(report_dpath)])} "$@"',
+            'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" -m helm_audit.cli.reports filter --report-dpath "$REPORT_DPATH" "$@"',
         ])
     script = write_reproduce_script(report_dpath / 'reproduce.latest.sh', lines)
     write_latest_alias(script, report_dpath, 'reproduce.sh')
