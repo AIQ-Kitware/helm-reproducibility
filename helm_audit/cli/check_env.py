@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import shutil
 
 from helm_audit.infra.env import load_env
 from helm_audit.infra.plotly_env import has_plotly_static_dependencies
+
+
+def require_module(modname: str) -> None:
+    if importlib.util.find_spec(modname) is None:
+        raise SystemExit(f"required python module not found: {modname}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -30,7 +36,6 @@ def main(argv: list[str] | None = None) -> None:
 
     env = load_env()
     required = {
-        "AIQ_MAGNET_ROOT": env.aiq_magnet_root,
         "AUDIT_RESULTS_ROOT": env.audit_results_root,
     }
     if args.require_precomputed_root:
@@ -41,6 +46,8 @@ def main(argv: list[str] | None = None) -> None:
     for exe in ["kwdagger", "helm-run", env.aiq_python]:
         if shutil.which(exe) is None:
             raise SystemExit(f"required executable not found: {exe}")
+    require_module("magnet")
+    require_module("helm")
     if args.require_plotly_static:
         ok, missing = has_plotly_static_dependencies()
         if not ok:

@@ -86,6 +86,25 @@ Design takeaways:
 2. Observability upgrades should avoid changing eligibility policy unless the task explicitly asks for that coupling.
 3. When metadata taxonomies are messy, preserve raw identifiers and add best-effort derived facets side by side rather than pretending the derived view is canonical.
 
+## 2026-04-18 17:20:25 +0000
+
+Summary of user intent: remove the stale `AIQ_MAGNET_ROOT` path requirement from the environment model and env check, rely on importability for MAGNeT and HELM instead, and keep the developer setup path editable-install based without introducing new repository-path coupling.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This was a deliberately narrow cleanup. The architectural shape is already clear: `helm_audit` should validate the runtime shape that matters to operators, not enforce an old checkout convention that no longer matches how the code actually runs. That made the decision straightforward once I confirmed the live code paths. The env loader only needed to keep the generic roots and execution defaults; the MAGNeT root field was pure legacy, and the environment check could be made more honest by checking module importability instead of a filesystem path.
+
+I chose `importlib.util.find_spec` for the module checks because it is the lightest honest test of “is this importable?” without overreaching into deeper backend internals. That keeps the validation aligned with the user’s requirement to validate `magnet` and `helm` only, not to encode assumptions about their submodule layout. The tradeoff is that it won’t prove a particular backend command path is healthy, but that was not the goal here. The existing executable checks and plotly dependency check still cover the operational surface we want.
+
+The setup script turned out to be already aligned with the requested behavior: editable install for the root package, editable install for any submodule with a Python project marker, and no `AIQ_MAGNET_ROOT` coupling. I left it untouched rather than introduce churn. The main residual risk is environmental rather than code-level: `check_env` will still fail if `magnet` or `helm` are not actually installed into the active interpreter, which is exactly the intended contract.
+
+Testing notes: compiled the edited Python files with `py_compile` and verified the targeted `AIQ_MAGNET_ROOT`/`aiq_magnet_root` search is empty in the touched surfaces. I did not broaden validation beyond that because the change is intentionally about the environment contract, not runtime behavior.
+
+Design takeaways:
+1. When runtime coupling is import-based, path-based validation becomes a stale proxy and should be removed.
+2. `find_spec` is a good fit for “module must be importable” checks when you want a minimal dependency test.
+3. If a setup script already satisfies the requested contract, leaving it alone is often the safest way to keep a patch small.
+
 ## 2026-04-06 17:38:22 +0000
 
 Summary of user intent: go beyond richer raw artifacts and make the filtered-run analysis genuinely explanatory by separating Stage 1 inventory generation from a secondary analysis pass that can answer what all candidate runs were, why some were chosen, why others were not, and what fraction of the whole was considered.
