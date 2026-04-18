@@ -86,28 +86,9 @@ def _ensure_importable_vllm_service(root: Path | None = None) -> None:
         sys.path.insert(0, package_root)
 
 
-def _import_vllm_modules(root: Path | None = None) -> dict[str, Any]:
+def _import_vllm_contracts(root: Path | None = None) -> Any:
     _ensure_importable_vllm_service(root)
-    return {
-        "config": importlib.import_module("vllm_service.config"),
-        "contracts": importlib.import_module("vllm_service.contracts"),
-        "resolver": importlib.import_module("vllm_service.resolver"),
-        "hardware": importlib.import_module("vllm_service.hardware"),
-    }
-
-
-def _load_vllm_config(root: Path, modules: dict[str, Any], *, backend: str | None = None) -> dict[str, Any]:
-    config_path = root / modules["config"].CONFIG_FILE
-    if config_path.exists():
-        cfg = modules["config"].load_yaml(config_path)
-    else:
-        cfg = modules["config"].initial_config()
-    cfg.setdefault("catalog", {})
-    cfg["catalog"]["builtin_models"] = True
-    cfg["catalog"]["builtin_profiles"] = True
-    if backend is not None:
-        cfg["backend"] = backend
-    return cfg
+    return importlib.import_module("vllm_service.contracts")
 
 
 def load_profile_contract(
@@ -118,11 +99,13 @@ def load_profile_contract(
     vllm_root: Path | None = None,
 ) -> dict[str, Any]:
     root = (vllm_root or vllm_service_root()).resolve()
-    modules = _import_vllm_modules(root)
-    cfg = _load_vllm_config(root, modules, backend=backend)
-    inventory = modules["hardware"].simulate_inventory(simulate_hardware) if simulate_hardware else None
-    deployment = modules["resolver"].resolve(root, cfg, inventory=inventory, profile_name=profile)
-    return modules["contracts"].build_profile_contract(deployment)
+    contracts = _import_vllm_contracts(root)
+    return contracts.load_profile_contract(
+        profile,
+        root=root,
+        backend=backend,
+        simulate_hardware_spec=simulate_hardware,
+    )
 
 
 def _select_service(contract: dict[str, Any]) -> dict[str, Any]:
@@ -157,6 +140,24 @@ def _default_deployment_name(service: dict[str, Any], access_kind: str) -> str:
     return f"{prefix}/{service['public_name']}-local"
 
 
+def _resolve_api_key(access: dict[str, Any], *, api_key_value: str | None = None) -> str | None:
+    if access["kind"] == "vllm-direct":
+        return api_key_value
+    if api_key_value is not None:
+        return api_key_value
+    env_name = access.get("auth_env_name", "")
+    env_value = os.environ.get(env_name) if env_name else None
+    if env_value:
+        return env_value
+    if not access.get("auth_required", access.get("auth_placeholder") != "EMPTY"):
+        return access.get("auth_placeholder")
+    raise ValueError(
+        "Selected access mode "
+        f"{access['kind']!r} requires credentials via {env_name!r}; "
+        "bundle was not written because credentials were missing."
+    )
+
+
 def _model_deployment_entry(
     contract: dict[str, Any],
     *,
@@ -184,9 +185,7 @@ def _model_deployment_entry(
     if kind == "vllm-direct":
         entry["client_spec"]["args"]["vllm_model_name"] = access["request_model_name"]
     else:
-        resolved_api_key = api_key_value
-        if resolved_api_key is None:
-            resolved_api_key = os.environ.get(access["auth_env_name"], access["auth_placeholder"])
+        resolved_api_key = _resolve_api_key(access, api_key_value=api_key_value)
         entry["client_spec"]["args"]["api_key"] = resolved_api_key
         entry["client_spec"]["args"]["openai_model_name"] = access["request_model_name"]
     return entry
@@ -245,7 +244,6 @@ def materialize_benchmark_bundle(
     api_key_value: str | None = None,
 ) -> dict[str, Any]:
     output_dir = output_dir.resolve()
-    output_dir.mkdir(parents=True, exist_ok=True)
     service = _select_service(contract)
     preset_cfg = PRESET_CONFIGS.get(preset or "", {})
     model_entry = _model_deployment_entry(
@@ -255,6 +253,7 @@ def materialize_benchmark_bundle(
         base_url=base_url,
         api_key_value=api_key_value,
     )
+    output_dir.mkdir(parents=True, exist_ok=True)
     model_deployments = {"model_deployments": [model_entry]}
     model_deployments_path = output_dir / "model_deployments.yaml"
     _write_yaml(model_deployments_path, model_deployments)

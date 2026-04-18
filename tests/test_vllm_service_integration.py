@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 from helm_audit.integrations.vllm_service.adapter import (
@@ -56,12 +57,14 @@ def test_export_bundle_distinguishes_gpt_oss_chat_vs_completions(tmp_path: Path)
         bundle_root=tmp_path / "gpt-oss-completions",
         simulate_hardware="1x96",
         vllm_root=vllm_root,
+        api_key_value="explicit-test-key",
     )
     chat = export_benchmark_bundle(
         "gpt-oss-20b-chat",
         bundle_root=tmp_path / "gpt-oss-chat",
         simulate_hardware="1x96",
         vllm_root=vllm_root,
+        api_key_value="explicit-test-key",
     )
     completions_doc = yaml.safe_load(completions["model_deployments_path"].read_text())["model_deployments"][0]
     chat_doc = yaml.safe_load(chat["model_deployments_path"].read_text())["model_deployments"][0]
@@ -93,6 +96,64 @@ def test_machine_local_bundle_uses_absolute_model_deployments_path(tmp_path: Pat
         bundle_root=bundle_root,
         simulate_hardware="1x96",
         vllm_root=vllm_root,
+        api_key_value="explicit-test-key",
     )
     smoke = yaml.safe_load(result["benchmark_smoke_manifest_path"].read_text())
     assert smoke["model_deployments_fpath"] == str((bundle_root / "model_deployments.yaml").resolve())
+
+
+def test_export_bundle_fails_fast_when_openai_auth_is_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    vllm_root = _make_vllm_root(tmp_path)
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+    with pytest.raises(ValueError, match="LITELLM_MASTER_KEY"):
+        export_benchmark_bundle(
+            "gpt-oss-20b-completions",
+            preset="gpt_oss_20b_vllm",
+            bundle_root=tmp_path / "missing-auth",
+            simulate_hardware="1x96",
+            vllm_root=vllm_root,
+        )
+    assert not (tmp_path / "missing-auth" / "bundle.yaml").exists()
+
+
+def test_export_bundle_uses_env_auth_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    vllm_root = _make_vllm_root(tmp_path)
+    monkeypatch.setenv("LITELLM_MASTER_KEY", "env-test-key")
+    result = export_benchmark_bundle(
+        "gpt-oss-20b-completions",
+        preset="gpt_oss_20b_vllm",
+        bundle_root=tmp_path / "env-auth",
+        simulate_hardware="1x96",
+        vllm_root=vllm_root,
+    )
+    deployment = yaml.safe_load(result["model_deployments_path"].read_text())["model_deployments"][0]
+    assert deployment["client_spec"]["args"]["api_key"] == "env-test-key"
+
+
+def test_export_bundle_uses_explicit_auth_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    vllm_root = _make_vllm_root(tmp_path)
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+    result = export_benchmark_bundle(
+        "gpt-oss-20b-completions",
+        preset="gpt_oss_20b_vllm",
+        bundle_root=tmp_path / "explicit-auth",
+        simulate_hardware="1x96",
+        vllm_root=vllm_root,
+        api_key_value="explicit-test-key",
+    )
+    deployment = yaml.safe_load(result["model_deployments_path"].read_text())["model_deployments"][0]
+    assert deployment["client_spec"]["args"]["api_key"] == "explicit-test-key"
+
+
+def test_qwen_direct_vllm_export_does_not_require_litellm_auth(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    vllm_root = _make_vllm_root(tmp_path)
+    monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
+    result = export_benchmark_bundle(
+        "qwen2-72b-instruct-tp2-balanced",
+        preset="qwen2_72b_vllm",
+        bundle_root=tmp_path / "qwen-direct",
+        simulate_hardware="2x96",
+        vllm_root=vllm_root,
+    )
+    deployment = yaml.safe_load(result["model_deployments_path"].read_text())["model_deployments"][0]
+    assert "api_key" not in deployment["client_spec"]["args"]

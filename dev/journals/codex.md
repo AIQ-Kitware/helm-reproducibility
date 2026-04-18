@@ -617,3 +617,20 @@ Design takeaways:
 1. Cross-repo seams become healthier when the lower layer exports a generic contract and the upper layer owns the domain-specific translation.
 2. “Compatibility shim” is a useful transitional design tool when the ownership boundary is changing faster than the operator workflow.
 3. Access hints, request-model defaults, and benchmark client mappings are related but not identical concepts; separating them makes both repos easier to explain later.
+
+## 2026-04-18 22:06:28 +0000
+
+Summary of user intent: do a narrow hardening pass on the new cross-repo seam by restoring fail-fast credential validation in the `helm_audit` adapter and reducing coupling so the adapter depends on one small public contract-loading API from `vllm_service` instead of several internals.
+
+Model and configuration: Codex (GPT-5-based coding agent), default in-session configuration.
+
+This pass was intentionally small, but it fixed two things that mattered operationally. First, the benchmark bundle adapter had become too forgiving about missing credentials. That looked harmless in code because the bundle still materialized, but it was actually a worse user experience than the earlier shell flow: operators could get a seemingly ready GPT-OSS bundle and only discover the missing `LITELLM_MASTER_KEY` once they were already inside a run. I moved that failure back to bundle-generation time. The adapter now treats OpenAI-compatible access as credentialed only when the selected access says auth is required, and in that case it resolves credentials in a strict order: explicit `api_key_value`, then the advertised environment variable, otherwise a clear error that names the selected access mode and env var and says the bundle was not written. Direct-vLLM export still avoids spurious LiteLLM-style auth requirements.
+
+The second improvement was about keeping the ownership boundary honest. The first version of the integration worked, but `helm_audit` was still reaching into `vllm_service.config`, `resolver`, and `hardware`, then rebuilding config-loading policy itself. That is the kind of coupling that quietly turns a “clean seam” into an implementation trap. I added a small public loader, `vllm_service.contracts.load_profile_contract(...)`, that owns canonical config loading, backend override, builtin-catalog enablement, optional simulated hardware, resolution, and contract construction. The `helm_audit` adapter now imports only the contracts module and calls that single public function. That keeps the benchmark layer focused on benchmark translation while leaving `vllm_service` free to reorganize its internals later.
+
+I’m confident in the boundary after this pass because the tests now cover both the mechanical seam and the operator behavior: public contract loading for active Qwen and GPT-OSS profiles, explicit auth failure, env-based auth success, explicit-key success, and the direct-vLLM Qwen path staying credential-light. The main deferred cleanup is that the adapter still has to manage `sys.path` insertion to reach the checked-out submodule. That is acceptable for now because it is explicit and localized, but if we later package the submodule more formally we can revisit that without changing the benchmark contract again.
+
+Design takeaways:
+1. A cross-repo integration point is only truly stable when the upper layer depends on one public function, not on the lower layer’s assembly steps.
+2. For machine-local bundle generation, “fail fast before writing anything plausible-looking” is more valuable than permissive placeholders.
+3. Serving-side access metadata can include auth expectations without dragging benchmark policy back into the serving repo.
