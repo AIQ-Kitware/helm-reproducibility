@@ -726,3 +726,15 @@ Reusable takeaways:
 1. Once the serving stack is stable enough to expose both public ids and answer real requests, the next failures become much more diagnostic: they tell you what capability metadata is missing rather than where the cluster is broken.
 2. If a compatibility rule changes the shape of a benchmark request or the mapping into HELM’s client/window-service model, the safest home is `helm_audit`, even when the trigger is a serving profile.
 3. Emergency runbook patches are useful during bring-up, but the durable ones should migrate downward only when they reflect actual serving truth. In this pass, public served-name routing and KubeAI resource-profile formatting qualified; tokenizer aliasing and Vicuna benchmark accommodations did not.
+
+## 2026-04-19 20:27:17 +0000
+Summary of user intent: inspect the new Vicuna rerun failure after switching the KubeAI completions path to HELM’s `VLLMClient`, and make the smallest clean fix in the HELM client layer so the rerun can proceed without undoing the benchmark-side client choice.
+
+Model/configuration: Codex on GPT-5.4 (medium reasoning effort) operating as a coding agent in the shared workspace.
+
+This was a reassuringly small fix once the failure was made explicit. The previous pass changed the Vicuna KubeAI benchmark export from `OpenAILegacyCompletionsClient` to `VLLMClient`, which is still the right architectural move because that client already knows how to avoid the greedy-sampling `best_of` issue that broke the earlier MMLU request. The new failure was purely a constructor plumbing problem inside HELM itself: `VLLMClient.__init__` still forwarded `tokenizer` and `tokenizer_name` through `super().__init__(**kwargs)`, and `OpenAIClient` then passed those unknown kwargs directly into the OpenAI SDK constructor. That meant the benchmark fix was correct in spirit but tripped on an old client-layer assumption.
+
+I fixed this where it belongs: in HELM’s `vllm_client.py`. The constructor now keeps `tokenizer` and `tokenizer_name` as attributes on `VLLMClient` but stops forwarding them into `OpenAIClient.__init__` and therefore into `OpenAI(...)`. The important design point is that tokenizer-related metadata may still matter to HELM later, but it is not part of the transport client’s SDK constructor surface. This is exactly the kind of bug that should stay local to the client layer rather than being worked around in `helm_audit` or `vllm_service`.
+
+Reusable takeaway:
+1. When a transport-specific HELM client subclasses a generic OpenAI client, constructor arguments need to be split into “HELM-local state” and “SDK constructor kwargs” deliberately, or benchmark-facing fixes can fail for reasons that have nothing to do with the benchmark itself.
