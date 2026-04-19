@@ -180,6 +180,15 @@ def _benchmark_client_class(protocol_mode: str, access_kind: str) -> str:
     )
 
 
+def _prefer_vllm_client_for_kubeai(contract: dict[str, Any], service: dict[str, Any], access: dict[str, Any]) -> bool:
+    return (
+        contract.get("backend") == "kubeai"
+        and service["protocol"]["mode"] == "completions"
+        and access["kind"] == "openai-compatible"
+        and str(service["protocol"].get("engine", "")).upper() == "VLLM"
+    )
+
+
 def _default_deployment_name(service: dict[str, Any], access_kind: str) -> str:
     prefix = "vllm" if access_kind == "vllm-direct" else "litellm"
     return f"{prefix}/{service['public_name']}-local"
@@ -217,19 +226,27 @@ def _model_deployment_entry(
     access = _select_access(service, access_kind)
     protocol_mode = service["protocol"]["mode"]
     kind = access["kind"]
+    use_vllm_client = _prefer_vllm_client_for_kubeai(contract, service, access)
+    client_class = (
+        "helm.clients.vllm_client.VLLMClient"
+        if use_vllm_client
+        else _benchmark_client_class(protocol_mode, kind)
+    )
     entry = {
         "name": model_deployment_name or _default_deployment_name(service, kind),
         "model_name": helm_model_name or service["model"]["logical_model_name"],
         "tokenizer_name": helm_tokenizer_name or service["model"]["tokenizer_name"],
         "max_sequence_length": int(service["runtime"]["max_model_len"]),
+        # vLLM-style servers enforce the total prompt+generation budget against max-model-len.
+        "max_sequence_and_generated_tokens_length": int(service["runtime"]["max_model_len"]),
         "client_spec": {
-            "class_name": _benchmark_client_class(protocol_mode, kind),
+            "class_name": client_class,
             "args": {
                 "base_url": base_url or access["base_url"],
             },
         },
     }
-    if kind == "vllm-direct":
+    if kind == "vllm-direct" or use_vllm_client:
         entry["client_spec"]["args"]["vllm_model_name"] = access["request_model_name"]
     else:
         resolved_api_key = _resolve_api_key(access, api_key_value=api_key_value)
