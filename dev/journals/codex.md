@@ -738,3 +738,15 @@ I fixed this where it belongs: in HELM’s `vllm_client.py`. The constructor now
 
 Reusable takeaway:
 1. When a transport-specific HELM client subclasses a generic OpenAI client, constructor arguments need to be split into “HELM-local state” and “SDK constructor kwargs” deliberately, or benchmark-facing fixes can fail for reasons that have nothing to do with the benchmark itself.
+
+## 2026-04-19 21:22:48 +0000
+Summary of user intent: inspect the remaining Vicuna context-window failures after the `VLLMClient` switch and make the smallest honest benchmark/export-side fix without changing serving behavior or undoing the client-layer correction.
+
+Model/configuration: Codex on GPT-5.4 (medium reasoning effort) operating as a coding agent in the shared workspace.
+
+This one turned out to be a classic “exact exported limit is too optimistic” problem. The Vicuna KubeAI deployment is now exported with the correct HELM client (`VLLMClient`) and the correct raw model budget (`max_sequence_length: 2048`, `max_sequence_and_generated_tokens_length: 2048`), but the live failures showed that the runtime effectively needs a little extra headroom beyond HELM’s nominal prompt-truncation accounting. The evidence was unusually clean: the failing requests were over by exactly one token after subtracting `max_tokens`, which points to a tokenizer/accounting mismatch at the boundary rather than a real serving capacity change.
+
+I kept this fix entirely in `helm_audit` and made it profile-specific. The serving contract should continue to report the serving truth (`max_model_len=2048`), while the benchmark export layer is allowed to be a bit more conservative when that is what produces honest and reliable execution. I chose a small safety margin of 8 tokens for the `vicuna-7b-v1-3-no-chat-template` entry in the `small_models_kubeai_overnight` preset, lowering only the exported `max_sequence_and_generated_tokens_length` to `2040` while leaving `max_sequence_length` unchanged at `2048`. That is intentionally modest: enough to absorb the observed off-by-one/runtime-reserved-token mismatch, but not so aggressive that it meaningfully changes benchmark semantics or hides a larger incompatibility.
+
+Reusable takeaway:
+1. When the serving runtime and the benchmark-side window service disagree by a token or two, the smallest honest fix is often a profile-specific export margin, not a global truncation rule and not a serving-side lie about the true model limit.

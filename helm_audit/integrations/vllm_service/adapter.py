@@ -89,6 +89,9 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
                 "model_deployment_name": "kubeai/vicuna-7b-v1-3-no-chat-template-local",
                 "helm_model_name": "lmsys/vicuna-7b-v1.3",
                 "helm_tokenizer_name": "hf-internal-testing/llama-tokenizer",
+                # Keep a small headroom margin for the live vLLM/Vicuna path, which
+                # appears to need a few reserved tokens beyond HELM's nominal budget.
+                "helm_max_sequence_and_generated_tokens_length": 2040,
             },
         ],
         "smoke_manifest": {
@@ -217,6 +220,7 @@ def _model_deployment_entry(
     *,
     helm_model_name: str | None = None,
     helm_tokenizer_name: str | None = None,
+    helm_max_sequence_and_generated_tokens_length: int | None = None,
     access_kind: str | None = None,
     model_deployment_name: str | None = None,
     base_url: str | None = None,
@@ -238,7 +242,9 @@ def _model_deployment_entry(
         "tokenizer_name": helm_tokenizer_name or service["model"]["tokenizer_name"],
         "max_sequence_length": int(service["runtime"]["max_model_len"]),
         # vLLM-style servers enforce the total prompt+generation budget against max-model-len.
-        "max_sequence_and_generated_tokens_length": int(service["runtime"]["max_model_len"]),
+        "max_sequence_and_generated_tokens_length": int(
+            helm_max_sequence_and_generated_tokens_length or service["runtime"]["max_model_len"]
+        ),
         "client_spec": {
             "class_name": client_class,
             "args": {
@@ -356,6 +362,7 @@ def materialize_benchmark_bundle(
                 contract,
                 helm_model_name=spec.get("helm_model_name"),
                 helm_tokenizer_name=spec.get("helm_tokenizer_name"),
+                helm_max_sequence_and_generated_tokens_length=spec.get("helm_max_sequence_and_generated_tokens_length"),
                 access_kind=selected_kind,
                 model_deployment_name=spec.get("model_deployment_name"),
                 base_url=base_url,

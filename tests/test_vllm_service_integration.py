@@ -185,7 +185,8 @@ def test_export_bundle_supports_multi_model_kubeai_overnight_preset(tmp_path: Pa
     assert deployments[1]["client_spec"]["class_name"].endswith("VLLMClient")
     assert deployments[1]["client_spec"]["args"]["vllm_model_name"] == "vicuna-7b-v1-3-no-chat-template"
     assert "api_key" not in deployments[1]["client_spec"]["args"]
-    assert deployments[1]["max_sequence_and_generated_tokens_length"] == 2048
+    assert deployments[1]["max_sequence_length"] == 2048
+    assert deployments[1]["max_sequence_and_generated_tokens_length"] == 2040
 
     bundle = yaml.safe_load(result["bundle_path"].read_text())
     assert [item["public_name"] for item in bundle["profiles"]] == [
