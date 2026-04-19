@@ -2,9 +2,12 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/reproduce/small_models_kubeai/_lib.sh"
+
 SERVICE_ROOT="${VLLM_SERVICE_ROOT:-$ROOT/submodules/vllm_service}"
-KUBEAI_NAMESPACE="${KUBEAI_NAMESPACE:-kubeai}"
+KUBEAI_NAMESPACE="$(resolve_kubeai_namespace)"
 PYTHON_BIN="${VLLM_SERVICE_PYTHON:-python3}"
+APPLY_KUBEAI_TONIGHT_PATCHES="${APPLY_KUBEAI_TONIGHT_PATCHES:-1}"
 
 cd "$SERVICE_ROOT"
 
@@ -19,6 +22,17 @@ cd "$SERVICE_ROOT"
 # Apply Vicuna as an additional KubeAI Model. `kubectl apply` is additive here,
 # so the earlier Qwen Model remains live on the cluster.
 "$PYTHON_BIN" manage.py switch vicuna-7b-v1-3-no-chat-template --apply --namespace "$KUBEAI_NAMESPACE"
+
+# Tonight's cluster expects the explicit `:1` resource profile form and benefits
+# from eager scheduling rather than scale-from-zero.
+if [[ "$APPLY_KUBEAI_TONIGHT_PATCHES" == "1" ]]; then
+  echo "Applying explicit tonight patches to both KubeAI Model objects"
+  kubectl -n "$KUBEAI_NAMESPACE" patch model qwen2-5-7b-instruct-turbo-default --type merge \
+    -p '{"spec":{"resourceProfile":"gpu-single-default:1","minReplicas":1}}'
+  kubectl -n "$KUBEAI_NAMESPACE" patch model vicuna-7b-v1-3-no-chat-template --type merge \
+    -p '{"spec":{"resourceProfile":"gpu-single-default:1","minReplicas":1}}'
+  kubectl -n "$KUBEAI_NAMESPACE" get model qwen2-5-7b-instruct-turbo-default vicuna-7b-v1-3-no-chat-template -o yaml
+fi
 
 # Restore the default active profile locally without disturbing the already
 # applied KubeAI Models so future one-model commands stay unsurprising.

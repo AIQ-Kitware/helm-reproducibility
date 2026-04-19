@@ -53,3 +53,29 @@ The `small_models_kubeai/` runbook assumes:
 - the KubeAI chart is already installed and reachable at `KUBEAI_BASE_URL` (default `http://127.0.0.1:8000/openai/v1`, typically via `kubectl port-forward`)
 - the `vllm_service` repo is configured for the same KubeAI namespace and can `switch --apply` the `qwen2-5-7b-instruct-turbo-default` and `vicuna-7b-v1-3-no-chat-template` profiles
 - applying the second profile is additive on the cluster, so both KubeAI `Model` objects remain resident for the combined overnight manifest
+- on `aiq-gpu`, the KubeAI Helm release currently lives in the `default` namespace, so these scripts default `KUBEAI_NAMESPACE=default`
+- tonight's runbook also applies an explicit post-deploy patch so both model CRs use `resourceProfile=gpu-single-default:1` and `minReplicas=1`
+
+Exact `aiq-gpu` flow:
+
+```bash
+cd /home/joncrall/code/helm_audit
+export KUBEAI_NAMESPACE=default
+export KUBEAI_BASE_URL=http://127.0.0.1:8000/openai/v1
+
+bash reproduce/small_models_kubeai/00_check_env.sh
+bash reproduce/small_models_kubeai/05_deploy_models.sh
+bash reproduce/small_models_kubeai/15_wait_ready.sh
+bash reproduce/small_models_kubeai/10_write_bundle.sh
+bash reproduce/small_models_kubeai/30_run_smoke.sh
+bash reproduce/small_models_kubeai/50_run_full.sh
+```
+
+One-command overnight entrypoint:
+
+```bash
+cd /home/joncrall/code/helm_audit
+export KUBEAI_NAMESPACE=default
+export KUBEAI_BASE_URL=http://127.0.0.1:8000/openai/v1
+bash reproduce/small_models_kubeai/99_run_tonight.sh
+```

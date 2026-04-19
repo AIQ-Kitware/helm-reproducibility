@@ -2,8 +2,10 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+source "$ROOT/reproduce/small_models_kubeai/_lib.sh"
+
 SERVICE_ROOT="${VLLM_SERVICE_ROOT:-$ROOT/submodules/vllm_service}"
-KUBEAI_NAMESPACE="${KUBEAI_NAMESPACE:-kubeai}"
+KUBEAI_NAMESPACE="$(resolve_kubeai_namespace)"
 KUBEAI_BASE_URL="${KUBEAI_BASE_URL:-http://127.0.0.1:8000/openai/v1}"
 
 echo "ROOT=$ROOT"
