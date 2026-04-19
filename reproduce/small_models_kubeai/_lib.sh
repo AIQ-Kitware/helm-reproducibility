@@ -26,6 +26,17 @@ print_kubeai_diagnostics() {
   kubectl -n "$namespace" get model -o wide || true
   echo
 
+  echo "=== kubectl -n $namespace get model -o yaml ==="
+  kubectl -n "$namespace" get model -o yaml || true
+  echo
+
+  echo "=== effective KubeAI model args ==="
+  for model in qwen2-5-7b-instruct-turbo-default vicuna-7b-v1-3-no-chat-template; do
+    echo "--- $model"
+    kubectl -n "$namespace" get model "$model" -o jsonpath='{range .spec.args[*]}{.}{"\n"}{end}' || true
+    echo
+  done
+
   echo "=== kubectl -n $namespace describe model qwen2-5-7b-instruct-turbo-default ==="
   kubectl -n "$namespace" describe model qwen2-5-7b-instruct-turbo-default || true
   echo
@@ -37,6 +48,17 @@ print_kubeai_diagnostics() {
   echo "=== kubectl -n $namespace get pods -o wide ==="
   kubectl -n "$namespace" get pods -o wide || true
   echo
+
+  local serving_pods
+  serving_pods="$(kubectl -n "$namespace" get pods --no-headers 2>/dev/null | awk '/qwen2-5-7b-instruct-turbo-default|vicuna-7b-v1-3-no-chat-template/ {print $1}')"
+  if [[ -n "$serving_pods" ]]; then
+    local pod
+    for pod in $serving_pods; do
+      echo "=== kubectl -n $namespace logs $pod --tail=200 ==="
+      kubectl -n "$namespace" logs "$pod" --tail=200 || true
+      echo
+    done
+  fi
 
   local kubeai_pods
   kubeai_pods="$(kubectl -n "$namespace" get pods --no-headers 2>/dev/null | awk '/kubeai/ {print $1}')"
@@ -55,6 +77,53 @@ print_kubeai_diagnostics() {
 
   echo "=== kubectl -n $namespace get events --sort-by=.metadata.creationTimestamp | tail -n 40 ==="
   kubectl -n "$namespace" get events --sort-by=.metadata.creationTimestamp | tail -n 40 || true
+}
+
+patch_model_for_tonight() {
+  local namespace="$1"
+  local model_name="$2"
+  local public_served_name="$3"
+  local tmp
+  tmp="$(mktemp)"
+  kubectl -n "$namespace" get model "$model_name" -o json >"$tmp"
+  python3 - "$tmp" "$public_served_name" <<'PY'
+import json
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+public_name = sys.argv[2]
+doc = json.loads(path.read_text())
+spec = doc.setdefault("spec", {})
+args = list(spec.get("args") or [])
+rewritten = []
+seen = False
+for arg in args:
+    if isinstance(arg, str) and arg.startswith("--served-model-name="):
+        rewritten.append(f"--served-model-name={public_name}")
+        seen = True
+    else:
+        rewritten.append(arg)
+if not seen:
+    rewritten.insert(0, f"--served-model-name={public_name}")
+spec["args"] = rewritten
+spec["resourceProfile"] = "gpu-single-default:1"
+spec["minReplicas"] = 1
+doc.pop("status", None)
+metadata = doc.setdefault("metadata", {})
+for field in (
+    "creationTimestamp",
+    "generation",
+    "resourceVersion",
+    "uid",
+    "managedFields",
+    "selfLink",
+):
+    metadata.pop(field, None)
+path.write_text(json.dumps(doc))
+PY
+  kubectl -n "$namespace" apply -f "$tmp"
+  rm -f "$tmp"
 }
 
 wait_for_model_objects() {
