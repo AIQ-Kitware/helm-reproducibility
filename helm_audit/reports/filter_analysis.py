@@ -881,6 +881,7 @@ def emit_filter_report_artifacts(
         interactive_dpath=interactive_dpath,
         static_dpath=static_dpath,
     )
+    write_latest_alias(Path(outputs['filter_cardinality_txt']), report_dpath, 'filter_cardinality_summary.latest.txt')
     return outputs
 
 
