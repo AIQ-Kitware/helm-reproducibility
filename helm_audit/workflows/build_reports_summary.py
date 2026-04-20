@@ -1097,26 +1097,18 @@ def _build_high_level_readme(
 
 def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: Path) -> None:
     write_latest_alias(level_001 / "README.latest.txt", summary_root, "README.latest.txt")
+    write_latest_alias(level_001 / "story_index.latest.txt", summary_root, "story_index.latest.txt")
     write_latest_alias(level_001, summary_root, "level_001.latest")
     write_latest_alias(level_002, summary_root, "level_002.latest")
     level_001_interactive = level_001 / "interactive"
     level_001_static = level_001 / "static"
     level_002_static = level_002 / "static"
     for src_name in [
-        "sankey_operational.latest.html",
-        "sankey_filter_to_attempt.latest.html",
-        "sankey_attempted_to_repro.latest.html",
-        "sankey_attempted_to_repro_tol001.latest.html",
-        "sankey_attempted_to_repro_tol010.latest.html",
-        "sankey_attempted_to_repro_tol050.latest.html",
-        "sankey_end_to_end.latest.html",
-        "sankey_end_to_end_tol001.latest.html",
-        "sankey_end_to_end_tol010.latest.html",
-        "sankey_end_to_end_tol050.latest.html",
-        "sankey_reproducibility.latest.html",
-        "sankey_repro_tol001.latest.html",
-        "sankey_repro_tol010.latest.html",
-        "sankey_repro_tol050.latest.html",
+        "sankey_s01_operational.latest.html",
+        "sankey_s02_filter_to_attempt.latest.html",
+        "sankey_s03_attempted_to_repro.latest.html",
+        "sankey_s04_end_to_end.latest.html",
+        "sankey_s05_reproducibility.latest.html",
         "sankey_repro_by_metric.latest.html",
         "benchmark_status.latest.html",
         "reproducibility_buckets.latest.html",
@@ -1130,34 +1122,16 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
     for src_name in [
-        "sankey_operational.latest.jpg",
-        "sankey_operational.latest.txt",
-        "sankey_filter_to_attempt.latest.jpg",
-        "sankey_filter_to_attempt.latest.txt",
-        "sankey_attempted_to_repro.latest.jpg",
-        "sankey_attempted_to_repro.latest.txt",
-        "sankey_attempted_to_repro_tol001.latest.jpg",
-        "sankey_attempted_to_repro_tol001.latest.txt",
-        "sankey_attempted_to_repro_tol010.latest.jpg",
-        "sankey_attempted_to_repro_tol010.latest.txt",
-        "sankey_attempted_to_repro_tol050.latest.jpg",
-        "sankey_attempted_to_repro_tol050.latest.txt",
-        "sankey_end_to_end.latest.jpg",
-        "sankey_end_to_end.latest.txt",
-        "sankey_end_to_end_tol001.latest.jpg",
-        "sankey_end_to_end_tol001.latest.txt",
-        "sankey_end_to_end_tol010.latest.jpg",
-        "sankey_end_to_end_tol010.latest.txt",
-        "sankey_end_to_end_tol050.latest.jpg",
-        "sankey_end_to_end_tol050.latest.txt",
-        "sankey_reproducibility.latest.jpg",
-        "sankey_reproducibility.latest.txt",
-        "sankey_repro_tol001.latest.jpg",
-        "sankey_repro_tol001.latest.txt",
-        "sankey_repro_tol010.latest.jpg",
-        "sankey_repro_tol010.latest.txt",
-        "sankey_repro_tol050.latest.jpg",
-        "sankey_repro_tol050.latest.txt",
+        "sankey_s01_operational.latest.jpg",
+        "sankey_s01_operational.latest.txt",
+        "sankey_s02_filter_to_attempt.latest.jpg",
+        "sankey_s02_filter_to_attempt.latest.txt",
+        "sankey_s03_attempted_to_repro.latest.jpg",
+        "sankey_s03_attempted_to_repro.latest.txt",
+        "sankey_s04_end_to_end.latest.jpg",
+        "sankey_s04_end_to_end.latest.txt",
+        "sankey_s05_reproducibility.latest.jpg",
+        "sankey_s05_reproducibility.latest.txt",
         "sankey_repro_by_metric.latest.jpg",
         "sankey_repro_by_metric.latest.txt",
         "benchmark_status.latest.jpg",
@@ -1922,6 +1896,13 @@ def _render_scope_summary(
     for d in [level_001_machine, level_001_interactive, level_001_static, level_002_machine, level_002_static]:
         d.mkdir(parents=True, exist_ok=True)
 
+    alt_tol_dpath = level_001 / "alt_tolerances"
+    alt_tol_machine = alt_tol_dpath / "machine"
+    alt_tol_interactive = alt_tol_dpath / "interactive"
+    alt_tol_static = alt_tol_dpath / "static"
+    for d in [alt_tol_machine, alt_tol_interactive, alt_tol_static]:
+        d.mkdir(parents=True, exist_ok=True)
+
     repro_keyed = {
         (str(row.get("experiment_name")), str(row.get("run_entry"))): row
         for row in repro_rows
@@ -2077,7 +2058,7 @@ def _render_scope_summary(
             rows=operational_sankey_rows,
             report_dpath=level_001,
             stamp=generated_utc,
-            kind="operational",
+            kind="s01_operational",
             title=f"Executive Operational Summary: {scope_title}",
             stage_defs={
                 "group": ["benchmark family or suite"],
@@ -2101,7 +2082,7 @@ def _render_scope_summary(
             rows=repro_sankey_rows,
             report_dpath=level_001,
             stamp=generated_utc,
-            kind="reproducibility",
+            kind="s05_reproducibility",
             title=f"Reproducibility Summary (instance-level, abs_tol=0 exact match): {scope_title}",
             stage_defs={
                 "group": ["benchmark family or suite"],
@@ -2149,39 +2130,39 @@ def _render_scope_summary(
         }
         repro_tol001_art = emit_sankey_artifacts(
             rows=repro_tol001_rows,
-            report_dpath=level_001,
+            report_dpath=alt_tol_dpath,
             stamp=generated_utc,
             kind="repro_tol001",
             title=f"Reproducibility at abs_tol=0.001: {scope_title}",
             stage_defs=_repro_stage_defs,
             stage_order=_repro_stage_order,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
+            machine_dpath=alt_tol_machine,
+            interactive_dpath=alt_tol_interactive,
+            static_dpath=alt_tol_static,
         )
         repro_tol010_art = emit_sankey_artifacts(
             rows=repro_tol010_rows,
-            report_dpath=level_001,
+            report_dpath=alt_tol_dpath,
             stamp=generated_utc,
             kind="repro_tol010",
             title=f"Reproducibility at abs_tol=0.010: {scope_title}",
             stage_defs=_repro_stage_defs,
             stage_order=_repro_stage_order,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
+            machine_dpath=alt_tol_machine,
+            interactive_dpath=alt_tol_interactive,
+            static_dpath=alt_tol_static,
         )
         repro_tol050_art = emit_sankey_artifacts(
             rows=repro_tol050_rows,
-            report_dpath=level_001,
+            report_dpath=alt_tol_dpath,
             stamp=generated_utc,
             kind="repro_tol050",
             title=f"Reproducibility at abs_tol=0.050: {scope_title}",
             stage_defs=_repro_stage_defs,
             stage_order=_repro_stage_order,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
+            machine_dpath=alt_tol_machine,
+            interactive_dpath=alt_tol_interactive,
+            static_dpath=alt_tol_static,
         )
         repro_metric_art = emit_sankey_artifacts(
             rows=metric_sankey_rows,
@@ -2211,7 +2192,7 @@ def _render_scope_summary(
             rows=filter_to_attempt_rows,
             report_dpath=level_001,
             stamp=generated_utc,
-            kind="filter_to_attempt",
+            kind="s02_filter_to_attempt",
             title=f"Filter Funnel to Attempted Runs: {scope_title}",
             stage_defs=filter_to_attempt_stage_defs,
             stage_order=[],
@@ -2226,7 +2207,7 @@ def _render_scope_summary(
             rows=attempted_to_repro_exact_rows,
             report_dpath=level_001,
             stamp=generated_utc,
-            kind="attempted_to_repro",
+            kind="s03_attempted_to_repro",
             title=f"Attempted Runs to Reproducibility at abs_tol=0: {scope_title}",
             stage_defs=attempted_to_repro_stage_defs,
             stage_order=[],
@@ -2238,7 +2219,7 @@ def _render_scope_summary(
         ) if attempted_to_repro_exact_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
         attempted_to_repro_tol001_art = emit_sankey_artifacts(
             rows=attempted_to_repro_tol001_rows,
-            report_dpath=level_001,
+            report_dpath=alt_tol_dpath,
             stamp=generated_utc,
             kind="attempted_to_repro_tol001",
             title=f"Attempted Runs to Reproducibility at abs_tol=0.001: {scope_title}",
@@ -2246,13 +2227,13 @@ def _render_scope_summary(
             stage_order=[],
             root=attempted_to_repro_root,
             explicit_stage_names=attempted_to_repro_stage_names,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
+            machine_dpath=alt_tol_machine,
+            interactive_dpath=alt_tol_interactive,
+            static_dpath=alt_tol_static,
         ) if attempted_to_repro_tol001_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
         attempted_to_repro_tol010_art = emit_sankey_artifacts(
             rows=attempted_to_repro_tol010_rows,
-            report_dpath=level_001,
+            report_dpath=alt_tol_dpath,
             stamp=generated_utc,
             kind="attempted_to_repro_tol010",
             title=f"Attempted Runs to Reproducibility at abs_tol=0.010: {scope_title}",
@@ -2260,13 +2241,13 @@ def _render_scope_summary(
             stage_order=[],
             root=attempted_to_repro_root,
             explicit_stage_names=attempted_to_repro_stage_names,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
+            machine_dpath=alt_tol_machine,
+            interactive_dpath=alt_tol_interactive,
+            static_dpath=alt_tol_static,
         ) if attempted_to_repro_tol010_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
         attempted_to_repro_tol050_art = emit_sankey_artifacts(
             rows=attempted_to_repro_tol050_rows,
-            report_dpath=level_001,
+            report_dpath=alt_tol_dpath,
             stamp=generated_utc,
             kind="attempted_to_repro_tol050",
             title=f"Attempted Runs to Reproducibility at abs_tol=0.050: {scope_title}",
@@ -2274,16 +2255,16 @@ def _render_scope_summary(
             stage_order=[],
             root=attempted_to_repro_root,
             explicit_stage_names=attempted_to_repro_stage_names,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
+            machine_dpath=alt_tol_machine,
+            interactive_dpath=alt_tol_interactive,
+            static_dpath=alt_tol_static,
         ) if attempted_to_repro_tol050_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no attempted rows available"}
         end_to_end_root, end_to_end_stage_names, end_to_end_stage_defs = _build_end_to_end_funnel_root()
         end_to_end_art = emit_sankey_artifacts(
             rows=end_to_end_exact_rows,
             report_dpath=level_001,
             stamp=generated_utc,
-            kind="end_to_end",
+            kind="s04_end_to_end",
             title=f"End-to-End Coverage and Reproducibility at abs_tol=0: {scope_title}",
             stage_defs=end_to_end_stage_defs,
             stage_order=[],
@@ -2295,7 +2276,7 @@ def _render_scope_summary(
         ) if end_to_end_exact_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
         end_to_end_tol001_art = emit_sankey_artifacts(
             rows=end_to_end_tol001_rows,
-            report_dpath=level_001,
+            report_dpath=alt_tol_dpath,
             stamp=generated_utc,
             kind="end_to_end_tol001",
             title=f"End-to-End Coverage and Reproducibility at abs_tol=0.001: {scope_title}",
@@ -2303,13 +2284,13 @@ def _render_scope_summary(
             stage_order=[],
             root=end_to_end_root,
             explicit_stage_names=end_to_end_stage_names,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
+            machine_dpath=alt_tol_machine,
+            interactive_dpath=alt_tol_interactive,
+            static_dpath=alt_tol_static,
         ) if end_to_end_tol001_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
         end_to_end_tol010_art = emit_sankey_artifacts(
             rows=end_to_end_tol010_rows,
-            report_dpath=level_001,
+            report_dpath=alt_tol_dpath,
             stamp=generated_utc,
             kind="end_to_end_tol010",
             title=f"End-to-End Coverage and Reproducibility at abs_tol=0.010: {scope_title}",
@@ -2317,13 +2298,13 @@ def _render_scope_summary(
             stage_order=[],
             root=end_to_end_root,
             explicit_stage_names=end_to_end_stage_names,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
+            machine_dpath=alt_tol_machine,
+            interactive_dpath=alt_tol_interactive,
+            static_dpath=alt_tol_static,
         ) if end_to_end_tol010_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
         end_to_end_tol050_art = emit_sankey_artifacts(
             rows=end_to_end_tol050_rows,
-            report_dpath=level_001,
+            report_dpath=alt_tol_dpath,
             stamp=generated_utc,
             kind="end_to_end_tol050",
             title=f"End-to-End Coverage and Reproducibility at abs_tol=0.050: {scope_title}",
@@ -2331,9 +2312,9 @@ def _render_scope_summary(
             stage_order=[],
             root=end_to_end_root,
             explicit_stage_names=end_to_end_stage_names,
-            machine_dpath=level_001_machine,
-            interactive_dpath=level_001_interactive,
-            static_dpath=level_001_static,
+            machine_dpath=alt_tol_machine,
+            interactive_dpath=alt_tol_interactive,
+            static_dpath=alt_tol_static,
         ) if end_to_end_tol050_rows else {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": "no filter inventory rows available"}
     else:
         operational_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
@@ -2583,6 +2564,44 @@ def _render_scope_summary(
             level_002=level_002,
             max_items_per_breakdown=max_items_per_breakdown,
         )
+
+    story_index_lines = [
+        "Story Index — Canonical Reading Order",
+        "======================================",
+        f"Generated: {generated_utc}",
+        f"Scope: {scope_title}",
+        "",
+        "Read the five sankeys below in order to follow the full reproducibility story.",
+        "",
+        "s01 — Executive Operational Summary",
+        "  All attempted runs: benchmark group → lifecycle status → outcome/failure reason.",
+        "  File: sankey_s01_operational.latest.{html,jpg,txt}",
+        "",
+        "s02 — Filter Funnel to Attempted Runs",
+        "  How many eligible run-specs were actually attempted, and why others were skipped.",
+        "  File: sankey_s02_filter_to_attempt.latest.{html,jpg,txt}",
+        "",
+        "s03 — Attempted Runs to Reproducibility (exact match)",
+        "  Attempted runs broken down by local reproducibility at abs_tol=0.",
+        "  File: sankey_s03_attempted_to_repro.latest.{html,jpg,txt}",
+        "",
+        "s04 — End-to-End Coverage and Reproducibility",
+        "  Full funnel from all discovered run-specs through to reproducible results.",
+        "  File: sankey_s04_end_to_end.latest.{html,jpg,txt}",
+        "",
+        "s05 — Detailed Reproducibility Breakdown",
+        "  Group → local repeatability → official-vs-local agreement → diagnosis.",
+        "  File: sankey_s05_reproducibility.latest.{html,jpg,txt}",
+        "",
+        "Supplementary",
+        "  sankey_repro_by_metric: per-metric drift (max |official - local| across runs)",
+        "  alt_tolerances/: tolerance sweep variants for s03, s04, s05",
+        "  agreement_curve.latest.html: agreement-rate vs tolerance curve",
+        "  coverage_matrix.latest.html: model × benchmark reproducibility heat-map",
+    ]
+    story_index_fpath = level_001 / f"story_index_{generated_utc}.txt"
+    _write_text(story_index_lines, story_index_fpath)
+    write_latest_alias(story_index_fpath, level_001, "story_index.latest.txt")
 
     _write_scope_level_aliases(level_001, level_002, summary_root)
 

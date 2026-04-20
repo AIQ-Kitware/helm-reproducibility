@@ -229,3 +229,37 @@ cat /data/crfm-helm-audit-store/analysis/experiments/audit-small-models-kubeai-o
 # Compat symlink (backward compat):
 ls -la reports/core-run-analysis/experiment-analysis-audit-small-models-kubeai-overnight
 ```
+
+## 2026-04-20 (session continuation)
+
+Summary of user intent: implement Stage 1 of the report surface improvements in `build_reports_summary.py` — rename the 5 canonical sankey `kind=` strings to carry story-arc position prefixes, move 9 tolerance-variant sankeys to an `alt_tolerances/` subdirectory, and add a `story_index.latest.txt` that gives explicit reading order.
+
+Model and configuration: claude-sonnet-4-6, Claude Code CLI (VSCode extension).
+
+**Canonical kind= renames**
+
+The root problem was that `level_001/interactive/` held 15 sankey HTML files with names like `sankey_operational.latest.html`, `sankey_filter_to_attempt.latest.html`, `sankey_end_to_end.latest.html`, etc., with no signal about which to read first or why. A reader opening the directory had to already know the story to navigate it.
+
+The fix: five canonical story-arc sankeys now carry an `s0N_` prefix reflecting their reading order:
+- `operational` → `s01_operational` (executive view: all runs, benchmark → lifecycle → outcome)
+- `filter_to_attempt` → `s02_filter_to_attempt` (eligible run-specs → actually attempted)
+- `attempted_to_repro` → `s03_attempted_to_repro` (attempted → reproducible at exact match)
+- `end_to_end` → `s04_end_to_end` (full funnel: discovered → reproducible)
+- `reproducibility` → `s05_reproducibility` (detailed group → repeatability → agreement → diagnosis)
+
+This changes filenames in `.history/` subdirs and `.latest.*` alias names everywhere they appear, so it's a clean break — no partial compatibility issues since the `.latest.*` aliases are what external callers use.
+
+**Tolerance variants moved to alt_tolerances/**
+
+Nine tolerance-sweep sankeys (`repro_tol001/010/050`, `attempted_to_repro_tol001/010/050`, `end_to_end_tol001/010/050`) now emit into `level_001/alt_tolerances/{machine,interactive,static}/` instead of `level_001/{machine,interactive,static}/`. The variables `alt_tol_dpath`, `alt_tol_machine`, `alt_tol_interactive`, `alt_tol_static` are created alongside the other level dirs (line ~1923). The tolerance variants are still accessible; they're just not cluttering the main reading surface. They remain listed in the `manifest` dict for programmatic access.
+
+The alternative considered was keeping them in level_001 but with an `alt_` kind prefix (`alt_repro_tol001`, etc.) — rejected because that still clutters the directory listing. Directory-based separation is cleaner: a reader scanning `ls level_001/interactive/` now sees 8 HTMLs (5 story + metric + agreement_curve + coverage_matrix) rather than 17.
+
+**story_index.latest.txt**
+
+Added after all artifacts are written, before `_write_scope_level_aliases`. The file explicitly lists s01–s05 with one-line descriptions and the filename pattern for each. Also lists supplementary artifacts (`repro_by_metric`, `alt_tolerances/`, `agreement_curve`, `coverage_matrix`). Aliased to both `level_001/story_index.latest.txt` and the summary root via `_write_scope_level_aliases`.
+
+Design takeaways:
+1. Prefixing with `s0N_` costs nothing in code complexity and creates a self-documenting directory listing. The "N" directly answers "what order should I read these in?"
+2. Move supporting artifacts to subdirs rather than prefixing them — the directory becomes the namespace, not the filename.
+3. A plain text reading-order file is the cheapest possible navigation aid and survives file system inspection better than any README embedded in an HTML file.
