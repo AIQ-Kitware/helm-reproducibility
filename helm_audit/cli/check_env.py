@@ -5,6 +5,7 @@ import importlib.util
 import shutil
 
 from helm_audit.infra.env import load_env
+from helm_audit.infra.logging import setup_cli_logging
 from helm_audit.infra.plotly_env import has_plotly_static_dependencies
 
 
@@ -23,6 +24,7 @@ def main(argv: list[str] | None = None) -> None:
         help="Only validate plotly/kaleido/chrome static rendering dependencies.",
     )
     args = parser.parse_args(argv)
+    setup_cli_logging()
 
     if args.plotly_static_only:
         ok, missing = has_plotly_static_dependencies()

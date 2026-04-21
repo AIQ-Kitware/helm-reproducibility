@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from helm_audit.infra.logging import setup_cli_logging
 from helm_audit.workflows.compare_batch import collect_historic_candidates
 
 
@@ -327,6 +328,7 @@ def _format_report(summary: dict[str, Any], *, top_experiments: int) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser(description="Summarize the current HELM reproduction portfolio.")
     parser.add_argument("--run-inventory-csv", default=None)
     parser.add_argument("--summary-history-root", default=str(DEFAULT_SUMMARY_HISTORY_ROOT))

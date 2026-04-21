@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+
+from helm_audit.infra.logging import setup_cli_logging
 import fnmatch
 import math
 from pathlib import Path
@@ -149,6 +151,7 @@ def _build_manifest(
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", required=True)
     parser.add_argument("--selection-output", default=None)
@@ -271,4 +274,5 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    setup_cli_logging()
     main()

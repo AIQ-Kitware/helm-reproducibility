@@ -15,6 +15,7 @@ from loguru import logger
 
 from helm_audit.reports.aggregate import _find_curve_value, _find_pair
 from helm_audit.infra.api import audit_root, default_index_root
+from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.utils.numeric import nested_get
 from helm_audit.infra.fs_publish import symlink_to, write_latest_alias
 from helm_audit.infra.paths import experiment_analysis_dpath
@@ -139,6 +140,7 @@ def _benchmark_completion_summary(rows: list[dict[str, Any]]) -> list[dict[str, 
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument('--experiment-name', required=True)
     parser.add_argument('--index-fpath', default=None)
@@ -322,9 +324,9 @@ def main(argv: list[str] | None = None) -> None:
         'rows': summary_rows,
     }
     json_fpath.write_text(json.dumps(payload, indent=2))
-    logger.debug(f'Write to: {json_fpath}')
+    logger.debug(f'Write to: {rich_link(json_fpath)}')
     table.to_csv(csv_fpath, index=False)
-    logger.debug(f'Write to: {csv_fpath}')
+    logger.debug(f'Write to: {rich_link(csv_fpath)}')
 
     lines = []
     lines.append('Experiment Analysis Summary')
@@ -394,7 +396,7 @@ def main(argv: list[str] | None = None) -> None:
         lines.append(f"    official_runlevel_p90: {row['official_runlevel_p90']}")
         lines.append(f"    official_runlevel_max: {row['official_runlevel_max']}")
     txt_fpath.write_text('\n'.join(lines) + '\n')
-    logger.debug(f'Write to: {txt_fpath}')
+    logger.debug(f'Write to: {rich_link(txt_fpath)}')
 
     write_latest_alias(json_fpath, out_dpath, 'experiment_summary.latest.json')
     write_latest_alias(csv_fpath, out_dpath, 'experiment_summary.latest.csv')
@@ -442,7 +444,7 @@ def main(argv: list[str] | None = None) -> None:
         pass
     provenance_fpath = out_dpath / 'provenance.json'
     provenance_fpath.write_text(json.dumps(provenance, indent=2))
-    logger.debug(f'Write to: {provenance_fpath}')
+    logger.debug(f'Write to: {rich_link(provenance_fpath)}')
 
     # Publish backward-compat symlink at the legacy repo/reports location.
     compat_link = compat_core_run_reports_root() / f'experiment-analysis-{slugify(args.experiment_name)}'
@@ -450,13 +452,14 @@ def main(argv: list[str] | None = None) -> None:
         try:
             symlink_to(out_dpath, compat_link)
         except Exception as ex:
-            logger.warning(f'Could not create compat symlink {compat_link}: {ex}')
+            logger.warning(f'Could not create compat symlink {rich_link(compat_link)}: {ex}')
 
-    logger.info(f'Canonical analysis root: {out_dpath}')
-    logger.info(f'Wrote experiment summary json: {json_fpath}')
-    logger.info(f'Wrote experiment summary csv: {csv_fpath}')
-    logger.info(f'Wrote experiment summary txt: {txt_fpath}')
+    logger.info(f'Canonical analysis root: {rich_link(out_dpath)}')
+    logger.info(f'Wrote experiment summary json: {rich_link(json_fpath)}')
+    logger.info(f'Wrote experiment summary csv: {rich_link(csv_fpath)}')
+    logger.info(f'Wrote experiment summary txt: {rich_link(txt_fpath)}')
 
 
 if __name__ == '__main__':
+    setup_cli_logging()
     main()

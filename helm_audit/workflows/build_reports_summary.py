@@ -17,6 +17,7 @@ import kwutil
 from helm_audit.infra.api import audit_root, default_index_root, default_store_root
 from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
+from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.infra.paths import experiment_analysis_dpath
 from helm_audit.infra.report_layout import aggregate_summary_reports_root, compat_core_run_reports_root, core_run_reports_root, portable_repo_root_lines
 from helm_audit.model_registry import local_model_registry_by_name
@@ -3477,7 +3478,7 @@ def _write_reproduce_sh(
         cmd,
     ]
     fpath.write_text("\n".join(lines) + "\n")
-    logger.debug(f'Write to 💻: {fpath}')
+    logger.debug(f'Write to 💻: {rich_link(fpath)}')
     fpath.chmod(0o755)
 
 
@@ -4346,6 +4347,7 @@ def _render_scope_summary(
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument("--experiment-name", default=None)
     parser.add_argument("--index-fpath", default=None)
@@ -4410,8 +4412,9 @@ def main(argv: list[str] | None = None) -> None:
         breakdown_dims=list(args.breakdown_dims),
         max_items_per_breakdown=args.max_items_per_breakdown,
     )
-    logger.info(f"Wrote executive summary root: {scope_root}")
+    logger.info(f"Wrote executive summary root: {rich_link(scope_root)}")
 
 
 if __name__ == "__main__":
+    setup_cli_logging()
     main()

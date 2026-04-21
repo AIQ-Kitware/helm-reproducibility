@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from helm_audit.infra.paths import audit_store_root, reports_root
+from helm_audit.infra.logging import rich_link
 from loguru import logger
 
 
@@ -45,5 +46,5 @@ def write_reproduce_script(script_fpath: Path, lines: list[str]) -> Path:
     text = "\n".join(lines).rstrip() + "\n"
     script_fpath.write_text(text)
     script_fpath.chmod(0o755)
-    logger.debug(f'Write to: {script_fpath}')
+    logger.debug(f'Write to: {rich_link(script_fpath)}')
     return script_fpath

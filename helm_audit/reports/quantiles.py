@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+
+from helm_audit.infra.logging import setup_cli_logging
 import datetime as datetime_mod
 import json
 from pathlib import Path
@@ -146,6 +148,7 @@ def _build_text(report: dict[str, Any]) -> str:
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument('--left-run-a', required=True)
     parser.add_argument('--left-run-b', required=True)
@@ -178,4 +181,5 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == '__main__':
+    setup_cli_logging()
     main()

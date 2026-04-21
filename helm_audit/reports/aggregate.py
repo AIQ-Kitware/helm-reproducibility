@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+
+from helm_audit.infra.logging import setup_cli_logging
 import datetime as datetime_mod
 import glob
 import json
@@ -68,6 +70,7 @@ def _write_latest_alias(src: Path, latest_root: Path, latest_name: str) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument('--report-root', default=str(default_report_root()))
     parser.add_argument('--out-dpath', default=None)
@@ -173,4 +176,5 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == '__main__':
+    setup_cli_logging()
     main()

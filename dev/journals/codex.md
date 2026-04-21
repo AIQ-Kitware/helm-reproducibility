@@ -963,3 +963,22 @@ Design takeaways:
 1. When provenance already exists in upstream artifacts, index the real thing before designing fallback identities.
 2. Aggregate summaries should distinguish logical-result identity from attempt identity explicitly; otherwise multiplicity gets flattened into whatever grouping happened to be convenient first.
 3. If analysis reports consume selected attempts, preserve that selection provenance at report-build time so later aggregate summaries can stay precise instead of inferring from stale group membership.
+
+## 2026-04-21 15:13:11 +0000
+
+Summary of user intent: add a shared CLI logging setup for `helm_audit` so Rich markup can turn path output into clickable directory/file links, and provide a small helper to format those links consistently across the repo.
+
+Model and configuration: Codex GPT-5.4, `reasoning_effort=medium`, collaboration mode `Default`, danger-full-access filesystem, no approval prompts.
+
+This was a good case for a narrow infrastructure change with a visible UX payoff. The repo already had plenty of path-oriented `logger` calls, but they were fragmented across workflow modules, report builders, and CLI wrappers. I chose not to chase every print statement in the codebase into a single logging abstraction; instead I added one reusable infra helper, then wired the direct `main()` entry points that matter for end users. That keeps the patch small enough to trust while still making the default CLI experience materially better.
+
+The key design choice was to preserve the existing verbosity rather than “clean up” the logs. A lot of the code uses `logger.debug()` for write-path messages, and suppressing those by default would have changed behavior in a way that feels unrelated to the user’s goal. So the shared `setup_cli_logging()` defaults to `DEBUG` and routes Loguru through a Rich `Console(stderr=True)` sink, which keeps the existing signal while allowing markup like `[link=...]...[/link]` to render when the terminal supports it. I also made `rich_link()` accept both filesystem paths and URLs, because the repo prints both kinds of targets.
+
+I did hit one subtle risk: a few of the modules are not just libraries but actual `project.scripts` targets, so setup had to happen inside `main()` rather than only under `if __name__ == "__main__"`. I corrected that after the first pass so the installed commands will still pick up the Rich sink when invoked through entry points. The remaining tradeoff is that the repo still has some plain `print()` usage in a few CLI paths, so the UX is not perfectly uniform yet. I think that is acceptable for this change because the requested capability is now centralized and the highest-value logging paths are linked.
+
+I verified the touched Python files with `python -m compileall helm_audit` and ran a tiny runtime smoke test against `setup_cli_logging()` plus `rich_link(Path("/tmp"))`. The compile pass gave me confidence that the broad import edits are sound. The smoke test showed the sink working, even though the terminal in this environment does not visibly expose hyperlink styling in the captured output, which is expected.
+
+Design takeaways:
+1. If you want consistent CLI UX, centralize the sink first, then convert the most informative path logs to the new helper.
+2. Default logging level matters for compatibility; changing it can be a behavioral regression even when the code still “works.”
+3. For entry points that are both importable and executable, configure logging inside `main()` so direct script execution and wrapper invocation behave the same.

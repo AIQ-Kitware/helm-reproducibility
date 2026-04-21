@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+
+from helm_audit.infra.logging import setup_cli_logging
 import datetime as datetime_mod
 from pathlib import Path
 
@@ -76,6 +78,7 @@ def write_pair_samples(
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument('--run-a', required=True)
     parser.add_argument('--run-b', required=True)
@@ -101,4 +104,5 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == '__main__':
+    setup_cli_logging()
     main()

@@ -9,6 +9,7 @@ import kwutil
 
 from helm_audit.infra.fs_publish import history_publish_root, write_latest_alias
 from helm_audit.infra.plotly_env import configure_plotly_chrome
+from helm_audit.infra.logging import rich_link
 from helm_audit.utils import sankey_builder
 from loguru import logger
 
@@ -92,7 +93,7 @@ def emit_sankey_artifacts(
             key_lines.append(f"  {item}")
         key_lines.append("")
     key_fpath.write_text("\n".join(key_lines).rstrip() + "\n")
-    logger.debug(f'Write: {key_fpath}')
+    logger.debug(f'Write: {rich_link(key_fpath)}')
 
     html_out = None
     jpg_out = None
@@ -106,16 +107,16 @@ def emit_sankey_artifacts(
             configure_plotly_chrome()
             fig = graph.to_plotly(title=title)
             fig.write_html(str(html_fpath), include_plotlyjs="cdn")
-            logger.debug(f'Write 📊: {html_fpath}')
+            logger.debug(f'Write 📊: {rich_link(html_fpath)}')
             html_out = str(html_fpath)
             if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
                 try:
                     fig.write_image(str(jpg_fpath), scale=3.0)
                     jpg_out = str(jpg_fpath)
-                    logger.debug(f'Write 🖼: {jpg_out}')
+                    logger.debug(f'Write 🖼: {rich_link(jpg_out)}')
                     fig.write_image(str(png_fpath), scale=3.0)
                     png_out = str(png_fpath)
-                    logger.debug(f'Write 🖼: {png_out}')
+                    logger.debug(f'Write 🖼: {rich_link(png_out)}')
                 except Exception as ex:
                     plotly_error = f"unable to write sankey JPG/PNG: {ex!r}"
                     logger.warning(plotly_error)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+
+from helm_audit.infra.logging import setup_cli_logging
 import os
 from pathlib import Path
 
@@ -176,6 +178,7 @@ def build_vicuna_nochat_manifest(args: argparse.Namespace) -> dict:
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--manifest-type",
@@ -212,4 +215,5 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    setup_cli_logging()
     main()

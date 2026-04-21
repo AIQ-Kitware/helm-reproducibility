@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+
+from helm_audit.infra.logging import setup_cli_logging
 import csv
 import datetime as datetime_mod
 import json
@@ -148,6 +150,7 @@ def _write_selected_run_symlinks(report_dpath: Path, selection: dict[str, Any]) 
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument('--run-entry', required=True)
     parser.add_argument('--index-fpath', default=None)
@@ -303,4 +306,5 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == '__main__':
+    setup_cli_logging()
     main()

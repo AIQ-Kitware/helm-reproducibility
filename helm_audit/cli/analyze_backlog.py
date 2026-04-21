@@ -6,6 +6,7 @@ from collections import defaultdict
 from collections import Counter
 from pathlib import Path
 
+from helm_audit.infra.logging import setup_cli_logging
 from helm_audit.infra.report_layout import core_run_reports_root
 from helm_audit.workflows.rebuild_core_report import main as rebuild_core_report_main, slugify
 from helm_audit.workflows import build_reports_summary
@@ -47,6 +48,7 @@ def _dedupe_keep_order(values: list[str]) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser(
         description="Rebuild only the completed-but-not-analyzed run entries for one or more experiments."
     )

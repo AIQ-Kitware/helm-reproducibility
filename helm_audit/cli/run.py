@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 
+from helm_audit.infra.logging import setup_cli_logging
 from helm_audit.workflows.run_from_manifest import run_from_manifest
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser(
         description="Preview or execute a kwdagger experiment from a manifest."
     )

@@ -18,6 +18,7 @@ from helm_audit.infra.api import (
     experiment_result_dpath,
     load_manifest,
 )
+from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.helm.run_entries import (
     canonicalize_kv,
     discover_benchmark_output_dirs,
@@ -509,7 +510,7 @@ def write_summary_text(
             lines.append(
                 f"  [{item.get('severity', 'info')}] {item.get('label')}: {item.get('summary')}"
             )
-    logger.debug(f'Write to: {out_fpath}')
+    logger.debug(f'Write to: {rich_link(out_fpath)}')
     out_fpath.write_text("\n".join(lines) + "\n")
 
 
@@ -536,11 +537,12 @@ def write_management_summary(
     for item in findings:
         lines.append(f"- [{item.get('severity', 'info').upper()}] {item.get('summary')}")
 
-    logger.debug(f'Write to: {out_fpath}')
+    logger.debug(f'Write to: {rich_link(out_fpath)}')
     out_fpath.write_text("\n".join(lines) + "\n")
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", required=True)
     parser.add_argument("--results-dpath", default=None)
@@ -755,4 +757,5 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == "__main__":
+    setup_cli_logging()
     main()

@@ -15,6 +15,7 @@ import kwutil
 from helm_audit.cli.index_historic_helm_runs import CLOSED_JUDGE_REQUIRED_REASON
 from helm_audit.infra.api import audit_root
 from helm_audit.infra.fs_publish import history_publish_root, write_latest_alias
+from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.infra.report_layout import filtering_reports_root, portable_repo_root_lines, write_reproduce_script
 from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.utils.sankey import emit_sankey_artifacts
@@ -634,7 +635,7 @@ def _write_stamped_text(report_root: Path, root: Path, stem: str, stamp: str, su
     root.mkdir(parents=True, exist_ok=True)
     history_root = history_publish_root(report_root, root, stamp)
     fpath = history_root / f'{stem}_{stamp}{suffix}'
-    logger.debug(f'Write to: {fpath}')
+    logger.debug(f'Write to: {rich_link(fpath)}')
     fpath.write_text(text)
     write_latest_alias(fpath, root, f'{stem}.latest{suffix}')
     return fpath
@@ -1205,14 +1206,14 @@ def _emit_bar_chart(
         fig.update_layout(**_bar_chart_layout(rows, x))
         fig.update_xaxes(**_bar_chart_xaxis_update(rows, x=x, xaxis_title=xaxis_title, compact=False))
         fig.write_html(str(html_fpath), include_plotlyjs='cdn')
-        logger.debug(f'Write to 📝: {html_fpath}')
+        logger.debug(f'Write to 📝: {rich_link(html_fpath)}')
         write_latest_alias(html_fpath, interactive_dpath, f'{stem}.latest.html')
         html_out = str(html_fpath)
         try:
             fig.update_layout(**_bar_chart_layout(rows, x, compact=True))
             fig.update_xaxes(**_bar_chart_xaxis_update(rows, x=x, xaxis_title=xaxis_title, compact=True))
             fig.write_image(str(png_fpath), scale=1.0)
-            logger.debug(f'Write 🖼: {png_fpath}')
+            logger.debug(f'Write 🖼: {rich_link(png_fpath)}')
             write_latest_alias(png_fpath, static_dpath, f'{stem}.latest.png')
             png_out = str(png_fpath)
         except Exception as ex:
@@ -1276,14 +1277,14 @@ def _emit_stacked_bar_chart(
         )
         fig.update_xaxes(**_bar_chart_xaxis_update(rows, x=x, xaxis_title=xaxis_title, compact=False))
         fig.write_html(str(html_fpath), include_plotlyjs='cdn')
-        logger.debug(f'Write to 📝: {html_fpath}')
+        logger.debug(f'Write to 📝: {rich_link(html_fpath)}')
         write_latest_alias(html_fpath, interactive_dpath, f'{stem}.latest.html')
         html_out = str(html_fpath)
         try:
             fig.update_layout(**_bar_chart_layout(rows, x, compact=True))
             fig.update_xaxes(**_bar_chart_xaxis_update(rows, x=x, xaxis_title=xaxis_title, compact=True))
             fig.write_image(str(png_fpath), scale=1.0)
-            logger.debug(f'Write 🖼: {png_fpath}')
+            logger.debug(f'Write 🖼: {rich_link(png_fpath)}')
             write_latest_alias(png_fpath, static_dpath, f'{stem}.latest.png')
             png_out = str(png_fpath)
         except Exception as ex:
@@ -1755,6 +1756,7 @@ def emit_filter_report_bundle(
 
 
 def main(argv: list[str] | None = None) -> None:
+    setup_cli_logging()
     parser = argparse.ArgumentParser(description='Analyze a saved Stage 1 filter inventory.')
     parser.add_argument('--report-dpath', default=str(filtering_reports_root()))
     parser.add_argument('--inventory-json', default=None)
@@ -1777,4 +1779,5 @@ def main(argv: list[str] | None = None) -> None:
 
 
 if __name__ == '__main__':
+    setup_cli_logging()
     main()

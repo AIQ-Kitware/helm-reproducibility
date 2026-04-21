@@ -54,6 +54,7 @@ import kwutil
 import scriptconfig as scfg
 from loguru import logger
 
+from helm_audit.infra.logging import setup_cli_logging
 from helm_audit.infra.api import repo_run_details_fpath, repo_run_specs_fpath
 from helm_audit.helm.run_entries import parse_run_entry_description, parse_run_name_to_kv
 from helm_audit.model_registry import local_model_registry_by_name
@@ -145,6 +146,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
             >>> config = cls(**kwargs)
             >>> cls.main(argv=argv, **config)
         """
+        setup_cli_logging()
         config = cls.cli(argv=argv, data=kwargs, verbose="auto")
         roots = [Path(r).expanduser() for r in config.roots]
         if not roots:
@@ -755,4 +757,5 @@ def build_filter_inventory_rows(
 __cli__ = CompileHelmReproListConfig
 
 if __name__ == "__main__":
+    setup_cli_logging()
     __cli__.main()

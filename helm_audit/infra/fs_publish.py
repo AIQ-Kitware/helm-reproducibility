@@ -4,6 +4,7 @@ import datetime as datetime_mod
 import os
 from pathlib import Path
 from loguru import logger
+from helm_audit.infra.logging import rich_link
 
 
 def safe_unlink(path: Path) -> None:
@@ -15,7 +16,7 @@ def write_latest_alias(src: Path, latest_root: Path, latest_name: str) -> Path:
     latest_fpath = latest_root / latest_name
     safe_unlink(latest_fpath)
     rel_src = os.path.relpath(src, start=latest_fpath.parent)
-    logger.debug(f'Write link 🔗: {latest_fpath}')
+    logger.debug(f'Write link 🔗: {rich_link(latest_fpath)}')
     os.symlink(rel_src, latest_fpath)
     return latest_fpath
 
@@ -26,7 +27,7 @@ def symlink_to(target: str | os.PathLike[str], link_path: Path) -> Path:
     safe_unlink(link_path)
     rel_src = os.path.relpath(target, start=link_path.parent)
     os.symlink(rel_src, link_path)
-    logger.debug(f'Write link 🔗: {link_path}')
+    logger.debug(f'Write link 🔗: {rich_link(link_path)}')
     return link_path
 
 

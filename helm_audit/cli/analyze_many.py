@@ -7,6 +7,9 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
+from loguru import logger
+
+from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.workflows import analyze_experiment, build_reports_summary
 
 
@@ -105,12 +108,13 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--build-summary", action="store_true")
     parser.add_argument("--filter-inventory-json", default=None)
     args = parser.parse_args(argv)
+    setup_cli_logging()
 
     index_fpath = Path(args.index_fpath).expanduser().resolve()
 
     if args.all_from_index:
         experiment_names = _discover_experiment_names(index_fpath)
-        print(f"[{_ts()}]  Discovered {len(experiment_names)} experiment(s) from {index_fpath}", flush=True)
+        logger.info(f"[{_ts()}]  Discovered {len(experiment_names)} experiment(s) from {rich_link(index_fpath)}")
     else:
         experiment_names = args.experiment_names
 
