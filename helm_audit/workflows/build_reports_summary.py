@@ -1526,6 +1526,536 @@ def _format_run_multiplicity_summary_text(
     return lines
 
 
+_TRIAGE_DIMENSION_PRIORITY = {
+    "benchmark": 0,
+    "model": 1,
+    "machine_host": 2,
+    "experiment_name": 3,
+    "suite": 4,
+}
+
+_TRIAGE_BUCKET_CLASS_ORDER = {
+    "good": 0,
+    "mid": 1,
+    "bad": 2,
+    "flagged": 3,
+}
+
+_TRIAGE_BUCKET_LABELS = {
+    "good": ("exact_or_near_exact", "high_agreement_0.95+"),
+    "mid": ("moderate_agreement_0.80+",),
+    "bad": ("low_agreement_0.00+", "zero_agreement"),
+}
+
+
+def _agreement_bucket_class(bucket: str | None) -> str | None:
+    text = _clean_optional_text(bucket)
+    if text is None:
+        return None
+    if text in _TRIAGE_BUCKET_LABELS["good"]:
+        return "good"
+    if text in _TRIAGE_BUCKET_LABELS["mid"]:
+        return "mid"
+    if text in _TRIAGE_BUCKET_LABELS["bad"]:
+        return "bad"
+    return None
+
+
+def _safe_ratio(numer: int, denom: int) -> float | None:
+    return (numer / denom) if denom else None
+
+
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value in {None, ""}:
+            return None
+        return float(value)
+    except Exception:
+        return None
+
+
+def _triage_bucket_score(
+    *,
+    bucket_class: str,
+    dimension: str,
+    n_analyzed: int,
+    target_count: int,
+    target_share: float,
+    mean_score: float | None,
+) -> float:
+    dim_priority = _TRIAGE_DIMENSION_PRIORITY.get(dimension, 99)
+    dim_bonus = max(0, 500 - (dim_priority * 100))
+    coverage_bonus = min(n_analyzed, 12) * 3.0
+    target_bonus = min(target_count, 8) * 8.0 + (target_share * 80.0)
+    score_bonus = 0.0
+    if mean_score is not None:
+        if bucket_class == "good":
+            score_bonus = mean_score * 12.0
+        elif bucket_class == "mid":
+            score_bonus = max(0.0, 1.0 - abs(mean_score - 0.85)) * 12.0
+        elif bucket_class == "bad":
+            score_bonus = (1.0 - mean_score) * 18.0
+    return dim_bonus + coverage_bonus + target_bonus + score_bonus
+
+
+def _flagged_bucket_score(
+    *,
+    dimension: str,
+    n_analyzed: int,
+    has_multiplicity_signal: bool,
+    has_machine_spread: bool,
+    has_ambiguous_analyzed_matching: bool,
+    has_off_story_signal: bool,
+    bad_count: int,
+) -> float:
+    dim_priority = _TRIAGE_DIMENSION_PRIORITY.get(dimension, 99)
+    dim_bonus = max(0, 500 - (dim_priority * 100))
+    flag_bonus = (
+        (18.0 if has_ambiguous_analyzed_matching else 0.0)
+        + (14.0 if has_machine_spread else 0.0)
+        + (12.0 if has_multiplicity_signal else 0.0)
+        + (10.0 if has_off_story_signal else 0.0)
+    )
+    return dim_bonus + flag_bonus + min(n_analyzed, 10) * 2.0 + min(bad_count, 5) * 4.0
+
+
+def _example_case_sort_key(row: dict[str, Any], bucket_class: str) -> tuple[float, str]:
+    score = _safe_float(row.get("official_instance_agree_005"))
+    if score is None:
+        score = -1.0
+    if bucket_class == "good":
+        primary = score
+    elif bucket_class == "mid":
+        primary = 1.0 - abs(score - 0.85)
+    elif bucket_class == "bad":
+        primary = -score
+    else:
+        primary = -abs(score - 0.85)
+    return (primary, str(row.get("run_entry") or ""))
+
+
+def _pick_example_cases(
+    *,
+    rows: list[dict[str, Any]],
+    bucket_class: str,
+    max_examples: int = 3,
+) -> list[dict[str, Any]]:
+    target_rows = [row for row in rows if _agreement_bucket_class(row.get("official_instance_agree_bucket")) == bucket_class]
+    candidates = target_rows or rows
+    sorted_rows = sorted(candidates, key=lambda row: _example_case_sort_key(row, bucket_class), reverse=True)
+    picked: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for row in sorted_rows:
+        key = (str(row.get("experiment_name") or ""), str(row.get("run_entry") or ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append(row)
+        if len(picked) >= max_examples:
+            break
+    return picked
+
+
+def _triage_selection_reason(
+    *,
+    bucket_class: str,
+    dimension: str,
+    target_count: int,
+    target_share: float,
+    n_analyzed: int,
+    flags: list[str],
+) -> str:
+    bucket_label = {
+        "good": "good-agreement",
+        "mid": "mid-agreement",
+        "bad": "bad-agreement",
+        "flagged": "flagged",
+    }.get(bucket_class, bucket_class)
+    reason = (
+        f"{dimension} group is a useful {bucket_label} exemplar: "
+        f"{target_count}/{n_analyzed} analyzed rows in the target bucket class"
+        f" ({target_share:.0%})"
+    )
+    if flags:
+        reason += "; flags=" + ", ".join(flags)
+    return reason
+
+
+def _build_prioritized_breakdown_summary(
+    *,
+    enriched_rows: list[dict[str, Any]],
+    repro_rows: list[dict[str, Any]],
+    run_multiplicity_summary: dict[str, Any],
+    breakdown_dims: list[str],
+    level_002: Path,
+) -> dict[str, Any]:
+    enriched_lookup = {
+        (str(row.get("experiment_name")), str(row.get("run_entry"))): row
+        for row in enriched_rows
+        if row.get("experiment_name") and row.get("run_entry")
+    }
+    multiplicity_lookup = {
+        str(row.get("logical_run_key") or row.get("run_entry") or ""): row
+        for row in (run_multiplicity_summary.get("rows") or [])
+        if row.get("logical_run_key") or row.get("run_entry")
+    }
+    analyzed_case_rows: list[dict[str, Any]] = []
+    for repro in repro_rows:
+        key = (str(repro.get("experiment_name") or ""), str(repro.get("run_entry") or ""))
+        parent = enriched_lookup.get(key, {})
+        logical_run_key = str(parent.get("logical_run_key") or repro.get("run_entry") or "")
+        multiplicity = multiplicity_lookup.get(logical_run_key, {})
+        analyzed_case_rows.append(
+            {
+                **parent,
+                **repro,
+                "logical_run_key": logical_run_key,
+                "official_instance_agree_bucket": repro.get("official_instance_agree_bucket") or parent.get("official_instance_agree_bucket"),
+                "bucket_class": _agreement_bucket_class(repro.get("official_instance_agree_bucket")),
+                "has_multiplicity_signal": bool(
+                    int(multiplicity.get("n_attempt_ids") or 0) > 1 or int(multiplicity.get("n_rows") or 0) > 1
+                ),
+                "has_machine_spread": bool(int(multiplicity.get("n_machines") or 0) > 1),
+                "has_ambiguous_analyzed_matching": bool(int(multiplicity.get("n_ambiguous_analyzed_candidates") or 0) > 0),
+                "has_off_story_signal": str(parent.get("storyline_status") or "") == "off_story",
+            }
+        )
+
+    attempted_by_dim: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    completed_by_dim: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    analyzed_by_dim: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    dims = [dim for dim in _TRIAGE_DIMENSION_PRIORITY if dim in breakdown_dims]
+    for dim in dims:
+        attempted_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        completed_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        analyzed_groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in enriched_rows:
+            value = str(row.get(dim) or "unknown")
+            attempted_groups[value].append(row)
+            if _is_truthy_text(row.get("has_run_spec")):
+                completed_groups[value].append(row)
+        for row in analyzed_case_rows:
+            value = str(row.get(dim) or "unknown")
+            analyzed_groups[value].append(row)
+        attempted_by_dim[dim] = attempted_groups
+        completed_by_dim[dim] = completed_groups
+        analyzed_by_dim[dim] = analyzed_groups
+
+    all_group_rows: list[dict[str, Any]] = []
+    for dim in dims:
+        for value, analyzed_group_rows in analyzed_by_dim[dim].items():
+            if not analyzed_group_rows:
+                continue
+            bucket_counts = Counter(str(row.get("official_instance_agree_bucket") or "unknown") for row in analyzed_group_rows)
+            bucket_class_counts = Counter(
+                _agreement_bucket_class(row.get("official_instance_agree_bucket")) or "other"
+                for row in analyzed_group_rows
+            )
+            scores = [
+                score for score in (_safe_float(row.get("official_instance_agree_005")) for row in analyzed_group_rows)
+                if score is not None
+            ]
+            mean_score = (sum(scores) / len(scores)) if scores else None
+            flags = {
+                "multiplicity_signal": any(bool(row.get("has_multiplicity_signal")) for row in analyzed_group_rows),
+                "machine_spread": any(bool(row.get("has_machine_spread")) for row in analyzed_group_rows),
+                "ambiguous_analyzed_matching": any(bool(row.get("has_ambiguous_analyzed_matching")) for row in analyzed_group_rows),
+                "off_story_signal": any(bool(row.get("has_off_story_signal")) for row in analyzed_group_rows),
+            }
+            dominant_bucket = max(bucket_counts.items(), key=lambda item: (item[1], item[0]))[0]
+            dominant_bucket_class = _agreement_bucket_class(dominant_bucket) or "other"
+            breakdown_dir = level_002 / "breakdowns" / f"by_{dim}" / slugify(value)
+            breakdown_index_dir = level_002 / "breakdowns" / f"by_{dim}"
+            all_group_rows.append(
+                {
+                    "dimension": dim,
+                    "dimension_value": value,
+                    "dimension_priority": _TRIAGE_DIMENSION_PRIORITY.get(dim, 99),
+                    "rank_population": "breakdown groups ranked from analyzed reproducibility rows; attempted/completed counts come from all indexed rows in the same group",
+                    "n_attempted": len(attempted_by_dim[dim].get(value, [])),
+                    "n_completed": len(completed_by_dim[dim].get(value, [])),
+                    "n_analyzed": len(analyzed_group_rows),
+                    "bucket_counts": dict(bucket_counts),
+                    "bucket_class_counts": dict(bucket_class_counts),
+                    "dominant_bucket": dominant_bucket,
+                    "dominant_bucket_class": dominant_bucket_class,
+                    "mean_official_instance_agree_005": mean_score,
+                    "has_multiplicity_signal": flags["multiplicity_signal"],
+                    "has_machine_spread": flags["machine_spread"],
+                    "has_ambiguous_analyzed_matching": flags["ambiguous_analyzed_matching"],
+                    "has_off_story_signal": flags["off_story_signal"],
+                    "breakdown_dir": str(breakdown_dir),
+                    "breakdown_index_dir": str(breakdown_index_dir),
+                    "rows": analyzed_group_rows,
+                }
+            )
+
+    def _select_bucket_rows(bucket_class: str, limit: int = 3) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        for row in all_group_rows:
+            target_count = int(row["bucket_class_counts"].get(bucket_class, 0))
+            if target_count <= 0:
+                continue
+            n_analyzed = int(row["n_analyzed"])
+            target_share = float(target_count / n_analyzed) if n_analyzed else 0.0
+            example_rows = _pick_example_cases(rows=row["rows"], bucket_class=bucket_class)
+            flags = [
+                name for name, enabled in [
+                    ("multiplicity", row["has_multiplicity_signal"]),
+                    ("multi_machine", row["has_machine_spread"]),
+                    ("ambiguous_analysis", row["has_ambiguous_analyzed_matching"]),
+                    ("off_story", row["has_off_story_signal"]),
+                ]
+                if enabled
+            ]
+            out = dict(row)
+            out.update(
+                {
+                    "bucket_class": bucket_class,
+                    "primary_bucket_class": bucket_class,
+                    "target_bucket_count": target_count,
+                    "target_bucket_share": target_share,
+                    "selection_score": _triage_bucket_score(
+                        bucket_class=bucket_class,
+                        dimension=str(row["dimension"]),
+                        n_analyzed=n_analyzed,
+                        target_count=target_count,
+                        target_share=target_share,
+                        mean_score=_safe_float(row.get("mean_official_instance_agree_005")),
+                    ),
+                    "example_rows": example_rows,
+                    "selection_reason": _triage_selection_reason(
+                        bucket_class=bucket_class,
+                        dimension=str(row["dimension"]),
+                        target_count=target_count,
+                        target_share=target_share,
+                        n_analyzed=n_analyzed,
+                        flags=flags,
+                    ),
+                    "interesting_flags": flags,
+                }
+            )
+            candidates.append(out)
+        candidates.sort(
+            key=lambda row: (
+                -float(row["selection_score"]),
+                int(row["dimension_priority"]),
+                -int(row["n_analyzed"]),
+                str(row["dimension_value"]),
+            )
+        )
+        selected: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for row in candidates:
+            key = (str(row["dimension"]), str(row["dimension_value"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(row)
+            if len(selected) >= limit:
+                break
+        return selected
+
+    def _select_flagged_rows(limit: int = 5) -> list[dict[str, Any]]:
+        candidates: list[dict[str, Any]] = []
+        for row in all_group_rows:
+            flags = [
+                name for name, enabled in [
+                    ("multiplicity", row["has_multiplicity_signal"]),
+                    ("multi_machine", row["has_machine_spread"]),
+                    ("ambiguous_analysis", row["has_ambiguous_analyzed_matching"]),
+                    ("off_story", row["has_off_story_signal"]),
+                ]
+                if enabled
+            ]
+            if not flags:
+                continue
+            bad_count = int(row["bucket_class_counts"].get("bad", 0))
+            out = dict(row)
+            out.update(
+                {
+                    "bucket_class": "flagged",
+                    "primary_bucket_class": str(row.get("dominant_bucket_class") or "other"),
+                    "target_bucket_count": bad_count,
+                    "target_bucket_share": _safe_ratio(bad_count, int(row["n_analyzed"])) or 0.0,
+                    "selection_score": _flagged_bucket_score(
+                        dimension=str(row["dimension"]),
+                        n_analyzed=int(row["n_analyzed"]),
+                        has_multiplicity_signal=bool(row["has_multiplicity_signal"]),
+                        has_machine_spread=bool(row["has_machine_spread"]),
+                        has_ambiguous_analyzed_matching=bool(row["has_ambiguous_analyzed_matching"]),
+                        has_off_story_signal=bool(row["has_off_story_signal"]),
+                        bad_count=bad_count,
+                    ),
+                    "example_rows": _pick_example_cases(
+                        rows=row["rows"],
+                        bucket_class="bad" if bad_count else (str(row.get("dominant_bucket_class") or "mid")),
+                    ),
+                    "selection_reason": "interesting investigative flags in an analyzed breakdown group: " + ", ".join(flags),
+                    "interesting_flags": flags,
+                }
+            )
+            candidates.append(out)
+        candidates.sort(
+            key=lambda row: (
+                -float(row["selection_score"]),
+                int(row["dimension_priority"]),
+                -int(row["n_analyzed"]),
+                str(row["dimension_value"]),
+            )
+        )
+        selected: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for row in candidates:
+            key = (str(row["dimension"]), str(row["dimension_value"]))
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append(row)
+            if len(selected) >= limit:
+                break
+        return selected
+
+    selected_by_section = {
+        "good": _select_bucket_rows("good", limit=4),
+        "mid": _select_bucket_rows("mid", limit=4),
+        "bad": _select_bucket_rows("bad", limit=4),
+        "flagged": _select_flagged_rows(limit=6),
+    }
+
+    flattened_rows: list[dict[str, Any]] = []
+    for section_name in ["good", "mid", "bad", "flagged"]:
+        for idx, row in enumerate(selected_by_section[section_name], start=1):
+            example_rows = row.get("example_rows") or []
+            flattened_rows.append(
+                {
+                    "priority_rank": idx,
+                    "bucket_class": section_name,
+                    "dimension": row["dimension"],
+                    "dimension_priority": row["dimension_priority"],
+                    "dimension_value": row["dimension_value"],
+                    "rank_population": row["rank_population"],
+                    "n_attempted": row["n_attempted"],
+                    "n_completed": row["n_completed"],
+                    "n_analyzed": row["n_analyzed"],
+                    "target_bucket_count": row["target_bucket_count"],
+                    "target_bucket_share": row["target_bucket_share"],
+                    "dominant_bucket": row["dominant_bucket"],
+                    "dominant_bucket_class": row["dominant_bucket_class"],
+                    "bucket_counts": row["bucket_counts"],
+                    "bucket_class_counts": row["bucket_class_counts"],
+                    "mean_official_instance_agree_005": row["mean_official_instance_agree_005"],
+                    "has_multiplicity_signal": row["has_multiplicity_signal"],
+                    "has_machine_spread": row["has_machine_spread"],
+                    "has_ambiguous_analyzed_matching": row["has_ambiguous_analyzed_matching"],
+                    "has_off_story_signal": row["has_off_story_signal"],
+                    "interesting_flags": row["interesting_flags"],
+                    "breakdown_dir": row["breakdown_dir"],
+                    "breakdown_index_dir": row["breakdown_index_dir"],
+                    "example_report_dirs": _preview_values([
+                        str(item.get("report_dir")) for item in example_rows if item.get("report_dir")
+                    ], max_items=3),
+                    "example_run_entries": _preview_values([
+                        str(item.get("run_entry")) for item in example_rows if item.get("run_entry")
+                    ], max_items=3),
+                    "example_models": _preview_values([
+                        str(item.get("model")) for item in example_rows if item.get("model")
+                    ], max_items=3),
+                    "selection_reason": row["selection_reason"],
+                    "selection_score": row["selection_score"],
+                }
+            )
+
+    include_values_by_dim: dict[str, set[str]] = defaultdict(set)
+    for row in flattened_rows:
+        include_values_by_dim[str(row["dimension"])].add(str(row["dimension_value"]))
+
+    return {
+        "definitions": {
+            "rank_population": "breakdown groups ranked from analyzed reproducibility rows; attempted/completed counts are added from all indexed rows in the same group",
+            "bucket_classes": {
+                "good": list(_TRIAGE_BUCKET_LABELS["good"]),
+                "mid": list(_TRIAGE_BUCKET_LABELS["mid"]),
+                "bad": list(_TRIAGE_BUCKET_LABELS["bad"]),
+                "flagged": ["interesting investigative flags regardless of primary bucket"],
+            },
+            "dimension_priority": _TRIAGE_DIMENSION_PRIORITY,
+        },
+        "selected_by_section": {
+            key: [
+                {
+                    k: v for k, v in row.items()
+                    if k != "rows" and k != "example_rows"
+                }
+                for row in value
+            ]
+            for key, value in selected_by_section.items()
+        },
+        "rows": flattened_rows,
+        "include_values_by_dim": {dim: sorted(values) for dim, values in include_values_by_dim.items()},
+    }
+
+
+def _format_prioritized_breakdown_summary_text(
+    *,
+    scope_title: str,
+    generated_utc: str,
+    summary: dict[str, Any],
+) -> list[str]:
+    lines = [
+        "Prioritized Breakdown Investigation Checklist",
+        "=============================================",
+        f"Generated: {generated_utc}",
+        f"Scope: {scope_title}",
+        "",
+        "Population:",
+        f"  {summary['definitions']['rank_population']}",
+        "",
+        "Dimension priority:",
+    ]
+    for dim, rank in _TRIAGE_DIMENSION_PRIORITY.items():
+        lines.append(f"  {rank + 1}. {dim}")
+
+    section_titles = [
+        ("good", "Recommended good-agreement breakdowns to inspect"),
+        ("mid", "Recommended mid-agreement breakdowns to inspect"),
+        ("bad", "Recommended bad-agreement breakdowns to inspect"),
+        ("flagged", "Flagged special cases worth inspecting"),
+    ]
+    for section_key, section_title in section_titles:
+        rows = [row for row in (summary.get("rows") or []) if row.get("bucket_class") == section_key]
+        lines.extend(["", section_title, "-" * len(section_title)])
+        if not rows:
+            lines.append("  (none)")
+            continue
+        for row in rows:
+            lines.append(
+                f"[{row['priority_rank']}] {row['dimension']} = {row['dimension_value']} "
+                f"({row['bucket_class']}; analyzed={row['n_analyzed']}, target={row['target_bucket_count']}, share={float(row['target_bucket_share'] or 0.0):.0%})"
+            )
+            lines.append(f"  reason: {row['selection_reason']}")
+            lines.append(
+                f"  counts: attempted={row['n_attempted']} completed={row['n_completed']} analyzed={row['n_analyzed']} "
+                f"dominant_bucket={row['dominant_bucket']}"
+            )
+            flags = row.get("interesting_flags") or []
+            if flags:
+                lines.append(f"  flags: {', '.join(flags)}")
+            lines.append(f"  breakdown_dir: {row['breakdown_dir']}")
+            lines.append(f"  breakdown_index_dir: {row['breakdown_index_dir']}")
+            example_runs = row.get("example_run_entries") or []
+            example_reports = row.get("example_report_dirs") or []
+            if example_runs:
+                lines.append("  example_run_entries:")
+                for item in example_runs:
+                    lines.append(f"    - {item}")
+            if example_reports:
+                lines.append("  example_report_dirs:")
+                for item in example_reports:
+                    lines.append(f"    - {item}")
+    return lines
+
+
 _AXIS_COUNT_TAGS = {
     "benchmark": "n_benchmarks",
     "model": "n_models",
@@ -1915,6 +2445,7 @@ def _build_high_level_readme(
             "  cardinality_summary.latest.txt — run/model/benchmark counts at each stage of the funnel",
             "  off_story_summary.latest.txt — off-story local-extension models with selected/attempted/completed/analyzed counts",
             "  run_multiplicity_summary.latest.txt — repeated attempts, machine spread, experiment spread, and UUID/fallback identity coverage",
+            "  prioritized_breakdowns.latest.txt — shortlist of benchmark/model/machine/experiment breakdowns to inspect next",
             "",
             "  understand_upstream_filtering:",
             "    1. What runs were excluded at Stage 1 (discovery)? See reports/filtering/ which contains",
@@ -1944,6 +2475,7 @@ def _build_high_level_readme(
             "",
             "  drill_down_by_dimension:",
             "    - follow next_level/ for breakdown tables by benchmark, model, suite, machine, experiment",
+            "    - use prioritized_breakdowns.latest.* for a triage-first shortlist with direct breakdown paths",
             "    - use off_story_summary.latest.* and run_multiplicity_summary.latest.* for storyline/attempt identity tables",
             "    - run reproduce.latest.sh to regenerate this report from current data",
             "",
@@ -2014,6 +2546,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         "benchmark_summary.latest.csv",
         "run_inventory.latest.csv",
         "reproducibility_rows.latest.csv",
+        "prioritized_breakdowns.latest.csv",
         "off_story_summary.latest.csv",
         "run_multiplicity_summary.latest.csv",
     ]:
@@ -2021,6 +2554,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
     for src_name in [
+        "prioritized_breakdowns.latest.txt",
         "off_story_summary.latest.txt",
         "run_multiplicity_summary.latest.txt",
     ]:
@@ -2028,6 +2562,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
     for src_name in [
+        "prioritized_breakdowns.latest.json",
         "off_story_summary.latest.json",
         "run_multiplicity_summary.latest.json",
     ]:
@@ -2050,6 +2585,7 @@ def _render_breakdown_scopes(
     breakdown_dims: list[str],
     level_002: Path,
     max_items_per_breakdown: int,
+    include_values_by_dim: dict[str, list[str]] | None = None,
 ) -> None:
     breakdowns_root = level_002 / "breakdowns"
     breakdowns_root.mkdir(parents=True, exist_ok=True)
@@ -2064,6 +2600,12 @@ def _render_breakdown_scopes(
         dim_root = breakdowns_root / f"by_{dim}"
         dim_root.mkdir(parents=True, exist_ok=True)
         top_values = [value for value, _ in value_counts.most_common(max_items_per_breakdown)]
+        extra_values = [
+            str(value)
+            for value in (include_values_by_dim or {}).get(dim, [])
+            if str(value) not in top_values
+        ]
+        top_values.extend(extra_values)
         summary_rows = _summarize_by_dimension(enriched_rows, dimension=dim, repro_keyed=repro_keyed)
         table_artifacts = _write_table_artifacts(summary_rows, dim_root / f"index_{slugify(dim)}")
         for kind in ["json", "csv", "txt"]:
@@ -2965,6 +3507,25 @@ def _render_scope_summary(
         scope_rows=scope_rows,
         repro_rows=repro_rows,
     )
+    prioritized_breakdowns_summary = _build_prioritized_breakdown_summary(
+        enriched_rows=enriched_rows,
+        repro_rows=repro_rows,
+        run_multiplicity_summary=run_multiplicity_summary,
+        breakdown_dims=breakdown_dims,
+        level_002=level_002,
+    )
+    if breakdown_dims:
+        _render_breakdown_scopes(
+            enriched_rows=enriched_rows,
+            all_repro_rows=repro_rows,
+            filter_inventory_rows=filter_inventory_rows,
+            filter_inventory_json=filter_inventory_json,
+            index_fpath=index_fpath,
+            breakdown_dims=breakdown_dims,
+            level_002=level_002,
+            max_items_per_breakdown=max_items_per_breakdown,
+            include_values_by_dim=prioritized_breakdowns_summary.get("include_values_by_dim"),
+        )
 
     operational_sankey_rows = []
     for row in enriched_rows:
@@ -3374,6 +3935,22 @@ def _render_scope_summary(
         machine_dpath=level_002_machine,
         static_dpath=level_002_static,
     )
+    prioritized_breakdowns_table = _write_structured_summary_artifacts(
+        rows=prioritized_breakdowns_summary["rows"],
+        payload={
+            "generated_utc": generated_utc,
+            "scope_title": scope_title,
+            **prioritized_breakdowns_summary,
+        },
+        txt_lines=_format_prioritized_breakdown_summary_text(
+            scope_title=scope_title,
+            generated_utc=generated_utc,
+            summary=prioritized_breakdowns_summary,
+        ),
+        stem=level_002 / f"prioritized_breakdowns_{generated_utc}",
+        machine_dpath=level_002_machine,
+        static_dpath=level_002_static,
+    )
 
     if include_visuals:
         benchmark_plot = _write_plotly_bar(
@@ -3497,6 +4074,7 @@ def _render_scope_summary(
         "  - benchmark_summary.latest.csv: benchmark-level counts and top failure reason",
         "  - run_inventory.latest.csv: one row per scheduled job with completion, failure, repro, and attempt identity/provenance fields",
         "  - reproducibility_rows.latest.csv: analyzed per-run reproducibility cases in this scope",
+        "  - prioritized_breakdowns.latest.{txt,csv,json}: ranked triage shortlist of breakdowns and example cases to inspect next",
         "  - off_story_summary.latest.{txt,csv,json}: off-story local extensions plus on-story context counts",
         "  - run_multiplicity_summary.latest.{txt,csv,json}: logical-run multiplicity, attempt identity, machine spread, and experiment spread",
     ]
@@ -3522,6 +4100,9 @@ def _render_scope_summary(
         (Path(repro_table["json"]), level_002_machine, "reproducibility_rows.latest.json"),
         (Path(repro_table["csv"]), level_002_static, "reproducibility_rows.latest.csv"),
         (Path(repro_table["txt"]), level_002_static, "reproducibility_rows.latest.txt"),
+        (Path(prioritized_breakdowns_table["json"]), level_002_machine, "prioritized_breakdowns.latest.json"),
+        (Path(prioritized_breakdowns_table["csv"]), level_002_static, "prioritized_breakdowns.latest.csv"),
+        (Path(prioritized_breakdowns_table["txt"]), level_002_static, "prioritized_breakdowns.latest.txt"),
         (Path(off_story_table["json"]), level_002_machine, "off_story_summary.latest.json"),
         (Path(off_story_table["csv"]), level_002_static, "off_story_summary.latest.csv"),
         (Path(off_story_table["txt"]), level_002_static, "off_story_summary.latest.txt"),
@@ -3584,6 +4165,7 @@ def _render_scope_summary(
         "coverage_matrix_plot": coverage_matrix_plot,
         "failure_taxonomy_plot": failure_taxonomy_plot,
         "filter_selection_by_model_plot": filter_selection_by_model_plot,
+        "prioritized_breakdowns": prioritized_breakdowns_table,
         "off_story_summary": off_story_table,
         "run_multiplicity_summary": run_multiplicity_table,
         "identity_contract": run_multiplicity_summary.get("definitions"),
@@ -3614,18 +4196,6 @@ def _render_scope_summary(
             analysis_dpath = compat_core_run_reports_root() / f"experiment-analysis-{slugify(exp_name)}"
         if analysis_dpath.exists():
             symlink_to(analysis_dpath, level_002 / "experiment-analysis")
-
-    if breakdown_dims:
-        _render_breakdown_scopes(
-            enriched_rows=enriched_rows,
-            all_repro_rows=repro_rows,
-            filter_inventory_rows=filter_inventory_rows,
-            filter_inventory_json=filter_inventory_json,
-            index_fpath=index_fpath,
-            breakdown_dims=breakdown_dims,
-            level_002=level_002,
-            max_items_per_breakdown=max_items_per_breakdown,
-        )
 
     story_index_lines = [
         "Story Index — Canonical Reading Order",
@@ -3658,6 +4228,7 @@ def _render_scope_summary(
         "  File: sankey_s05_reproducibility.latest.{html,jpg,txt}",
         "",
         "Supplementary",
+        "  prioritized_breakdowns.latest.txt: triage-first shortlist of good/mid/bad/flagged breakdowns with direct paths",
         "  off_story_summary.latest.txt: off-story local extensions with stage counts and provenance",
         "  run_multiplicity_summary.latest.txt: logical-result identity, repeated attempts, machines, experiments, UUIDs",
         "  sankey_repro_by_metric: per-metric drift (max |official - local| across runs)",

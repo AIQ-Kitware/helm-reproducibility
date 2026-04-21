@@ -6,6 +6,7 @@ from helm_audit.workflows.build_reports_summary import (
     FILTER_SELECTION_SELECTED_LABEL,
     NOT_ATTEMPTED_LABEL,
     _build_off_story_summary,
+    _build_prioritized_breakdown_summary,
     _build_attempted_to_repro_rows,
     _build_end_to_end_funnel_rows,
     _build_filter_to_attempt_rows,
@@ -458,3 +459,125 @@ def test_run_multiplicity_summary_marks_legacy_multi_completed_groups_ambiguous(
     assert row["n_analyzed_rows"] == 0
     assert row["n_ambiguous_analyzed_candidates"] == 2
     assert row["analyzed_match_status_counts"]["ambiguous_legacy_group_multi_completed"] == 2
+
+
+def test_prioritized_breakdown_summary_ranks_and_points_to_actionable_paths(tmp_path):
+    level_002 = tmp_path / "level_002"
+    enriched_rows = [
+        {
+            "experiment_name": "exp-good",
+            "run_entry": "bench_good:model=model-a",
+            "benchmark": "bench_good",
+            "model": "model-a",
+            "machine_host": "host-a",
+            "suite": "suite-1",
+            "has_run_spec": "True",
+            "storyline_status": "on_story",
+            "logical_run_key": "bench_good:model=model-a",
+            "repro_report_dir": "/reports/good",
+        },
+        {
+            "experiment_name": "exp-mid",
+            "run_entry": "bench_mid:model=model-a",
+            "benchmark": "bench_mid",
+            "model": "model-a",
+            "machine_host": "host-b",
+            "suite": "suite-1",
+            "has_run_spec": "True",
+            "storyline_status": "on_story",
+            "logical_run_key": "bench_mid:model=model-a",
+            "repro_report_dir": "/reports/mid",
+        },
+        {
+            "experiment_name": "exp-bad",
+            "run_entry": "bench_bad:model=model-b",
+            "benchmark": "bench_bad",
+            "model": "model-b",
+            "machine_host": "host-c",
+            "suite": "suite-2",
+            "has_run_spec": "True",
+            "storyline_status": "off_story",
+            "logical_run_key": "bench_bad:model=model-b",
+            "repro_report_dir": "/reports/bad",
+        },
+    ]
+    repro_rows = [
+        {
+            "experiment_name": "exp-good",
+            "run_entry": "bench_good:model=model-a",
+            "report_dir": "/reports/good",
+            "official_instance_agree_bucket": "exact_or_near_exact",
+            "official_instance_agree_005": 0.99,
+        },
+        {
+            "experiment_name": "exp-mid",
+            "run_entry": "bench_mid:model=model-a",
+            "report_dir": "/reports/mid",
+            "official_instance_agree_bucket": "moderate_agreement_0.80+",
+            "official_instance_agree_005": 0.84,
+        },
+        {
+            "experiment_name": "exp-bad",
+            "run_entry": "bench_bad:model=model-b",
+            "report_dir": "/reports/bad",
+            "official_instance_agree_bucket": "low_agreement_0.00+",
+            "official_instance_agree_005": 0.22,
+        },
+    ]
+    run_multiplicity_summary = {
+        "rows": [
+            {
+                "logical_run_key": "bench_good:model=model-a",
+                "n_attempt_ids": 1,
+                "n_rows": 1,
+                "n_machines": 1,
+                "n_ambiguous_analyzed_candidates": 0,
+            },
+            {
+                "logical_run_key": "bench_mid:model=model-a",
+                "n_attempt_ids": 2,
+                "n_rows": 2,
+                "n_machines": 1,
+                "n_ambiguous_analyzed_candidates": 0,
+            },
+            {
+                "logical_run_key": "bench_bad:model=model-b",
+                "n_attempt_ids": 2,
+                "n_rows": 2,
+                "n_machines": 2,
+                "n_ambiguous_analyzed_candidates": 1,
+            },
+        ]
+    }
+
+    summary = _build_prioritized_breakdown_summary(
+        enriched_rows=enriched_rows,
+        repro_rows=repro_rows,
+        run_multiplicity_summary=run_multiplicity_summary,
+        breakdown_dims=["benchmark", "model", "machine_host", "experiment_name", "suite"],
+        level_002=level_002,
+    )
+
+    good_rows = [row for row in summary["rows"] if row["bucket_class"] == "good"]
+    mid_rows = [row for row in summary["rows"] if row["bucket_class"] == "mid"]
+    bad_rows = [row for row in summary["rows"] if row["bucket_class"] == "bad"]
+    flagged_rows = [row for row in summary["rows"] if row["bucket_class"] == "flagged"]
+
+    assert good_rows[0]["dimension"] == "benchmark"
+    assert good_rows[0]["dimension_value"] == "bench_good"
+    assert good_rows[0]["example_report_dirs"] == ["/reports/good"]
+    assert good_rows[0]["breakdown_dir"].endswith("/level_002/breakdowns/by_benchmark/bench_good")
+    assert "bench_good" in summary["include_values_by_dim"]["benchmark"]
+
+    assert mid_rows[0]["dimension"] == "benchmark"
+    assert mid_rows[0]["dimension_value"] == "bench_mid"
+    assert mid_rows[0]["has_multiplicity_signal"] is True
+
+    assert bad_rows[0]["dimension"] == "benchmark"
+    assert bad_rows[0]["dimension_value"] == "bench_bad"
+    assert bad_rows[0]["has_machine_spread"] is True
+    assert bad_rows[0]["has_ambiguous_analyzed_matching"] is True
+    assert bad_rows[0]["has_off_story_signal"] is True
+
+    assert flagged_rows
+    assert any("ambiguous_analysis" in row["interesting_flags"] for row in flagged_rows)
