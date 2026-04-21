@@ -46,7 +46,6 @@ Ignore:
 
 from __future__ import annotations
 import fnmatch
-import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,6 +59,17 @@ from loguru import logger
 from helm_audit.infra.logging import setup_cli_logging
 from helm_audit.infra.api import repo_run_details_fpath, repo_run_specs_fpath
 from helm_audit.helm.run_entries import parse_run_entry_description, parse_run_name_to_kv
+from helm_audit.indexing.schema import (
+    KNOWN_STRUCTURAL_JUNK_NAMES,
+    OFFICIAL_COMPONENT_COLUMNS,
+    classify_run_entry as _classify_run_entry_impl,
+    component_id_for_official,
+    compute_run_spec_hash as _compute_run_spec_hash_impl,
+    extract_run_spec_fields,
+    logical_run_key_for_official,
+    normalize_for_hash as _normalize_for_hash_impl,
+    now_utc_iso,
+)
 from helm_audit.model_registry import local_model_registry_by_name
 
 
@@ -787,70 +797,23 @@ def build_filter_inventory_rows(
 # Official/public index — version-aware canonical artifact
 # ---------------------------------------------------------------------------
 
-#: Directory names that appear under benchmark_output/runs/<suite>/ but are
-#: NOT benchmark run directories (e.g. HELM emits groups/, confs/, logs/).
-KNOWN_STRUCTURAL_JUNK_NAMES: frozenset[str] = frozenset({
-    'groups', 'confs', 'logs', '__pycache__',
-})
-
-#: Ordered list of columns in the official public index CSV.
-OFFICIAL_INDEX_COLUMNS: list[str] = [
-    'source_kind',
-    'public_root',
-    'public_track',
-    'suite_version',
-    'public_run_dir',
-    'run_name',
-    'entry_kind',
-    'has_run_spec_json',
-    'run_spec_fpath',
-    'run_spec_name',
-    'run_spec_hash',
-    'model',
-    'scenario_class',
-    'benchmark_group',
-    'max_eval_instances',
-    'is_structural_junk',
-    'index_generated_utc',
-]
+#: Backwards-compat alias for the canonical official-index column order.
+OFFICIAL_INDEX_COLUMNS: list[str] = OFFICIAL_COMPONENT_COLUMNS
 
 
 def _normalize_for_hash(obj: Any) -> Any:
-    """Recursively sort dict keys so the hash is stable regardless of insertion order."""
-    if isinstance(obj, dict):
-        return {k: _normalize_for_hash(v) for k, v in sorted(obj.items())}
-    if isinstance(obj, list):
-        return [_normalize_for_hash(v) for v in obj]
-    return obj
+    """Back-compat shim for ``helm_audit.indexing.schema.normalize_for_hash``."""
+    return _normalize_for_hash_impl(obj)
 
 
 def _compute_run_spec_hash(run_spec_fpath: Path) -> str | None:
-    """Return a stable SHA-256 hex digest of the normalised run_spec.json content."""
-    try:
-        content = json.loads(run_spec_fpath.read_text(encoding='utf-8'))
-        normalised = json.dumps(
-            _normalize_for_hash(content),
-            ensure_ascii=False,
-            separators=(',', ':'),
-        )
-        return hashlib.sha256(normalised.encode('utf-8')).hexdigest()
-    except Exception:
-        return None
+    """Back-compat shim for ``helm_audit.indexing.schema.compute_run_spec_hash``."""
+    return _compute_run_spec_hash_impl(run_spec_fpath)
 
 
 def _classify_run_entry(entry_name: str) -> tuple[str, bool]:
-    """
-    Classify a directory name found under a HELM suite directory.
-
-    Returns:
-        (entry_kind, is_structural_junk)
-        entry_kind is one of 'benchmark_run', 'structural_non_run', 'unknown'.
-    """
-    if entry_name in KNOWN_STRUCTURAL_JUNK_NAMES:
-        return 'structural_non_run', True
-    if ':' in entry_name:
-        return 'benchmark_run', False
-    return 'unknown', False
+    """Back-compat shim for ``helm_audit.indexing.schema.classify_run_entry``."""
+    return _classify_run_entry_impl(entry_name)
 
 
 def _scan_benchmark_output_dir(
@@ -864,6 +827,8 @@ def _scan_benchmark_output_dir(
     Scan a single benchmark_output directory and return official index rows.
 
     This is the inner loop extracted so it can be unit-tested without magnet.
+    Emits component-style rows whose schema matches
+    :data:`helm_audit.indexing.schema.OFFICIAL_COMPONENT_COLUMNS`.
     """
     rows: list[dict[str, Any]] = []
     runs_dir = bo_dir / 'runs'
@@ -881,42 +846,42 @@ def _scan_benchmark_output_dir(
             if not entry_dir.is_dir():
                 continue
             run_name = entry_dir.name
-            entry_kind, is_structural_junk = _classify_run_entry(run_name)
+            entry_kind, is_structural_junk = _classify_run_entry_impl(run_name)
 
             run_spec_fpath = entry_dir / 'run_spec.json'
-            has_run_spec_json = run_spec_fpath.exists()
-            run_spec_hash: str | None = None
-            run_spec_name: str | None = None
-            model: str | None = None
-            scenario_class: str | None = None
-            benchmark_group: str | None = run_name.split(':')[0] if ':' in run_name else None
-
-            if has_run_spec_json:
-                run_spec_hash = _compute_run_spec_hash(run_spec_fpath)
-                try:
-                    spec = json.loads(run_spec_fpath.read_text(encoding='utf-8'))
-                    run_spec_name = spec.get('name')
-                    model = spec.get('adapter_spec', {}).get('model')
-                    scenario_class = spec.get('scenario_spec', {}).get('class_name')
-                    if benchmark_group is None and run_spec_name and ':' in run_spec_name:
-                        benchmark_group = run_spec_name.split(':')[0]
-                except Exception:
-                    pass
+            spec_fields = extract_run_spec_fields(run_spec_fpath)
+            has_run_spec_json = spec_fields['has_run_spec_json']
+            # For benchmark runs, fall back to directory-name prefix if the
+            # spec didn't yield a benchmark group.
+            benchmark_group = spec_fields['benchmark_group']
+            if benchmark_group is None and ':' in run_name:
+                benchmark_group = run_name.split(':', 1)[0]
 
             rows.append({
                 'source_kind': 'official',
+                'component_id': component_id_for_official(
+                    public_track=public_track,
+                    suite_version=suite_version,
+                    run_name=run_name,
+                ),
+                'logical_run_key': logical_run_key_for_official(
+                    run_spec_name=spec_fields['run_spec_name'],
+                    run_name=run_name,
+                ),
                 'public_root': public_root,
                 'public_track': public_track,
                 'suite_version': suite_version,
                 'public_run_dir': str(entry_dir),
+                'run_path': str(entry_dir),
                 'run_name': run_name,
                 'entry_kind': entry_kind,
                 'has_run_spec_json': has_run_spec_json,
                 'run_spec_fpath': str(run_spec_fpath) if has_run_spec_json else None,
-                'run_spec_name': run_spec_name,
-                'run_spec_hash': run_spec_hash,
-                'model': model,
-                'scenario_class': scenario_class,
+                'run_spec_name': spec_fields['run_spec_name'],
+                'run_spec_hash': spec_fields['run_spec_hash'],
+                'model': spec_fields['model'],
+                'model_deployment': spec_fields['model_deployment'],
+                'scenario_class': spec_fields['scenario_class'],
                 'benchmark_group': benchmark_group,
                 'max_eval_instances': None,
                 'is_structural_junk': is_structural_junk,
@@ -943,7 +908,7 @@ def build_official_public_index_rows(
     from magnet.backends.helm.cli.materialize_helm_run import discover_benchmark_output_dirs
 
     if index_generated_utc is None:
-        index_generated_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        index_generated_utc = now_utc_iso()
 
     bo_dirs = list(ub.ProgIter(
         discover_benchmark_output_dirs(roots),
@@ -999,10 +964,10 @@ def write_official_public_index(
     latest_fpath = out_dpath / 'official_public_index.latest.csv'
 
     df = pd.DataFrame(rows)
-    for col in OFFICIAL_INDEX_COLUMNS:
+    for col in OFFICIAL_COMPONENT_COLUMNS:
         if col not in df.columns:
             df[col] = None
-    df = df[OFFICIAL_INDEX_COLUMNS]
+    df = df[OFFICIAL_COMPONENT_COLUMNS]
     df.to_csv(ts_fpath, index=False)
 
     if latest_fpath.is_symlink() or latest_fpath.exists():

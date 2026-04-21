@@ -11,6 +11,13 @@ import kwutil
 import pandas as pd
 
 from helm_audit.compat.helm_outputs import HelmOutputs
+from helm_audit.indexing.schema import (
+    benchmark_group_from_run_name,
+    component_id_for_local,
+    extract_run_spec_fields,
+    logical_run_key_for_local,
+    now_utc_iso,
+)
 from helm_audit.infra.api import default_index_root, env_defaults
 from helm_audit.infra.fs_publish import write_latest_alias
 from helm_audit.infra.logging import rich_link, setup_cli_logging
@@ -128,32 +135,57 @@ def _process_context_provenance(job_dpath: Path, adapter_manifest: dict[str, Any
     }
 
 
-def _row_for_job(job_config_fpath: Path, fallback_host: str | None) -> dict[str, Any]:
+def _row_for_job(
+    job_config_fpath: Path,
+    fallback_host: str | None,
+    index_generated_utc: str | None = None,
+) -> dict[str, Any]:
     job_dpath = job_config_fpath.parent
     adapter_manifest = _safe_json_load(job_dpath / 'adapter_manifest.json')
     process_context = _safe_json_load(job_dpath / 'process_context.json')
     if not process_context:
         process_context = adapter_manifest.get('process_context', {}) if isinstance(adapter_manifest, dict) else {}
     run_dir = _first_run_dir(job_dpath)
-    run_spec = _safe_json_load(run_dir / 'run_spec.json') if run_dir else {}
 
     job_config = _safe_json_load(job_config_fpath)
     run_entry = job_config.get('helm.run_entry')
     benchmark = None
-    model = None
+    run_entry_model = None
     method = None
     if run_entry:
         try:
             benchmark, tokens = parse_run_entry_description(run_entry)
-            model = tokens.get('model')
+            run_entry_model = tokens.get('model')
             method = tokens.get('method')
         except Exception:
             benchmark = None
 
+    # Normalized run-spec fields via the shared extractor (stable hash + names).
+    run_spec_fpath = (run_dir / 'run_spec.json') if run_dir else None
+    spec_fields = extract_run_spec_fields(run_spec_fpath)
+
+    # Prefer the authoritative adapter_spec.model from the run_spec; fall back to
+    # the model token parsed out of helm.run_entry when the spec isn't present.
+    model = spec_fields['model'] or run_entry_model
+    scenario_class = spec_fields['scenario_class']
+    benchmark_group = spec_fields['benchmark_group'] or benchmark_group_from_run_name(run_entry)
+    model_deployment = spec_fields['model_deployment']
+
     context_info = _process_context_info(process_context, fallback_host)
     process_info = _process_context_provenance(job_dpath, adapter_manifest, process_context)
-    adapter_spec = run_spec.get('adapter_spec', {}) if isinstance(run_spec, dict) else {}
-    metric_specs = run_spec.get('metric_specs', []) if isinstance(run_spec, dict) else []
+    metric_specs: list[Any] = []
+    if run_spec_fpath and run_spec_fpath.exists():
+        raw_spec = _safe_json_load(run_spec_fpath)
+        if isinstance(raw_spec, dict):
+            raw_specs_list = raw_spec.get('metric_specs', [])
+            if isinstance(raw_specs_list, list):
+                metric_specs = raw_specs_list
+    if model_deployment is None and isinstance(adapter_manifest, dict):
+        # Legacy fallback: adapter_manifest sometimes carries a top-level adapter_spec.
+        am_adapter = adapter_manifest.get('adapter_spec', {})
+        if isinstance(am_adapter, dict):
+            model_deployment = am_adapter.get('model_deployment')
+
     experiment_name = job_dpath.parent.parent.name if job_dpath.parent.name == 'helm' else job_dpath.parent.name
     run_dir_text = str(run_dir) if run_dir else None
     attempt_fallback_key = _build_attempt_fallback_key(
@@ -166,25 +198,49 @@ def _row_for_job(job_config_fpath: Path, fallback_host: str | None) -> dict[str,
     )
     attempt_identity = process_info['attempt_uuid'] or attempt_fallback_key
 
+    logical_run_key = logical_run_key_for_local(
+        run_spec_name=spec_fields['run_spec_name'],
+        run_entry=run_entry,
+    )
+    component_id = component_id_for_local(
+        experiment_name=experiment_name,
+        job_id=job_dpath.name,
+        attempt_identity=attempt_identity,
+    )
+
     row = {
+        # --- normalized component-row fields (aligned with official index) ---
+        'source_kind': 'local',
+        'component_id': component_id,
+        'logical_run_key': logical_run_key,
         'experiment_name': experiment_name,
         'job_id': job_dpath.name,
         'job_dpath': str(job_dpath),
+        'run_path': run_dir_text,
+        'run_spec_fpath': str(run_spec_fpath) if (run_spec_fpath and run_spec_fpath.exists()) else None,
+        'run_spec_name': spec_fields['run_spec_name'],
+        'run_spec_hash': spec_fields['run_spec_hash'],
+        'model': model,
+        'model_deployment': model_deployment,
+        'scenario_class': scenario_class,
+        'benchmark_group': benchmark_group,
+        'max_eval_instances': job_config.get('helm.max_eval_instances'),
+        'index_generated_utc': index_generated_utc,
+        # --- status / run metadata ---
         'status': adapter_manifest.get('status'),
         'manifest_timestamp': adapter_manifest.get('timestamp'),
         'run_entry': run_entry,
         'benchmark': benchmark,
-        'model': model,
         'method': method,
         'suite': job_config.get('helm.suite'),
-        'max_eval_instances': job_config.get('helm.max_eval_instances'),
+        # Legacy alias preserved so existing consumers continue to work.
         'run_dir': run_dir_text,
         'has_run_dir': bool(run_dir and run_dir.exists()),
         'has_run_spec': bool(run_dir and (run_dir / 'run_spec.json').exists()),
         'has_stats': bool(run_dir and (run_dir / 'stats.json').exists()),
         'has_per_instance_stats': bool(run_dir and (run_dir / 'per_instance_stats.json').exists()),
-        'model_deployment': adapter_spec.get('model_deployment'),
         'metric_class_names': [m.get('class_name') for m in metric_specs if isinstance(m, dict)],
+        # --- attempt identity (first-class) ---
         'attempt_fallback_key': attempt_fallback_key,
         'attempt_identity': attempt_identity,
         'attempt_identity_kind': 'attempt_uuid' if process_info['attempt_uuid'] else 'fallback',
@@ -224,12 +280,58 @@ def _write_summary(rows: list[dict[str, Any]], out_fpath: Path) -> None:
     out_fpath.write_text('\n'.join(lines) + '\n')
 
 
+def write_combined_component_index(
+    *,
+    official_index_fpath: Path,
+    local_rows: list[dict[str, Any]],
+    out_fpath: Path,
+) -> Path:
+    """Emit a derived normalized union of official and local component rows.
+
+    This is a dumb, derived artifact: rows from both sides are coerced to a
+    shared column set with the ``source_kind`` column distinguishing them.  No
+    grouping or comparison logic is performed here — that remains the
+    responsibility of downstream grouping/comparison tooling.
+    """
+    from helm_audit.indexing.schema import COMMON_COMPONENT_COLUMNS
+
+    official_df = pd.read_csv(official_index_fpath, low_memory=False)
+    local_df = pd.DataFrame(local_rows)
+
+    for col in COMMON_COMPONENT_COLUMNS:
+        if col not in official_df.columns:
+            official_df[col] = None
+        if col not in local_df.columns:
+            local_df[col] = None
+
+    combined = pd.concat(
+        [
+            official_df[COMMON_COMPONENT_COLUMNS],
+            local_df[COMMON_COMPONENT_COLUMNS],
+        ],
+        axis=0,
+        ignore_index=True,
+    )
+    out_fpath.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_csv(out_fpath, index=False)
+    return out_fpath
+
+
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser()
     parser.add_argument('--results-root', default=env_defaults()['AUDIT_RESULTS_ROOT'])
     parser.add_argument('--report-dpath', default=str(default_index_root()))
     parser.add_argument('--fallback-host', default=None)
+    parser.add_argument(
+        '--combined-with-official',
+        default=None,
+        help=(
+            'Optional path to an official/public index CSV. When provided, also '
+            'emit a derived combined index CSV that is a normalized union of '
+            'official and local component rows (no grouping, purely a union).'
+        ),
+    )
     args = parser.parse_args(argv)
     logger.debug('Start index results')
 
@@ -237,19 +339,25 @@ def main(argv: list[str] | None = None) -> None:
     report_dpath = Path(args.report_dpath).expanduser().resolve()
     report_dpath.mkdir(parents=True, exist_ok=True)
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
+    index_generated_utc = now_utc_iso()
 
     rows = []
     logger.debug(f'Globbing {rich_link(results_root)}')
     for job_config_fpath in sorted(results_root.rglob('job_config.json')):
         try:
-            rows.append(_row_for_job(job_config_fpath, args.fallback_host))
+            rows.append(_row_for_job(
+                job_config_fpath, args.fallback_host,
+                index_generated_utc=index_generated_utc,
+            ))
         except Exception as ex:
             rows.append({
+                'source_kind': 'local',
                 'job_dpath': str(job_config_fpath.parent),
                 'status': 'index_error',
                 'error': repr(ex),
                 'machine_host': args.fallback_host,
                 'provenance_source': 'fallback' if args.fallback_host else 'unknown',
+                'index_generated_utc': index_generated_utc,
             })
 
     jsonl_fpath = report_dpath / f'audit_results_index_{stamp}.jsonl'
@@ -262,14 +370,20 @@ def main(argv: list[str] | None = None) -> None:
 
     table = pd.DataFrame(rows)
     if not table.empty:
+        # Component-style fields first (aligned with the official index), then
+        # legacy operational columns, then any remaining fields.
         preferred = [
-            'experiment_name', 'job_id', 'status', 'benchmark', 'model', 'method',
+            'source_kind', 'component_id', 'logical_run_key',
+            'experiment_name', 'job_id', 'status',
+            'run_spec_name', 'run_spec_hash', 'benchmark_group',
+            'benchmark', 'model', 'model_deployment', 'method',
             'attempt_identity_kind', 'attempt_uuid', 'attempt_identity',
             'manifest_timestamp', 'process_start_timestamp', 'process_stop_timestamp',
             'max_eval_instances', 'machine_host', 'gpu_count', 'gpu_names',
             'cuda_visible_devices', 'provenance_source', 'process_context_source',
-            'run_dir', 'materialize_out_dpath', 'adapter_manifest_fpath',
-            'process_context_fpath',
+            'run_path', 'run_dir', 'run_spec_fpath',
+            'materialize_out_dpath', 'adapter_manifest_fpath',
+            'process_context_fpath', 'index_generated_utc',
         ]
         cols = [c for c in preferred if c in table.columns] + [c for c in table.columns if c not in preferred]
         table = table[cols]
@@ -284,6 +398,17 @@ def main(argv: list[str] | None = None) -> None:
     logger.info(f'Wrote csv index: {rich_link(csv_fpath)}')
     logger.info(f'Wrote summary: {rich_link(summary_fpath)}')
     logger.info(f'Latest alias: {rich_link(report_dpath / "audit_results_index.latest.csv")}')
+
+    if args.combined_with_official:
+        official_fpath = Path(args.combined_with_official).expanduser().resolve()
+        combined_fpath = report_dpath / f'combined_component_index_{stamp}.csv'
+        write_combined_component_index(
+            official_index_fpath=official_fpath,
+            local_rows=rows,
+            out_fpath=combined_fpath,
+        )
+        write_latest_alias(combined_fpath, report_dpath, 'combined_component_index.latest.csv')
+        logger.info(f'Wrote combined index: {rich_link(combined_fpath)}')
 
 
 if __name__ == '__main__':
