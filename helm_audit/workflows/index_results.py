@@ -208,6 +208,17 @@ def _row_for_job(
         attempt_identity=attempt_identity,
     )
 
+    # Canonical run_name — prefer the authoritative run_spec.json["name"]; fall
+    # back through directory-basename and then weaker logical keys.  Keeping
+    # this explicit means analyzers don't have to synthesize it downstream.
+    run_name = spec_fields['run_spec_name']
+    if run_name is None and run_dir is not None:
+        run_name = run_dir.name
+    if run_name is None and run_dir_text:
+        run_name = Path(run_dir_text).name
+    if run_name is None:
+        run_name = logical_run_key or run_entry
+
     row = {
         # --- normalized component-row fields (aligned with official index) ---
         'source_kind': 'local',
@@ -217,6 +228,7 @@ def _row_for_job(
         'job_id': job_dpath.name,
         'job_dpath': str(job_dpath),
         'run_path': run_dir_text,
+        'run_name': run_name,
         'run_spec_fpath': str(run_spec_fpath) if (run_spec_fpath and run_spec_fpath.exists()) else None,
         'run_spec_name': spec_fields['run_spec_name'],
         'run_spec_hash': spec_fields['run_spec_hash'],
@@ -381,7 +393,7 @@ def main(argv: list[str] | None = None) -> None:
             'manifest_timestamp', 'process_start_timestamp', 'process_stop_timestamp',
             'max_eval_instances', 'machine_host', 'gpu_count', 'gpu_names',
             'cuda_visible_devices', 'provenance_source', 'process_context_source',
-            'run_path', 'run_dir', 'run_spec_fpath',
+            'run_name', 'run_path', 'run_dir', 'run_spec_fpath',
             'materialize_out_dpath', 'adapter_manifest_fpath',
             'process_context_fpath', 'index_generated_utc',
         ]

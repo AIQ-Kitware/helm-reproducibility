@@ -359,6 +359,86 @@ def test_html_benchmark_plot_not_truncated(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Backward compatibility — indexes without a literal run_name column
+# ---------------------------------------------------------------------------
+
+def test_analyzer_synthesizes_run_name_from_run_spec_name(tmp_path):
+    """A local-style index lacking run_name must still produce nonzero run counts."""
+    rows = [
+        {'source_kind': 'local', 'run_spec_name': 'boolq:model=foo',
+         'model': 'foo', 'benchmark_group': 'boolq', 'scenario_class': 'helm.X'},
+        {'source_kind': 'local', 'run_spec_name': 'mmlu:model=bar',
+         'model': 'bar', 'benchmark_group': 'mmlu', 'scenario_class': 'helm.X'},
+        {'source_kind': 'local', 'run_spec_name': 'boolq:model=bar',
+         'model': 'bar', 'benchmark_group': 'boolq', 'scenario_class': 'helm.X'},
+    ]
+    df = pd.DataFrame(rows)
+    index_fpath = tmp_path / 'local_no_run_name.csv'
+    df.to_csv(index_fpath, index=False)
+    out_dpath = tmp_path / 'analysis'
+    summary = analyze_index_snapshot(index_fpath=index_fpath, out_dpath=out_dpath)
+
+    assert summary['row_counts']['benchmark_runs'] == 3
+    assert summary['cardinality']['run_names'] == 3
+    assert summary['cardinality']['models'] == 2
+    by_model = {r['model']: r for r in summary['counts_by_model']}
+    assert by_model['bar']['total_runs'] == 2
+    assert by_model['foo']['total_runs'] == 1
+
+
+def test_analyzer_synthesizes_run_name_from_logical_run_key(tmp_path):
+    """When only logical_run_key is present, analyzer uses it as run_name."""
+    rows = [
+        {'source_kind': 'local', 'logical_run_key': 'boolq:model=foo',
+         'model': 'foo', 'benchmark_group': 'boolq', 'scenario_class': 'helm.X'},
+        {'source_kind': 'local', 'logical_run_key': 'mmlu:model=bar',
+         'model': 'bar', 'benchmark_group': 'mmlu', 'scenario_class': 'helm.X'},
+    ]
+    df = pd.DataFrame(rows)
+    index_fpath = tmp_path / 'local_logical_only.csv'
+    df.to_csv(index_fpath, index=False)
+    summary = analyze_index_snapshot(
+        index_fpath=index_fpath, out_dpath=tmp_path / 'analysis',
+    )
+    assert summary['cardinality']['run_names'] == 2
+
+
+def test_analyzer_synthesizes_run_name_from_run_path_basename(tmp_path):
+    """Basename of run_path is used as a fallback for older local indexes."""
+    rows = [
+        {'source_kind': 'local',
+         'run_path': '/results/exp/helm/job-1/benchmark_output/runs/s/boolq:model=foo',
+         'model': 'foo', 'benchmark_group': 'boolq', 'scenario_class': 'helm.X'},
+        {'source_kind': 'local',
+         'run_path': '/results/exp/helm/job-2/benchmark_output/runs/s/mmlu:model=bar',
+         'model': 'bar', 'benchmark_group': 'mmlu', 'scenario_class': 'helm.X'},
+    ]
+    df = pd.DataFrame(rows)
+    index_fpath = tmp_path / 'local_only_run_path.csv'
+    df.to_csv(index_fpath, index=False)
+    summary = analyze_index_snapshot(
+        index_fpath=index_fpath, out_dpath=tmp_path / 'analysis',
+    )
+    assert summary['cardinality']['run_names'] == 2
+    by_model = {r['model']: r for r in summary['counts_by_model']}
+    assert by_model['foo']['total_runs'] == 1
+    assert by_model['bar']['total_runs'] == 1
+
+
+def test_analyzer_official_index_unaffected_by_run_name_backfill(tmp_path):
+    """The explicit run_name in the official index must take precedence."""
+    rows = [
+        _row('boolq:model=foo', 'v0.2.2', 'h1'),
+        _row('mmlu:model=bar', 'v0.2.2', 'h2'),
+    ]
+    _, summary = _run_analysis(rows, tmp_path)
+    assert summary['cardinality']['run_names'] == 2
+    by_model = {r['model']: r for r in summary['counts_by_model']}
+    assert by_model['foo']['total_runs'] == 1
+    assert by_model['bar']['total_runs'] == 1
+
+
+# ---------------------------------------------------------------------------
 # Graceful degradation when optional columns are absent
 # ---------------------------------------------------------------------------
 

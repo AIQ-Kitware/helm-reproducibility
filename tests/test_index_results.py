@@ -186,6 +186,69 @@ def test_row_has_normalized_component_fields(tmp_path, monkeypatch):
     assert row['run_dir'] == str(run_dir)
 
 
+def test_row_run_name_prefers_run_spec_json_name(tmp_path, monkeypatch):
+    """run_name must be sourced from run_spec.json["name"] when available."""
+    spec_name = 'mmlu:subject=anatomy,model=meta/llama-3-8b'
+    # Deliberately give the run directory a *different* name from the spec name
+    # to prove we prefer the spec.
+    run_dir_basename = 'mmlu_subject_anatomy_renamed'
+    job_dpath = tmp_path / 'demo-exp' / 'helm' / 'job-1'
+    job_config_fpath = job_dpath / 'job_config.json'
+    _write_json(job_config_fpath, {
+        'helm.run_entry': spec_name,
+        'helm.suite': 'demo-suite',
+    })
+    _write_json(job_dpath / 'adapter_manifest.json', {'status': 'computed'})
+    run_dir = job_dpath / 'benchmark_output' / 'runs' / 'demo-suite' / run_dir_basename
+    run_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(run_dir / 'run_spec.json', _make_run_spec(spec_name))
+
+    monkeypatch.setattr(index_results, '_first_run_dir', lambda _j: run_dir)
+    row = index_results._row_for_job(job_config_fpath, fallback_host=None)
+
+    assert row['run_name'] == spec_name, 'run_name must come from run_spec.json["name"]'
+    assert row['run_spec_name'] == spec_name
+    assert Path(row['run_path']).name == run_dir_basename
+
+
+def test_row_run_name_falls_back_to_basename_when_no_spec(tmp_path, monkeypatch):
+    """When run_spec.json is absent, run_name falls back to run_dir basename."""
+    run_dir_basename = 'boolq:model=meta_llama-3-8b'
+    job_dpath = tmp_path / 'demo-exp' / 'helm' / 'job-1'
+    job_config_fpath = job_dpath / 'job_config.json'
+    _write_json(job_config_fpath, {
+        'helm.run_entry': 'boolq:model=meta/llama-3-8b',
+        'helm.suite': 'demo-suite',
+    })
+    _write_json(job_dpath / 'adapter_manifest.json', {'status': 'failed'})
+    run_dir = job_dpath / 'benchmark_output' / 'runs' / 'demo-suite' / run_dir_basename
+    run_dir.mkdir(parents=True, exist_ok=True)
+    # No run_spec.json written.
+
+    monkeypatch.setattr(index_results, '_first_run_dir', lambda _j: run_dir)
+    row = index_results._row_for_job(job_config_fpath, fallback_host=None)
+
+    assert row['run_spec_name'] is None
+    assert row['run_name'] == run_dir_basename
+
+
+def test_row_run_name_final_fallback_is_logical_or_entry(tmp_path, monkeypatch):
+    """With no run_dir and no spec, run_name falls back to logical_run_key / run_entry."""
+    job_dpath = tmp_path / 'demo-exp' / 'helm' / 'job-1'
+    job_config_fpath = job_dpath / 'job_config.json'
+    _write_json(job_config_fpath, {
+        'helm.run_entry': 'boolq:model=meta/llama-3-8b',
+        'helm.suite': 'demo-suite',
+    })
+    _write_json(job_dpath / 'adapter_manifest.json', {'status': 'failed'})
+
+    monkeypatch.setattr(index_results, '_first_run_dir', lambda _j: None)
+    row = index_results._row_for_job(job_config_fpath, fallback_host=None)
+
+    assert row['run_path'] is None
+    assert row['run_name'] == 'boolq:model=meta/llama-3-8b'
+
+
 def test_row_run_spec_hash_is_stable_and_present(tmp_path, monkeypatch):
     """run_spec_hash must be deterministic and come from the shared helper."""
     run_name = 'mmlu:model=meta_llama-3-8b'

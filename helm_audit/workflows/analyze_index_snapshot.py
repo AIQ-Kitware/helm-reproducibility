@@ -102,6 +102,15 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
     has_run_spec_hash = 'run_spec_hash' in _original_cols and df['run_spec_hash'].notna().any()
 
     # ------------------------------------------------------------------
+    # Backfill a canonical run_name so older indexes (e.g. local indexes
+    # emitted before `run_name` was a first-class field) still produce
+    # non-zero run counts.  Preference order mirrors the local builder:
+    # run_name → run_spec_name → logical_run_key → run_entry → basename of
+    # run_path / run_dir.
+    # ------------------------------------------------------------------
+    df['run_name'] = _coerce_run_name_series(df)
+
+    # ------------------------------------------------------------------
     # Partition rows
     # ------------------------------------------------------------------
     df_runs = df[df['entry_kind'] == 'benchmark_run'].copy()
@@ -267,6 +276,35 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _coerce_run_name_series(df: pd.DataFrame) -> pd.Series:
+    """Return a canonical run_name column, filling gaps from weaker sources.
+
+    Preference order per row:
+      1. ``run_name``
+      2. ``run_spec_name``
+      3. ``logical_run_key``
+      4. ``run_entry``
+      5. basename of ``run_path``
+      6. basename of ``run_dir``
+    """
+    def _basename_of(col: str) -> pd.Series:
+        if col not in df.columns:
+            return pd.Series([None] * len(df), index=df.index)
+        return df[col].map(
+            lambda v: Path(v).name if isinstance(v, str) and v else None
+        )
+
+    out = df['run_name'].copy() if 'run_name' in df.columns else pd.Series(
+        [None] * len(df), index=df.index,
+    )
+    for col in ('run_spec_name', 'logical_run_key', 'run_entry'):
+        if col in df.columns:
+            out = out.where(out.notna(), df[col])
+    out = out.where(out.notna(), _basename_of('run_path'))
+    out = out.where(out.notna(), _basename_of('run_dir'))
+    return out
+
 
 def _agg_by_group(
     df: pd.DataFrame,
