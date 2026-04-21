@@ -45,7 +45,10 @@ Ignore:
 """
 
 from __future__ import annotations
+import fnmatch
+import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, Any
 
@@ -127,6 +130,17 @@ class CompileHelmReproListConfig(scfg.DataConfig):
     out_inventory_json = scfg.Value(
         None,
         help="If provided, write the full filter inventory as JSON for later analysis.",
+    )
+
+    out_official_index_dpath = scfg.Value(
+        None,
+        help=(
+            "If provided, emit the canonical official/public index as a timestamped CSV "
+            "plus a .latest.csv symlink in this directory.  This index captures ALL "
+            "public HELM run entries (including structural junk) with explicit "
+            "public_track and suite_version provenance. "
+            "It is separate from Stage 1 selected-run artifacts."
+        ),
     )
 
     dedupe = scfg.Value(
@@ -398,6 +412,21 @@ class CompileHelmReproListConfig(scfg.DataConfig):
                 ) + '\n'
             )
             logger.success("Wrote ⚙ {}", inventory_fpath)
+
+        if config.out_official_index_dpath:
+            official_rows = build_official_public_index_rows(
+                roots=roots,
+                suite_pattern=suite_pattern,
+            )
+            ts_fpath, latest_fpath = write_official_public_index(
+                rows=official_rows,
+                out_dpath=Path(config.out_official_index_dpath).expanduser().resolve(),
+            )
+            logger.success(
+                "Wrote official public index {} ({} rows)",
+                ts_fpath, len(official_rows),
+            )
+            logger.success("Latest alias: {}", latest_fpath)
 
         if config.out_detail_fpath:
             text = kwutil.Yaml.dumps(chosen_rows)
@@ -752,6 +781,239 @@ def build_filter_inventory_rows(
     inventory_rows.extend(incomplete_rows)
     inventory_rows.sort(key=lambda row: (row['selection_status'], str(row.get('model')), row['run_spec_name']))
     return inventory_rows
+
+
+# ---------------------------------------------------------------------------
+# Official/public index — version-aware canonical artifact
+# ---------------------------------------------------------------------------
+
+#: Directory names that appear under benchmark_output/runs/<suite>/ but are
+#: NOT benchmark run directories (e.g. HELM emits groups/, confs/, logs/).
+KNOWN_STRUCTURAL_JUNK_NAMES: frozenset[str] = frozenset({
+    'groups', 'confs', 'logs', '__pycache__',
+})
+
+#: Ordered list of columns in the official public index CSV.
+OFFICIAL_INDEX_COLUMNS: list[str] = [
+    'source_kind',
+    'public_root',
+    'public_track',
+    'suite_version',
+    'public_run_dir',
+    'run_name',
+    'entry_kind',
+    'has_run_spec_json',
+    'run_spec_fpath',
+    'run_spec_name',
+    'run_spec_hash',
+    'model',
+    'scenario_class',
+    'benchmark_group',
+    'max_eval_instances',
+    'is_structural_junk',
+    'index_generated_utc',
+]
+
+
+def _normalize_for_hash(obj: Any) -> Any:
+    """Recursively sort dict keys so the hash is stable regardless of insertion order."""
+    if isinstance(obj, dict):
+        return {k: _normalize_for_hash(v) for k, v in sorted(obj.items())}
+    if isinstance(obj, list):
+        return [_normalize_for_hash(v) for v in obj]
+    return obj
+
+
+def _compute_run_spec_hash(run_spec_fpath: Path) -> str | None:
+    """Return a stable SHA-256 hex digest of the normalised run_spec.json content."""
+    try:
+        content = json.loads(run_spec_fpath.read_text(encoding='utf-8'))
+        normalised = json.dumps(
+            _normalize_for_hash(content),
+            ensure_ascii=False,
+            separators=(',', ':'),
+        )
+        return hashlib.sha256(normalised.encode('utf-8')).hexdigest()
+    except Exception:
+        return None
+
+
+def _classify_run_entry(entry_name: str) -> tuple[str, bool]:
+    """
+    Classify a directory name found under a HELM suite directory.
+
+    Returns:
+        (entry_kind, is_structural_junk)
+        entry_kind is one of 'benchmark_run', 'structural_non_run', 'unknown'.
+    """
+    if entry_name in KNOWN_STRUCTURAL_JUNK_NAMES:
+        return 'structural_non_run', True
+    if ':' in entry_name:
+        return 'benchmark_run', False
+    return 'unknown', False
+
+
+def _scan_benchmark_output_dir(
+    bo_dir: Path,
+    public_root: str | None,
+    public_track: str,
+    suite_pattern: str = '*',
+    index_generated_utc: str = '',
+) -> list[dict[str, Any]]:
+    """
+    Scan a single benchmark_output directory and return official index rows.
+
+    This is the inner loop extracted so it can be unit-tested without magnet.
+    """
+    rows: list[dict[str, Any]] = []
+    runs_dir = bo_dir / 'runs'
+    if not runs_dir.is_dir():
+        return rows
+
+    for suite_dir in sorted(runs_dir.iterdir()):
+        if not suite_dir.is_dir():
+            continue
+        suite_version = suite_dir.name
+        if suite_pattern != '*' and not fnmatch.fnmatch(suite_version, suite_pattern):
+            continue
+
+        for entry_dir in sorted(suite_dir.iterdir()):
+            if not entry_dir.is_dir():
+                continue
+            run_name = entry_dir.name
+            entry_kind, is_structural_junk = _classify_run_entry(run_name)
+
+            run_spec_fpath = entry_dir / 'run_spec.json'
+            has_run_spec_json = run_spec_fpath.exists()
+            run_spec_hash: str | None = None
+            run_spec_name: str | None = None
+            model: str | None = None
+            scenario_class: str | None = None
+            benchmark_group: str | None = run_name.split(':')[0] if ':' in run_name else None
+
+            if has_run_spec_json:
+                run_spec_hash = _compute_run_spec_hash(run_spec_fpath)
+                try:
+                    spec = json.loads(run_spec_fpath.read_text(encoding='utf-8'))
+                    run_spec_name = spec.get('name')
+                    model = spec.get('adapter_spec', {}).get('model')
+                    scenario_class = spec.get('scenario_spec', {}).get('class_name')
+                    if benchmark_group is None and run_spec_name and ':' in run_spec_name:
+                        benchmark_group = run_spec_name.split(':')[0]
+                except Exception:
+                    pass
+
+            rows.append({
+                'source_kind': 'official',
+                'public_root': public_root,
+                'public_track': public_track,
+                'suite_version': suite_version,
+                'public_run_dir': str(entry_dir),
+                'run_name': run_name,
+                'entry_kind': entry_kind,
+                'has_run_spec_json': has_run_spec_json,
+                'run_spec_fpath': str(run_spec_fpath) if has_run_spec_json else None,
+                'run_spec_name': run_spec_name,
+                'run_spec_hash': run_spec_hash,
+                'model': model,
+                'scenario_class': scenario_class,
+                'benchmark_group': benchmark_group,
+                'max_eval_instances': None,
+                'is_structural_junk': is_structural_junk,
+                'index_generated_utc': index_generated_utc,
+            })
+
+    return rows
+
+
+def build_official_public_index_rows(
+    roots: list[Path],
+    suite_pattern: str = '*',
+    index_generated_utc: str | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Scan public HELM roots and build the canonical version-aware official index.
+
+    Unlike gather_runs(), this function:
+    - Does NOT filter for run completeness.
+    - Records every directory entry including structural junk.
+    - Preserves explicit public_track and suite_version provenance.
+    - Computes a stable run_spec_hash from normalised run_spec.json content.
+    """
+    from magnet.backends.helm.cli.materialize_helm_run import discover_benchmark_output_dirs
+
+    if index_generated_utc is None:
+        index_generated_utc = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    bo_dirs = list(ub.ProgIter(
+        discover_benchmark_output_dirs(roots),
+        desc='discovering benchmark_output dirs for official index',
+        verbose=3,
+        homogeneous=False,
+    ))
+
+    rows: list[dict[str, Any]] = []
+    for bo_dir in ub.ProgIter(bo_dirs, desc='Building official public index'):
+        bo_dir = Path(bo_dir)
+        public_root: str | None = None
+        public_track = 'unknown'
+        for root in roots:
+            try:
+                rel = bo_dir.parent.relative_to(root)
+                public_root = str(root)
+                parts = rel.parts
+                public_track = '/'.join(parts) if parts else 'main'
+                break
+            except ValueError:
+                continue
+
+        rows.extend(_scan_benchmark_output_dir(
+            bo_dir=bo_dir,
+            public_root=public_root,
+            public_track=public_track,
+            suite_pattern=suite_pattern,
+            index_generated_utc=index_generated_utc,
+        ))
+
+    rows.sort(key=lambda r: (r['public_track'], r['suite_version'], r['run_name']))
+    return rows
+
+
+def write_official_public_index(
+    rows: list[dict[str, Any]],
+    out_dpath: Path,
+    timestamp: str | None = None,
+) -> tuple[Path, Path]:
+    """
+    Write the official public index to a timestamped CSV and update the .latest symlink.
+
+    Returns (timestamped_fpath, latest_fpath).
+    """
+    import pandas as pd
+
+    if timestamp is None:
+        timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+
+    out_dpath.mkdir(parents=True, exist_ok=True)
+    ts_fpath = out_dpath / f'official_public_index_{timestamp}.csv'
+    latest_fpath = out_dpath / 'official_public_index.latest.csv'
+
+    df = pd.DataFrame(rows)
+    for col in OFFICIAL_INDEX_COLUMNS:
+        if col not in df.columns:
+            df[col] = None
+    df = df[OFFICIAL_INDEX_COLUMNS]
+    df.to_csv(ts_fpath, index=False)
+
+    if latest_fpath.is_symlink() or latest_fpath.exists():
+        latest_fpath.unlink()
+    try:
+        latest_fpath.symlink_to(ts_fpath.name)
+    except OSError:
+        import shutil
+        shutil.copy2(ts_fpath, latest_fpath)
+
+    return ts_fpath, latest_fpath
 
 
 __cli__ = CompileHelmReproListConfig

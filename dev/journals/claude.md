@@ -318,3 +318,27 @@ Claude Sonnet 4.6.
 - No new plot artifact (text table is sufficient; adding a plot would require plotly and is not clearly cheap/clean for this partition).
 
 14 filter tests pass.
+
+## 2026-04-21 00:00:00 -0700
+
+User asked for version-aware official/public HELM index and a sidecar analysis tool, motivated by the fact that public HELM has ~36K run dirs spanning multiple suite versions and tracks, and the existing Stage 1 selected subset (~270 runs) is too small to serve as a canonical inventory.
+
+Claude Sonnet 4.6.
+
+**Part A — official/public index artifact in `index_historic_helm_runs.py`:**
+Added `KNOWN_STRUCTURAL_JUNK_NAMES`, `_normalize_for_hash()`, `_compute_run_spec_hash()`, `_classify_run_entry()`, `_scan_benchmark_output_dir()` (inner loop, directly testable), `build_official_public_index_rows()` (calls magnet discover), `write_official_public_index()` (timestamped CSV + .latest.csv symlink). New CLI arg `--out_official_index_dpath` (opt-in, no effect unless specified). Existing Stage 1 outputs unchanged.
+
+Key design decisions:
+- `_scan_benchmark_output_dir` is separated out as a pure filesystem helper so tests don't need magnet.
+- `run_spec_hash` is SHA-256 of recursively key-sorted JSON, truncated to full hex for uniqueness.
+- Structural junk detection: known names (`groups`, `confs`, `logs`, `__pycache__`) → `structural_non_run`; dirs with `:` → `benchmark_run`; others → `unknown`.
+- `public_track` = relative path from root to `benchmark_output` parent (`.` → `'main'`).
+
+**Part B — `helm_audit/workflows/analyze_official_index.py`:**
+Standalone tool consuming a single official index CSV. Produces 8 artifacts: summary txt/json, per-track/version/model/benchmark CSVs, duplicates report, version-drift report. Does NOT rescan filesystem. Registered as `helm-audit-analyze-official-index` entrypoint.
+
+**Path helpers added to `paths.py`:** `official_public_index_dpath()` → `indexes/`, `official_public_analysis_dpath()` → `analysis/official-public-index/`.
+
+**Tests:** `tests/test_official_public_index.py` — 26 tests, all passing. Covers all 6 required scenarios without needing magnet or real HELM data.
+
+Next: User may want to actually run `--out_official_index_dpath` against `/data/crfm-helm-public` and then run the analysis tool. The scan will be slow (36K dirs + run_spec.json reads) but is a one-time operation.
