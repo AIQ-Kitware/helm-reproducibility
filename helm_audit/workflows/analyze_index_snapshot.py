@@ -6,17 +6,11 @@ It degrades gracefully when optional provenance columns (``suite_version``,
 ``public_track``, ``run_spec_hash``) are absent — those breakdowns just
 produce empty or single-group tables instead of failing.
 
-Typical usage against the official/public index:
+Usage:
 
     python -m helm_audit.workflows.analyze_index_snapshot \\
-        --index_fpath /data/crfm-helm-audit-store/indexes/official_public_index.latest.csv \\
-        --out_dpath   /data/crfm-helm-audit-store/analysis/official-public-index/
-
-Or against any other index CSV:
-
-    python -m helm_audit.workflows.analyze_index_snapshot \\
-        --index_fpath my_custom_index.csv \\
-        --out_dpath   /tmp/snapshot-analysis/
+        --index_fpath /data/my-store/indexes/my_index.latest.csv \\
+        --out_dpath   /data/my-store/analysis/index-snapshot/
 """
 
 from __future__ import annotations
