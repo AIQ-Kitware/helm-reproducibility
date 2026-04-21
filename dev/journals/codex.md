@@ -251,6 +251,21 @@ Design takeaways:
 2. Filtering display rows to remove zero-valued bars can improve usefulness without weakening the underlying data if the full table remains intact.
 3. When a metric already exists in the table rows, the safest edit is to reuse it rather than invent a new aggregation path.
 
+## 2026-04-21 00:17:24 +0000
+
+Summary of user intent: diagnose why the model selected-fraction plot was rendering all `1.0` values and make the narrowest correction needed so it reflects selected-versus-total behavior for all model rows.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+The important detail was that the 1.0 values were not caused by the fraction formula itself. `fraction_selected_of_all` already computes selected divided by total for each facet. The misleading result came from the chart-specific row filter, which only kept model rows with nonzero eligible-selected signal. That meant the plot was showing a highly restricted subset of models that, in the current data, happen to be fully selected. Once that filter is removed, the plot can actually express the intended model-level fraction story.
+
+I kept the correction narrow and isolated to the model chart because the user’s question was specifically about that behavior. The dataset chart still has its previous display filter, which is a separate presentation choice. The tradeoff is that the model chart now reveals the full distribution, which is what we want for correctness, but the chart may include more rows than before. That is acceptable because it restores the honest denominator story instead of hiding the very rows that explain the plot.
+
+Design takeaways:
+1. A correct formula can still produce a misleading chart if the plotted row set is prefiltered too aggressively.
+2. When a facet chart seems uniformly saturated, check the chart input rows before changing the metric.
+3. Keep fixes local to the chart that exhibits the problem when the underlying table logic is already correct.
+
 ## 2026-04-09 22:45:14 +0000
 
 Summary of user intent: improve the historic grid aggregate report so it shows a model-separated histogram of run specs that were filtered out versus included.

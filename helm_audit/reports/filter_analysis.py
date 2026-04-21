@@ -1484,10 +1484,7 @@ def emit_filter_analysis_artifacts(
         'sel_excl_by_scenario_tsv': str(_write_stamped_table(report_dpath, tables_dpath, 'filter_candidate_selection_by_scenario', stamp, selected_excluded_by_scenario_rows)),
     }
 
-    selected_fraction_by_model_rows = [
-        row for row in by_model_rows
-        if (row.get('fraction_selected_of_eligible') or 0) > 0
-    ]
+    selected_fraction_by_model_rows = by_model_rows
     selected_fraction_by_dataset_rows = [
         row for row in by_dataset_rows
         if (row.get('fraction_selected_of_eligible') or 0) > 0
