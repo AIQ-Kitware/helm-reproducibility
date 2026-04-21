@@ -892,3 +892,20 @@ The repo is not fully at the slide stage yet, but it is much closer. The report 
 I also feel more confident now about what *not* to do. I do not think I need more legacy aliases. I do not think I need a high-risk wrapper layer just to order reports. I do not think I need to recompute raw HELM results just to improve the storytelling surface. What I do still need is to rerun the report-generation scripts, inspect the newly fixed filtering outputs, then turn toward the aggregate/all-results layer and slide construction.
 
 So the state at the end of this session is: the reporting surface is much healthier, the filter layer is more honest and more interpretable, and the next phase should be verifying the regenerated artifacts and then building the six-stage slide/storyboard from the now-cleaner report contract.
+
+## 2026-04-21 00:45:15 +0000
+
+Summary of user intent: correct the agreement-curve title counts in `helm_audit/workflows/build_reports_summary.py` so `n_scenarios` does not collapse to `1` when scenario metadata is sparse, while keeping the current legend/layout improvements and the plotted-subset-only count semantics.
+
+Model and configuration: GPT-5.4, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+The bug is a classic “wrong field for the shape of this report” issue. The previous title logic was technically counting something from the plotted subset, but it assumed that `scenario` was populated on the contributing rows. In this aggregate path, that assumption is too brittle: the meaningful diversity is carried by benchmark-like units, and scenario is either blank or not the right semantic field.
+
+I’m fixing that by making the title count logic explicit about the fallback order. The plotted subset still determines the population being counted, but `n_scenarios` now prefers `scenario`, then falls back to `benchmark`, then `suite` as a last resort if needed. That keeps the title aligned with what the reader can actually see in the plot instead of emitting a misleading `1` just because the preferred metadata field is missing.
+
+The reason I’m keeping the fallback chain narrow is to avoid turning this into a semantic rewrite. The legend/layout patch from the prior step remains intact, and the curve data itself is unchanged. The only thing that changes here is how the title summarizes the subset already on the canvas.
+
+Design takeaways:
+1. A count label is only as good as the metadata field that feeds it.
+2. When a report has a clear visible grouping, the title should prefer the grouping the reader can verify in the figure.
+3. Narrow fallback chains are safer than ad hoc guessing because they make the semantic intent visible in code.
