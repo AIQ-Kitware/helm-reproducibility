@@ -1201,17 +1201,27 @@ def _format_off_story_summary_text(
     return lines
 
 
-def _build_analyzed_attempt_keys(
+def _build_analyzed_attempt_matchers(
     repro_rows: list[dict[str, Any]],
-) -> tuple[set[tuple[str, str, str]], set[tuple[str, str]]]:
-    explicit_attempt_keys: set[tuple[str, str, str]] = set()
+) -> tuple[dict[tuple[str, str], dict[str, set[str]]], set[tuple[str, str]]]:
+    explicit_matchers: dict[tuple[str, str], dict[str, set[str]]] = {}
     analyzed_groups: set[tuple[str, str]] = set()
     for row in repro_rows:
         experiment_name = _clean_optional_text(row.get("experiment_name"))
         run_entry = _clean_optional_text(row.get("run_entry"))
         if not experiment_name or not run_entry:
             continue
-        analyzed_groups.add((experiment_name, run_entry))
+        group_key = (experiment_name, run_entry)
+        analyzed_groups.add(group_key)
+        matcher = explicit_matchers.setdefault(
+            group_key,
+            {
+                "run_dirs": set(),
+                "attempt_identities": set(),
+                "attempt_uuids": set(),
+                "attempt_fallback_keys": set(),
+            },
+        )
         selected_run_dirs = row.get("analysis_selected_run_dirs") or []
         if isinstance(selected_run_dirs, str):
             try:
@@ -1221,29 +1231,77 @@ def _build_analyzed_attempt_keys(
         for run_dir in selected_run_dirs:
             run_dir_text = _clean_optional_text(run_dir)
             if run_dir_text:
-                explicit_attempt_keys.add((experiment_name, run_entry, run_dir_text))
-    return explicit_attempt_keys, analyzed_groups
+                matcher["run_dirs"].add(run_dir_text)
+        selected_attempt_refs = row.get("analysis_selected_attempt_refs") or []
+        if isinstance(selected_attempt_refs, str):
+            try:
+                selected_attempt_refs = json.loads(selected_attempt_refs)
+            except Exception:
+                selected_attempt_refs = []
+        for ref in selected_attempt_refs:
+            if not isinstance(ref, dict):
+                continue
+            for src_key, dst_key in [
+                ("run_dir", "run_dirs"),
+                ("attempt_identity", "attempt_identities"),
+                ("attempt_uuid", "attempt_uuids"),
+                ("attempt_fallback_key", "attempt_fallback_keys"),
+            ]:
+                value = _clean_optional_text(ref.get(src_key))
+                if value:
+                    matcher[dst_key].add(value)
+        selected_attempt_identities = row.get("analysis_selected_attempt_identities") or []
+        if isinstance(selected_attempt_identities, str):
+            try:
+                selected_attempt_identities = json.loads(selected_attempt_identities)
+            except Exception:
+                selected_attempt_identities = [selected_attempt_identities]
+        for identity in selected_attempt_identities:
+            identity_text = _clean_optional_text(identity)
+            if identity_text:
+                matcher["attempt_identities"].add(identity_text)
+    return explicit_matchers, analyzed_groups
 
 
-def _is_row_analyzed(
+def _analyzed_match_status(
     row: dict[str, Any],
     *,
-    explicit_attempt_keys: set[tuple[str, str, str]],
-    explicit_groups: set[tuple[str, str]],
+    explicit_matchers: dict[tuple[str, str], dict[str, set[str]]],
     analyzed_groups: set[tuple[str, str]],
-) -> bool:
+    completed_rows_by_group: dict[tuple[str, str], list[dict[str, Any]]],
+) -> str:
     if not _is_truthy_text(row.get("has_run_spec")):
-        return False
+        return "not_completed"
     experiment_name = _clean_optional_text(row.get("experiment_name"))
     run_entry = _clean_optional_text(row.get("run_entry"))
     if not experiment_name or not run_entry:
-        return False
+        return "missing_group_key"
+    group_key = (experiment_name, run_entry)
+    if group_key not in analyzed_groups:
+        return "not_in_analyzed_group"
+
+    matcher = explicit_matchers.get(group_key)
     run_dir = _clean_optional_text(row.get("run_dir"))
-    if run_dir and (experiment_name, run_entry, run_dir) in explicit_attempt_keys:
-        return True
-    if (experiment_name, run_entry) in explicit_groups:
-        return False
-    return (experiment_name, run_entry) in analyzed_groups
+    attempt_identity = _clean_optional_text(row.get("attempt_identity"))
+    attempt_uuid = _clean_optional_text(row.get("attempt_uuid"))
+    attempt_fallback_key = _clean_optional_text(row.get("attempt_fallback_key"))
+    if matcher and any(matcher.values()):
+        if run_dir and run_dir in matcher["run_dirs"]:
+            return "explicit_run_dir"
+        if attempt_identity and attempt_identity in matcher["attempt_identities"]:
+            return "explicit_attempt_identity"
+        if attempt_uuid and attempt_uuid in matcher["attempt_uuids"]:
+            return "explicit_attempt_uuid"
+        if attempt_fallback_key and attempt_fallback_key in matcher["attempt_fallback_keys"]:
+            return "explicit_attempt_fallback_key"
+        return "ambiguous_explicit_group_unmatched"
+
+    completed_group_rows = completed_rows_by_group.get(group_key, [])
+    if len(completed_group_rows) == 1:
+        return "singleton_completed_group_fallback"
+    if len(completed_group_rows) > 1:
+        return "ambiguous_legacy_group_multi_completed"
+    return "analyzed_group_without_completed_rows"
 
 
 def _build_run_multiplicity_summary(
@@ -1255,8 +1313,7 @@ def _build_run_multiplicity_summary(
     registry_lookup = local_model_registry_by_name()
     filter_lookup = _filter_inventory_lookup_by_run_entry(filter_inventory_rows)
     run_entry_meta = _run_entry_metadata_lookup(filter_inventory_rows, scope_rows)
-    explicit_attempt_keys, analyzed_groups = _build_analyzed_attempt_keys(repro_rows)
-    explicit_groups = {(exp, run_entry) for exp, run_entry, _ in explicit_attempt_keys}
+    explicit_matchers, analyzed_groups = _build_analyzed_attempt_matchers(repro_rows)
     repro_by_run_entry = _group_repro_rows_by_run_entry(repro_rows)
 
     grouped_rows = _group_scope_rows_by_run_entry(scope_rows)
@@ -1276,15 +1333,33 @@ def _build_run_multiplicity_summary(
             reverse=True,
         )
         completed_rows = [row for row in resolved_rows if _is_truthy_text(row.get("has_run_spec"))]
-        analyzed_rows = [
-            row for row in resolved_rows
-            if _is_row_analyzed(
-                row,
-                explicit_attempt_keys=explicit_attempt_keys,
-                explicit_groups=explicit_groups,
-                analyzed_groups=analyzed_groups,
+        completed_rows_by_group: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in completed_rows:
+            group_key = (
+                _clean_optional_text(row.get("experiment_name")) or "",
+                _clean_optional_text(row.get("run_entry")) or "",
             )
+            completed_rows_by_group[group_key].append(row)
+        analyzed_statuses = [
+            _analyzed_match_status(
+                row,
+                explicit_matchers=explicit_matchers,
+                analyzed_groups=analyzed_groups,
+                completed_rows_by_group=completed_rows_by_group,
+            )
+            for row in resolved_rows
         ]
+        analyzed_rows = [
+            row for row, status in zip(resolved_rows, analyzed_statuses)
+            if status in {
+                "explicit_run_dir",
+                "explicit_attempt_identity",
+                "explicit_attempt_uuid",
+                "explicit_attempt_fallback_key",
+                "singleton_completed_group_fallback",
+            }
+        ]
+        analyzed_match_status_counts = Counter(analyzed_statuses)
         attempt_ids = [str(row.get("attempt_identity")) for row in resolved_rows if row.get("attempt_identity")]
         attempt_uuids = [str(row.get("attempt_uuid")) for row in resolved_rows if row.get("attempt_uuid")]
         fallback_attempt_ids = [
@@ -1327,6 +1402,10 @@ def _build_run_multiplicity_summary(
                 "n_attempt_uuids": len(set(attempt_uuids)),
                 "n_rows_with_attempt_uuid": sum(1 for row in resolved_rows if row.get("attempt_uuid")),
                 "n_rows_without_attempt_uuid": sum(1 for row in resolved_rows if not row.get("attempt_uuid")),
+                "n_ambiguous_analyzed_candidates": int(
+                    analyzed_match_status_counts.get("ambiguous_explicit_group_unmatched", 0)
+                    + analyzed_match_status_counts.get("ambiguous_legacy_group_multi_completed", 0)
+                ),
                 "machine_hosts": _preview_values(machine_hosts, max_items=8),
                 "experiment_names": _preview_values(experiment_names, max_items=8),
                 "attempt_ids": _preview_values(attempt_ids, max_items=8),
@@ -1339,6 +1418,8 @@ def _build_run_multiplicity_summary(
                 "latest_attempt_identity": resolved_rows[0].get("attempt_identity"),
                 "latest_attempt_identity_kind": resolved_rows[0].get("attempt_identity_kind"),
                 "latest_attempt_uuid": resolved_rows[0].get("attempt_uuid"),
+                "analyzed_match_status_counts": dict(analyzed_match_status_counts),
+                "analyzed_match_modes": _preview_values(list(analyzed_match_status_counts.keys()), max_items=6),
                 "analysis_report_dirs": _preview_values([
                     str(row.get("report_dir")) for row in repro_by_run_entry.get(run_entry, []) if row.get("report_dir")
                 ], max_items=4),
@@ -1357,6 +1438,7 @@ def _build_run_multiplicity_summary(
         "n_logical_runs_with_multiple_rows": sum(1 for row in summary_rows if int(row.get("n_rows") or 0) > 1),
         "n_logical_runs_with_multiple_completed_rows": sum(1 for row in summary_rows if int(row.get("n_completed_rows") or 0) > 1),
         "n_logical_runs_with_multiple_analyzed_rows": sum(1 for row in summary_rows if int(row.get("n_analyzed_rows") or 0) > 1),
+        "n_logical_runs_with_ambiguous_analyzed_matching": sum(1 for row in summary_rows if int(row.get("n_ambiguous_analyzed_candidates") or 0) > 0),
         "n_logical_runs_spanning_multiple_machines": sum(1 for row in summary_rows if int(row.get("n_machines") or 0) > 1),
         "n_logical_runs_spanning_multiple_experiments": sum(1 for row in summary_rows if int(row.get("n_experiments") or 0) > 1),
         "n_logical_runs_with_multiple_manifest_timestamps": sum(1 for row in summary_rows if int(row.get("n_manifest_timestamps") or 0) > 1),
@@ -1370,10 +1452,10 @@ def _build_run_multiplicity_summary(
             "attempt_uuid": "process_context.properties.uuid when available from process_context.json or embedded adapter_manifest.process_context",
             "attempt_fallback_key": "fallback::experiment_name|job_id|run_entry|manifest_timestamp|machine_host|run_dir when UUID is missing",
             "attempt_identity": "attempt_uuid when present, otherwise attempt_fallback_key",
-            "version": "a distinct attempt_identity observed under the same logical_run_key",
-            "cross_machine_repeat": "same logical_run_key observed on more than one distinct machine_host",
-            "analyzed_row": "a completed indexed row explicitly selected into a reproducibility report when selection provenance is available; otherwise a completed row in an analyzed (experiment_name, run_entry) group",
-        },
+        "version": "a distinct attempt_identity observed under the same logical_run_key",
+        "cross_machine_repeat": "same logical_run_key observed on more than one distinct machine_host",
+        "analyzed_row": "a completed indexed row matched to report selection provenance by run_dir or attempt identity when available; otherwise only a singleton completed row in an analyzed legacy (experiment_name, run_entry) group",
+    },
         "headline_counts": headline,
         "rows": summary_rows,
     }
@@ -1407,6 +1489,7 @@ def _format_run_multiplicity_summary_text(
         f"  n_logical_runs_with_multiple_rows: {counts['n_logical_runs_with_multiple_rows']}",
         f"  n_logical_runs_with_multiple_completed_rows: {counts['n_logical_runs_with_multiple_completed_rows']}",
         f"  n_logical_runs_with_multiple_analyzed_rows: {counts['n_logical_runs_with_multiple_analyzed_rows']}",
+        f"  n_logical_runs_with_ambiguous_analyzed_matching: {counts['n_logical_runs_with_ambiguous_analyzed_matching']}",
         f"  n_logical_runs_spanning_multiple_machines: {counts['n_logical_runs_spanning_multiple_machines']}",
         f"  n_logical_runs_spanning_multiple_experiments: {counts['n_logical_runs_spanning_multiple_experiments']}",
         f"  n_logical_runs_with_multiple_manifest_timestamps: {counts['n_logical_runs_with_multiple_manifest_timestamps']}",
@@ -1420,7 +1503,7 @@ def _format_run_multiplicity_summary_text(
         lines.append("  (no attempted runs found in this scope)")
         return lines
     header = (
-        f"{'run_entry':<44} {'rows':>4} {'cmp':>4} {'ana':>4} {'exp':>4} "
+        f"{'run_entry':<44} {'rows':>4} {'cmp':>4} {'ana':>4} {'amb':>4} {'exp':>4} "
         f"{'mach':>4} {'ids':>4} {'uuids':>5} latest_manifest"
     )
     lines.append(header)
@@ -1431,6 +1514,7 @@ def _format_run_multiplicity_summary_text(
             f"{int(row.get('n_rows') or 0):>4} "
             f"{int(row.get('n_completed_rows') or 0):>4} "
             f"{int(row.get('n_analyzed_rows') or 0):>4} "
+            f"{int(row.get('n_ambiguous_analyzed_candidates') or 0):>4} "
             f"{int(row.get('n_experiments') or 0):>4} "
             f"{int(row.get('n_machines') or 0):>4} "
             f"{int(row.get('n_attempt_ids') or 0):>4} "

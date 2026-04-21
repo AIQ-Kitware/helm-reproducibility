@@ -378,6 +378,7 @@ def test_run_multiplicity_summary_tracks_attempt_identity_and_analysis_selection
         "n_logical_runs_with_multiple_rows": 1,
         "n_logical_runs_with_multiple_completed_rows": 1,
         "n_logical_runs_with_multiple_analyzed_rows": 1,
+        "n_logical_runs_with_ambiguous_analyzed_matching": 0,
         "n_logical_runs_spanning_multiple_machines": 1,
         "n_logical_runs_spanning_multiple_experiments": 1,
         "n_logical_runs_with_multiple_manifest_timestamps": 1,
@@ -396,3 +397,64 @@ def test_run_multiplicity_summary_tracks_attempt_identity_and_analysis_selection
     assert row["n_rows_without_attempt_uuid"] == 1
     assert row["latest_attempt_identity"] == "uuid-c"
     assert "fallback::job-2" in row["fallback_attempt_ids"]
+
+
+def test_run_multiplicity_summary_marks_legacy_multi_completed_groups_ambiguous():
+    filter_inventory_rows = [
+        {
+            "run_spec_name": "gsm8k:model=openai/gpt-oss-20b",
+            "model": "openai/gpt-oss-20b",
+            "benchmark": "gsm8k",
+            "scenario": "gsm8k",
+            "selection_status": "selected",
+            "expected_local_served": True,
+            "replaces_helm_deployment": None,
+            "local_registry_source": "preset:gpt_oss_20b_vllm",
+        }
+    ]
+    scope_rows = [
+        {
+            "experiment_name": "legacy-exp",
+            "job_id": "job-1",
+            "run_entry": "gsm8k:model=openai/gpt-oss-20b",
+            "model": "openai/gpt-oss-20b",
+            "benchmark": "gsm8k",
+            "machine_host": "host-a",
+            "manifest_timestamp": "10",
+            "has_run_spec": "True",
+            "run_dir": "/runs/g1",
+            "attempt_fallback_key": "fallback::job-1",
+        },
+        {
+            "experiment_name": "legacy-exp",
+            "job_id": "job-2",
+            "run_entry": "gsm8k:model=openai/gpt-oss-20b",
+            "model": "openai/gpt-oss-20b",
+            "benchmark": "gsm8k",
+            "machine_host": "host-b",
+            "manifest_timestamp": "20",
+            "has_run_spec": "True",
+            "run_dir": "/runs/g2",
+            "attempt_fallback_key": "fallback::job-2",
+        },
+    ]
+    repro_rows = [
+        {
+            "experiment_name": "legacy-exp",
+            "run_entry": "gsm8k:model=openai/gpt-oss-20b",
+            "report_dir": "/reports/legacy",
+        }
+    ]
+
+    summary = _build_run_multiplicity_summary(
+        filter_inventory_rows=filter_inventory_rows,
+        scope_rows=scope_rows,
+        repro_rows=repro_rows,
+    )
+
+    assert summary["headline_counts"]["n_logical_runs_with_ambiguous_analyzed_matching"] == 1
+    row = summary["rows"][0]
+    assert row["n_completed_rows"] == 2
+    assert row["n_analyzed_rows"] == 0
+    assert row["n_ambiguous_analyzed_candidates"] == 2
+    assert row["analyzed_match_status_counts"]["ambiguous_legacy_group_multi_completed"] == 2
