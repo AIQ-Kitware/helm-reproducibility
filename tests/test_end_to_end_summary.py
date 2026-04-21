@@ -581,3 +581,95 @@ def test_prioritized_breakdown_summary_ranks_and_points_to_actionable_paths(tmp_
 
     assert flagged_rows
     assert any("ambiguous_analysis" in row["interesting_flags"] for row in flagged_rows)
+
+
+def test_prioritized_breakdown_summary_uses_selected_attempt_machine_host_for_analyzed_grouping(tmp_path):
+    level_002 = tmp_path / "level_002"
+    enriched_rows = [
+        {
+            "experiment_name": "exp-multi",
+            "run_entry": "bench_multi:model=model-x",
+            "benchmark": "bench_multi",
+            "model": "model-x",
+            "machine_host": "host-a",
+            "suite": "suite-1",
+            "job_id": "job-a",
+            "run_dir": "/runs/selected",
+            "attempt_identity": "uuid-selected",
+            "attempt_uuid": "uuid-selected",
+            "attempt_fallback_key": "fallback::selected",
+            "manifest_timestamp": "10",
+            "has_run_spec": "True",
+            "storyline_status": "on_story",
+            "logical_run_key": "bench_multi:model=model-x",
+            "repro_report_dir": "/reports/multi",
+        },
+        {
+            "experiment_name": "exp-multi",
+            "run_entry": "bench_multi:model=model-x",
+            "benchmark": "bench_multi",
+            "model": "model-x",
+            "machine_host": "host-b",
+            "suite": "suite-1",
+            "job_id": "job-b",
+            "run_dir": "/runs/unselected",
+            "attempt_identity": "uuid-unselected",
+            "attempt_uuid": "uuid-unselected",
+            "attempt_fallback_key": "fallback::unselected",
+            "manifest_timestamp": "20",
+            "has_run_spec": "True",
+            "storyline_status": "on_story",
+            "logical_run_key": "bench_multi:model=model-x",
+            "repro_report_dir": "/reports/multi",
+        },
+    ]
+    repro_rows = [
+        {
+            "experiment_name": "exp-multi",
+            "run_entry": "bench_multi:model=model-x",
+            "report_dir": "/reports/multi",
+            "official_instance_agree_bucket": "high_agreement_0.95+",
+            "official_instance_agree_005": 0.97,
+            "analysis_selected_attempt_refs": [
+                {
+                    "run_dir": "/runs/selected",
+                    "attempt_identity": "uuid-selected",
+                    "attempt_uuid": "uuid-selected",
+                    "attempt_fallback_key": "fallback::selected",
+                    "machine_host": "host-a",
+                    "experiment_name": "exp-multi",
+                }
+            ],
+            "analysis_selected_attempt_identities": ["uuid-selected"],
+        }
+    ]
+    run_multiplicity_summary = {
+        "rows": [
+            {
+                "logical_run_key": "bench_multi:model=model-x",
+                "n_attempt_ids": 2,
+                "n_rows": 2,
+                "n_machines": 2,
+                "n_ambiguous_analyzed_candidates": 0,
+            }
+        ]
+    }
+
+    summary = _build_prioritized_breakdown_summary(
+        enriched_rows=enriched_rows,
+        repro_rows=repro_rows,
+        run_multiplicity_summary=run_multiplicity_summary,
+        breakdown_dims=["benchmark", "model", "machine_host", "experiment_name", "suite"],
+        level_002=level_002,
+    )
+
+    machine_good_rows = [
+        row for row in summary["rows"]
+        if row["bucket_class"] == "good" and row["dimension"] == "machine_host"
+    ]
+    assert machine_good_rows
+    assert any(row["dimension_value"] == "host-a" for row in machine_good_rows)
+    assert all(row["dimension_value"] != "host-b" for row in machine_good_rows)
+    row = next(row for row in machine_good_rows if row["dimension_value"] == "host-a")
+    assert row["machine_host_membership_source"] == "selected_attempt_refs.machine_host"
+    assert row["example_report_dirs"] == ["/reports/multi"]

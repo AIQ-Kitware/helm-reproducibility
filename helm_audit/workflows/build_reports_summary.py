@@ -1681,6 +1681,87 @@ def _triage_selection_reason(
     return reason
 
 
+def _coerce_listlike(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            return [value]
+        if isinstance(parsed, list):
+            return parsed
+        return [parsed]
+    return [value]
+
+
+def _selected_attempt_refs_for_repro_row(repro: dict[str, Any]) -> list[dict[str, Any]]:
+    refs = []
+    for item in _coerce_listlike(repro.get("analysis_selected_attempt_refs")):
+        if isinstance(item, dict):
+            refs.append(item)
+    return refs
+
+
+def _attempt_ref_matches_row(ref: dict[str, Any], row: dict[str, Any]) -> bool:
+    comparisons = [
+        ("run_dir", "run_dir"),
+        ("attempt_identity", "attempt_identity"),
+        ("attempt_uuid", "attempt_uuid"),
+        ("attempt_fallback_key", "attempt_fallback_key"),
+    ]
+    for ref_key, row_key in comparisons:
+        ref_value = _clean_optional_text(ref.get(ref_key))
+        row_value = _clean_optional_text(row.get(row_key))
+        if ref_value and row_value and ref_value == row_value:
+            return True
+    return False
+
+
+def _choose_parent_row_for_repro(
+    repro: dict[str, Any],
+    parent_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not parent_rows:
+        return {}
+    selected_refs = _selected_attempt_refs_for_repro_row(repro)
+    for ref in selected_refs:
+        for row in parent_rows:
+            if _attempt_ref_matches_row(ref, row):
+                return row
+    return sorted(
+        parent_rows,
+        key=lambda row: (
+            _coerce_float(row.get("manifest_timestamp")),
+            str(row.get("job_id") or ""),
+        ),
+        reverse=True,
+    )[0]
+
+
+def _analyzed_dimension_values(case_row: dict[str, Any], dimension: str) -> list[str]:
+    if dimension == "machine_host":
+        hosts = sorted({
+            str(host)
+            for host in [
+                _clean_optional_text(ref.get("machine_host"))
+                for ref in (_selected_attempt_refs_for_repro_row(case_row))
+            ]
+            if host
+        })
+        if hosts:
+            return hosts
+    value = _clean_optional_text(case_row.get(dimension))
+    return [value or "unknown"]
+
+
 def _build_prioritized_breakdown_summary(
     *,
     enriched_rows: list[dict[str, Any]],
@@ -1689,11 +1770,12 @@ def _build_prioritized_breakdown_summary(
     breakdown_dims: list[str],
     level_002: Path,
 ) -> dict[str, Any]:
-    enriched_lookup = {
-        (str(row.get("experiment_name")), str(row.get("run_entry"))): row
-        for row in enriched_rows
-        if row.get("experiment_name") and row.get("run_entry")
-    }
+    enriched_lookup: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in enriched_rows:
+        experiment_name = _clean_optional_text(row.get("experiment_name"))
+        run_entry = _clean_optional_text(row.get("run_entry"))
+        if experiment_name and run_entry:
+            enriched_lookup[(experiment_name, run_entry)].append(row)
     multiplicity_lookup = {
         str(row.get("logical_run_key") or row.get("run_entry") or ""): row
         for row in (run_multiplicity_summary.get("rows") or [])
@@ -1702,14 +1784,26 @@ def _build_prioritized_breakdown_summary(
     analyzed_case_rows: list[dict[str, Any]] = []
     for repro in repro_rows:
         key = (str(repro.get("experiment_name") or ""), str(repro.get("run_entry") or ""))
-        parent = enriched_lookup.get(key, {})
+        parent_rows = enriched_lookup.get(key, [])
+        parent = _choose_parent_row_for_repro(repro, parent_rows)
         logical_run_key = str(parent.get("logical_run_key") or repro.get("run_entry") or "")
         multiplicity = multiplicity_lookup.get(logical_run_key, {})
+        selected_attempt_refs = _selected_attempt_refs_for_repro_row(repro)
+        selected_machine_hosts = sorted({
+            str(host)
+            for host in [
+                _clean_optional_text(ref.get("machine_host"))
+                for ref in selected_attempt_refs
+            ]
+            if host
+        })
         analyzed_case_rows.append(
             {
                 **parent,
                 **repro,
                 "logical_run_key": logical_run_key,
+                "selected_attempt_refs": selected_attempt_refs,
+                "selected_machine_hosts": selected_machine_hosts,
                 "official_instance_agree_bucket": repro.get("official_instance_agree_bucket") or parent.get("official_instance_agree_bucket"),
                 "bucket_class": _agreement_bucket_class(repro.get("official_instance_agree_bucket")),
                 "has_multiplicity_signal": bool(
@@ -1735,8 +1829,8 @@ def _build_prioritized_breakdown_summary(
             if _is_truthy_text(row.get("has_run_spec")):
                 completed_groups[value].append(row)
         for row in analyzed_case_rows:
-            value = str(row.get(dim) or "unknown")
-            analyzed_groups[value].append(row)
+            for value in _analyzed_dimension_values(row, dim):
+                analyzed_groups[str(value or "unknown")].append(row)
         attempted_by_dim[dim] = attempted_groups
         completed_by_dim[dim] = completed_groups
         analyzed_by_dim[dim] = analyzed_groups
@@ -1775,6 +1869,11 @@ def _build_prioritized_breakdown_summary(
                     "n_attempted": len(attempted_by_dim[dim].get(value, [])),
                     "n_completed": len(completed_by_dim[dim].get(value, [])),
                     "n_analyzed": len(analyzed_group_rows),
+                    "machine_host_membership_source": (
+                        "selected_attempt_refs.machine_host"
+                        if dim == "machine_host" and any(row.get("selected_machine_hosts") for row in analyzed_group_rows)
+                        else "coarse_parent_row"
+                    ),
                     "bucket_counts": dict(bucket_counts),
                     "bucket_class_counts": dict(bucket_class_counts),
                     "dominant_bucket": dominant_bucket,
@@ -1944,6 +2043,7 @@ def _build_prioritized_breakdown_summary(
                     "dominant_bucket_class": row["dominant_bucket_class"],
                     "bucket_counts": row["bucket_counts"],
                     "bucket_class_counts": row["bucket_class_counts"],
+                    "machine_host_membership_source": row.get("machine_host_membership_source"),
                     "mean_official_instance_agree_005": row["mean_official_instance_agree_005"],
                     "has_multiplicity_signal": row["has_multiplicity_signal"],
                     "has_machine_spread": row["has_machine_spread"],
@@ -1972,7 +2072,7 @@ def _build_prioritized_breakdown_summary(
 
     return {
         "definitions": {
-            "rank_population": "breakdown groups ranked from analyzed reproducibility rows; attempted/completed counts are added from all indexed rows in the same group",
+            "rank_population": "breakdown groups ranked from analyzed reproducibility rows; attempted/completed counts are added from all indexed rows in the same group; machine_host membership uses selected attempt provenance when available",
             "bucket_classes": {
                 "good": list(_TRIAGE_BUCKET_LABELS["good"]),
                 "mid": list(_TRIAGE_BUCKET_LABELS["mid"]),
@@ -2038,6 +2138,8 @@ def _format_prioritized_breakdown_summary_text(
                 f"  counts: attempted={row['n_attempted']} completed={row['n_completed']} analyzed={row['n_analyzed']} "
                 f"dominant_bucket={row['dominant_bucket']}"
             )
+            if row["dimension"] == "machine_host" and row.get("machine_host_membership_source"):
+                lines.append(f"  machine_host_membership_source: {row['machine_host_membership_source']}")
             flags = row.get("interesting_flags") or []
             if flags:
                 lines.append(f"  flags: {', '.join(flags)}")
