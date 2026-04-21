@@ -34,6 +34,8 @@ DEFAULT_BREAKDOWN_DIMS = [
     "machine_host",
 ]
 
+CANONICAL_AGREEMENT_TOL = 0.05
+
 
 def latest_index_csv(index_dpath: Path) -> Path:
     cands = sorted(index_dpath.glob("audit_results_index_*.csv"), reverse=True)
@@ -754,6 +756,7 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
         official_instance_level = official.get("instance_level") or {}
         official_agree_curve = official_instance_level.get("agreement_vs_abs_tol") or []
         agree_0 = _find_curve_value(official_agree_curve, 0.0)
+        agree_005 = _find_curve_value(official_agree_curve, CANONICAL_AGREEMENT_TOL)
         row = {
             "experiment_name": experiment_name,
             "run_entry": run_entry,
@@ -765,12 +768,12 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
             "official_diagnosis": official_diag.get("label"),
             "official_primary_reasons": official_diag.get("primary_reason_names") or [],
             "official_instance_agree_0": agree_0,
-            "official_instance_agree_bucket": _bucket_agreement(agree_0),
+            "official_instance_agree_005": agree_005,
+            "official_instance_agree_bucket": _bucket_agreement(agree_005),
             "official_instance_agree_01": _find_curve_value(official_agree_curve, 0.1),
             "official_runlevel_abs_max": nested_get(official, "run_level", "overall_quantiles", "abs_delta", "max"),
             "official_runlevel_abs_p90": nested_get(official, "run_level", "overall_quantiles", "abs_delta", "p90"),
             "official_instance_agree_001": _find_curve_value(official_agree_curve, 0.001),
-            "official_instance_agree_005": _find_curve_value(official_agree_curve, 0.05),
             "core_metrics": official.get("core_metrics") or [],
             "official_runlevel_metric_max_deltas": {
                 m["metric"]: nested_get(m, "abs_delta", "max")
@@ -2261,12 +2264,12 @@ def _render_scope_summary(
                 "lifecycle": ["whether the run produced runnable artifacts"],
                 "outcome": [
                     "for failed/incomplete runs: failure reason",
-                    "for completed runs: instance-level agreement bucket at abs_tol=0 (exact match)",
-                    "  exact_or_near_exact: >=99.9999% of instances agree exactly",
-                    "  high_agreement_0.95+: >=95% of instances agree exactly",
-                    "  moderate_agreement_0.80+: >=80% agree exactly",
-                    "  low_agreement_0.00+: >0% agree exactly",
-                    "  zero_agreement: no instances agree exactly",
+                    f"for completed runs: instance-level agreement bucket at abs_tol={CANONICAL_AGREEMENT_TOL:g}",
+                    f"  exact_or_near_exact: >=99.9999% of instances agree within abs_tol={CANONICAL_AGREEMENT_TOL:g}",
+                    f"  high_agreement_0.95+: >=95% of instances agree within abs_tol={CANONICAL_AGREEMENT_TOL:g}",
+                    f"  moderate_agreement_0.80+: >=80% agree within abs_tol={CANONICAL_AGREEMENT_TOL:g}",
+                    f"  low_agreement_0.00+: >0% agree within abs_tol={CANONICAL_AGREEMENT_TOL:g}",
+                    f"  zero_agreement: no instances agree within abs_tol={CANONICAL_AGREEMENT_TOL:g}",
                 ],
             },
             stage_order=[("group", "group"), ("lifecycle", "lifecycle"), ("outcome", "outcome")],
@@ -2279,13 +2282,13 @@ def _render_scope_summary(
             report_dpath=level_001,
             stamp=generated_utc,
             kind="s05_reproducibility",
-            title=f"Reproducibility Summary (instance-level, abs_tol=0 exact match): {scope_title}",
+            title=f"Reproducibility Summary (instance-level, abs_tol={CANONICAL_AGREEMENT_TOL:g} canonical): {scope_title}",
             stage_defs={
                 "group": ["benchmark family or suite"],
                 "repeatability": ["local repeatability diagnosis (run vs its own repeat)"],
                 "agreement": [
-                    "official-vs-local agreement bucket at abs_tol=0 (exact match only)",
-                    "fraction = share of instances where |official_score - local_score| == 0",
+                    f"official-vs-local agreement bucket at abs_tol={CANONICAL_AGREEMENT_TOL:g} (canonical)",
+                    f"fraction = share of instances where |official_score - local_score| <= {CANONICAL_AGREEMENT_TOL:g}",
                     "  exact_or_near_exact: fraction >= 0.999999",
                     "  high_agreement_0.95+: fraction >= 0.95",
                     "  moderate_agreement_0.80+: fraction >= 0.80",
@@ -2314,7 +2317,7 @@ def _render_scope_summary(
             "group": ["benchmark family or suite"],
             "repeatability": ["local repeatability diagnosis (run vs its own repeat)"],
             "agreement": [
-                "official-vs-local agreement bucket at the abs_tol stated in the title",
+                f"official-vs-local agreement bucket at the abs_tol stated in the title (canonical abs_tol={CANONICAL_AGREEMENT_TOL:g})",
                 "fraction = share of instances where |official_score - local_score| <= abs_tol",
                 "  exact_or_near_exact: fraction >= 0.999999",
                 "  high_agreement_0.95+: fraction >= 0.95",
@@ -2541,7 +2544,7 @@ def _render_scope_summary(
             x="group_value",
             y="count",
             color="status_bucket",
-            title=f"Benchmark Coverage and Analysis Status (analyzed runs use abs_tol=0): {scope_title}",
+            title=f"Benchmark Coverage and Analysis Status (analyzed runs use abs_tol={CANONICAL_AGREEMENT_TOL:g}): {scope_title}",
             stem=level_001 / f"benchmark_status_{generated_utc}",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
@@ -2555,7 +2558,7 @@ def _render_scope_summary(
             x="official_instance_agree_bucket",
             y="count",
             color="official_instance_agree_bucket",
-            title=f"Official vs Local Agreement Buckets (instance-level, abs_tol=0 exact match): {scope_title}",
+            title=f"Official vs Local Agreement Buckets (instance-level, abs_tol={CANONICAL_AGREEMENT_TOL:g} canonical): {scope_title}",
             stem=level_001 / f"reproducibility_buckets_{generated_utc}",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
@@ -2793,8 +2796,8 @@ def _render_scope_summary(
         "  the rest was excluded.",
         "  File: sankey_s02_filter_to_attempt.latest.{html,jpg,txt}",
         "",
-        "s03 — Attempted Runs to Reproducibility (exact match)",
-        "  Attempted runs broken down by local reproducibility at abs_tol=0.",
+        "s03 — Attempted Runs to Reproducibility (exact-match diagnostic)",
+        "  Attempted runs broken down by local reproducibility at abs_tol=0 as a lower-tolerance diagnostic.",
         "  File: sankey_s03_attempted_to_repro.latest.{html,jpg,txt}",
         "",
         "s04 — End-to-End Coverage and Reproducibility",

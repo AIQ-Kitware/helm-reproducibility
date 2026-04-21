@@ -231,6 +231,8 @@ The main tradeoff I am keeping in mind is that this should remain a pure present
 
 What I’m confident about so far: the update can stay in one file, the key bar-chart writers are centralized enough to benefit from shared helpers, and the heatmap/curve plots can be bounded with static-only sizing without altering the underlying rows. The only thing I’m still watching is keeping the categorical axis count metadata semantically clear for the different plot families, especially where the x field name is generic like `group_value` but the business meaning is still “benchmark.”
 
+The user then clarified an important semantic detail: `abs_tol=0` should not be the canonical agreement headline, and `abs_tol=0.05` is a better default for the summary buckets. I adjusted the presentation layer to preserve the exact-match data as a diagnostic view while letting the main agreement bucket and its wording pivot to the 0.05 threshold. That keeps the report honest about fine-grained exactness without making the canonical summary overly brittle.
+
 Design takeaways:
 1. Rendering contracts get clearer when the figure data and the export layout are treated as separate concerns.
 2. Static readability fixes should prefer display-only abbreviations and bounded dimensions over any data reduction.
