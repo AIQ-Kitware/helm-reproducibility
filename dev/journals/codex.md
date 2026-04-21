@@ -238,6 +238,23 @@ Design takeaways:
 2. Static readability fixes should prefer display-only abbreviations and bounded dimensions over any data reduction.
 3. A narrow helper layer inside the existing workflow is usually enough when the report family is already centralized.
 
+## 2026-04-21 00:38:15 +0000
+
+Summary of user intent: make a narrow static-export fix for the aggregate agreement-curve JPG so the legend is readable and the title includes curve-contributor counts (`n_runs`, `n_models`, `n_scenarios`) derived from the plotted subset only.
+
+Model and configuration: GPT-5.4, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This is a small but useful refinement to the earlier summary rendering pass. The report already had the right data path, but the agreement-curve export still looked like a “same figure everywhere” case: the HTML and JPG shared nearly the same layout, which is fine for inspection but not ideal for a slide-oriented static image when the legend gets dense. The sensible fix is not to touch the curve data or the benchmark grouping; it is to make the JPG export more forgiving by giving the legend a better home and a little more space.
+
+On the title side, the important nuance is that the counts should describe only the rows that actually contribute to the plotted curve. That keeps the title honest when a scope contains rows that are present in the report but do not yield agreement points. I’m computing the counts from the same rows used to build the curve, then joining back to the analyzed metadata for model and scenario cardinalities. That preserves the meaning of the chart while giving the reader a quick sense of how much evidence the curve is summarizing.
+
+The main risk here is over-bending the static export until it starts to diverge from the HTML path. I’m keeping that in check by limiting the change to legend placement, margins, and static sizing, while leaving the plotted traces and interactive behavior intact. If the static legend still feels crowded after this, the next step would be to tune the static legend font or item spacing, not to redesign the chart.
+
+Design takeaways:
+1. Static slide exports often need a different legend contract than browser-first HTML, even when the plotted data is identical.
+2. Counts in the title are most useful when they come from the plotted subset, not the enclosing scope.
+3. The smallest safe rendering fix is usually to adjust export geometry before touching trace structure.
+
 ## 2026-04-20 23:50:15 +0000
 
 Summary of user intent: keep `helm_audit/reports/filter_analysis.py` plotting the full canonical data while making static PNG exports slide-friendly by separating HTML fidelity from PNG compactness, without reintroducing truncation or new artifact families.

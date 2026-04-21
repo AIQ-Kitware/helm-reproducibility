@@ -1488,17 +1488,26 @@ def _write_agreement_curve_plot(
     machine_dpath: Path | None = None,
     interactive_dpath: Path | None = None,
     static_dpath: Path | None = None,
+    scope_title: str | None = None,
 ) -> dict[str, str | None]:
     """Line chart: x=abs_tol (log), y=instance agree_ratio, one line per analyzed run."""
     bench_lookup = {
         (str(r.get("experiment_name")), str(r.get("run_entry"))): str(r.get("benchmark") or "unknown")
         for r in enriched_rows
     }
+    meta_lookup = {
+        (str(r.get("experiment_name")), str(r.get("run_entry"))): r
+        for r in enriched_rows
+    }
     curve_data: list[dict[str, Any]] = []
+    curve_rows: list[dict[str, Any]] = []
     for row in repro_rows:
         key = (str(row.get("experiment_name")), str(row.get("run_entry")))
         bench = bench_lookup.get(key, "unknown")
         curve = row.get("official_instance_agree_curve") or []
+        if not curve:
+            continue
+        curve_rows.append(row)
         run_label = str(row.get("run_spec_name") or row.get("run_entry") or "unknown")
         for pt in curve:
             curve_data.append({
@@ -1507,6 +1516,17 @@ def _write_agreement_curve_plot(
                 "abs_tol": pt["abs_tol"],
                 "agree_ratio": pt["agree_ratio"],
             })
+    contributing_rows = [meta_lookup.get((str(row.get("experiment_name")), str(row.get("run_entry")))) for row in curve_rows]
+    contributing_rows = [row for row in contributing_rows if row is not None]
+    n_runs = len(curve_rows)
+    n_models = len({str(row.get("model") or "unknown") for row in contributing_rows})
+    n_scenarios = len({str(row.get("scenario") or "unknown") for row in contributing_rows})
+    title_text = title
+    if scope_title is not None:
+        title_text = (
+            "Agreement Rate vs Tolerance (instance-level; "
+            f"n_runs={n_runs}, n_models={n_models}, n_scenarios={n_scenarios}): {scope_title}"
+        )
 
     if machine_dpath is not None:
         machine_dpath.mkdir(parents=True, exist_ok=True)
@@ -1572,7 +1592,7 @@ def _write_agreement_curve_plot(
                     ),
                 ))
             fig.update_layout(
-                title=title,
+                title=title_text,
                 xaxis={"title": "abs_tol (tolerance on |official - local|)", "type": "log"},
                 yaxis={"title": "Fraction of Instances Agreeing", "range": [0, 1.05]},
                 legend={"title": "Benchmark"},
@@ -1581,8 +1601,22 @@ def _write_agreement_curve_plot(
             fig.write_html(str(html_fpath), include_plotlyjs="cdn")
             html_out = str(html_fpath)
             if os.environ.get("HELM_AUDIT_SKIP_STATIC_IMAGES", "") not in {"1", "true", "yes"}:
-                static_width = min(max(1100, 80 * max(len(benchmarks), 1)), 1600)
-                static_height = 760
+                static_width = min(max(1200, 96 * max(len(benchmarks), 1)), 1800)
+                static_height = 880
+                fig.update_layout(
+                    width=static_width,
+                    height=static_height,
+                    margin={"t": 100, "b": 180, "l": 70, "r": 50},
+                    legend={
+                        "title": "Benchmark",
+                        "orientation": "h",
+                        "x": 0,
+                        "xanchor": "left",
+                        "y": -0.24,
+                        "yanchor": "top",
+                        "font": {"size": 9},
+                    },
+                )
                 fig.write_image(str(jpg_fpath), width=static_width, height=static_height, scale=1.0)
                 jpg_out = str(jpg_fpath)
         except Exception as ex:
@@ -2571,10 +2605,11 @@ def _render_scope_summary(
             repro_rows=repro_rows,
             enriched_rows=enriched_rows,
             stem=level_001 / f"agreement_curve_{generated_utc}",
-            title=f"Agreement Rate vs Tolerance (instance-level): {scope_title}",
+            title="Agreement Rate vs Tolerance (instance-level)",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
+            scope_title=scope_title,
         )
         per_metric_agreement_plot = _write_per_metric_agreement_plot(
             repro_rows=repro_rows,
