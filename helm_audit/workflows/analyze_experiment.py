@@ -210,7 +210,10 @@ def main(argv: list[str] | None = None) -> None:
     compat_dpath = compat_core_run_reports_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
     if compat_dpath.is_dir() and not compat_dpath.is_symlink() and not out_dpath.exists():
         import shutil
-        logger.info(f'Migrating legacy report dir: {compat_dpath} → {out_dpath}')
+        logger.info(
+            "Migrating legacy report dir: "
+            f"{rich_link(compat_dpath)} -> {rich_link(out_dpath)}"
+        )
         out_dpath.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(compat_dpath), str(out_dpath))
     out_dpath.mkdir(parents=True, exist_ok=True)

@@ -26,7 +26,6 @@ from helm_audit.reports.core_packet_summary import (
     load_core_report_bundle,
     packet_component_by_source_kind,
     packet_local_reference_component,
-    packet_sample_artifact_names,
     prioritized_example_artifact_names,
     render_path_link,
 )
@@ -256,10 +255,10 @@ def _load_filter_inventory_rows(filter_inventory_json: Path | None) -> list[dict
     try:
         payload = json.loads(path.read_text())
     except Exception:
-        logger.warning(f"Unable to load filter inventory: {path}")
+        logger.warning(f"Unable to load filter inventory: {rich_link(path)}")
         return []
     if not isinstance(payload, list):
-        logger.warning(f"Filter inventory is not a list: {path}")
+        logger.warning(f"Filter inventory is not a list: {rich_link(path)}")
         return []
     return [row for row in payload if isinstance(row, dict)]
 

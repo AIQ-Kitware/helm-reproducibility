@@ -274,6 +274,23 @@ Design takeaways:
 2. Dynamic artifact lookup should be derived from declared comparisons, not from remembered historical labels.
 3. A small shared packet helper is worth it when it removes repeated semantic translation logic across multiple reporting layers.
 
+## 2026-04-21 23:51:21 +0000
+
+Summary of user intent: make a very small cleanup patch on top of the recent packet-propagation work so the remaining operator-facing path logs and prints in the touched summary/aggregate files use `rich_link` consistently, without changing packet semantics or broadening the refactor.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This pass is intentionally tiny, but it matters because path rendering is one of those details that either becomes consistent everywhere or keeps reintroducing visual friction at the edges. The recent refactor already fixed most of the human-facing report text surfaces, so the right move here was not another structural pass. It was to find the leftover operator-facing path messages in logs and prints and bring them into the same `rich_link` convention.
+
+The cleanup ended up being exactly the kind of thing that is easy to postpone and then live with forever: one migration log still printed raw old/new directories, a pair of warnings in the aggregate-summary workflow still referenced raw inventory paths, and the aggregate report script still printed raw output file paths. I converted those directly rather than adding a new helper layer because the existing `rich_link` function is already the right abstraction and the user asked to keep the patch narrow.
+
+I also removed one obviously unused import left over from the packet-summary wiring (`packet_sample_artifact_names` in `build_reports_summary.py`). That kind of residue is small, but leaving it in would make a narrow cleanup patch feel less trustworthy than it should.
+
+Design takeaways:
+1. Once a rendering convention is established for surfaced paths, the last few raw logs are worth cleaning up because they disproportionately shape the operator experience.
+2. Tiny polish passes go best when they reuse the established helper directly instead of introducing a second “cleanup” abstraction.
+3. Unused imports are low-stakes, but removing them in a narrow pass helps keep the change obviously intentional.
+
 ## 2026-04-21 00:18:44 +0000
 
 Summary of user intent: make a narrow presentation-layer fix in `helm_audit/workflows/build_reports_summary.py` so aggregate-summary plots keep full data and full HTML labels, but static JPG/PNG exports become bounded, slide-usable, and more readable for categorical axes without truncating categories or redesigning the report set.

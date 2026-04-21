@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 
-from helm_audit.infra.logging import setup_cli_logging
+from helm_audit.infra.logging import rich_link, setup_cli_logging
 import datetime as datetime_mod
 import glob
 import json
@@ -177,10 +177,10 @@ def main(argv: list[str] | None = None) -> None:
     ]:
         _write_latest_alias(src, out_dpath, latest_name)
 
-    print(f'Wrote summary json: {json_fpath}')
-    print(f'Wrote summary csv: {csv_fpath}')
-    print(f'Wrote summary md: {md_fpath}')
-    print(f'Wrote summary txt: {txt_fpath}')
+    print(f'Wrote summary json: {rich_link(json_fpath)}')
+    print(f'Wrote summary csv: {rich_link(csv_fpath)}')
+    print(f'Wrote summary md: {rich_link(md_fpath)}')
+    print(f'Wrote summary txt: {rich_link(txt_fpath)}')
 
 
 if __name__ == '__main__':
