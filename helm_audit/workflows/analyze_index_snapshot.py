@@ -1,10 +1,11 @@
 """
-Analyze a single HELM index CSV and produce executive-summary artifacts.
+Inventory-reporting tool for a single HELM index CSV.
 
-This tool works with any index that has at minimum a ``run_name`` column.
-It degrades gracefully when optional provenance columns (``suite_version``,
-``public_track``, ``run_spec_hash``) are absent — those breakdowns just
-produce empty or single-group tables instead of failing.
+Describes what is in the index — row counts, cardinality, and distributions
+across tracks, suite versions, models, benchmark groups, and entry kinds.
+
+This stage is intentionally neutral.  It does not judge, interpret drift,
+or make deduplication decisions.
 
 Usage:
 
@@ -58,12 +59,16 @@ class AnalyzeIndexSnapshotConfig(scfg.DataConfig):
 
 def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
     """
-    Analyze an index CSV and emit executive-summary artifacts.
+    Inventory-report an index CSV and emit tabular, JSON, TXT, and HTML artifacts.
 
     Optional provenance columns (``suite_version``, ``public_track``,
-    ``run_spec_hash``, ``entry_kind``) are added as null columns when absent
-    so that all downstream groupby calls succeed.  Breakdowns based on absent
-    columns produce empty or trivially-small tables rather than errors.
+    ``run_spec_hash``, ``entry_kind``) are injected as null/default columns
+    when absent so that all downstream groupby calls succeed.  Breakdowns on
+    absent columns produce empty tables and trivially-empty figures.
+
+    The returned dict mirrors ``index_snapshot_summary.latest.json`` exactly —
+    it contains complete (non-truncated) arrays.  Only the TXT summary
+    truncates long lists for human readability.
 
     Args:
         index_fpath: Path to the index CSV.
@@ -77,89 +82,50 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
     out_dpath.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
-    # Normalise optional provenance columns
-    # Track which are present *before* we fill in nulls, for display.
+    # Normalise optional provenance columns — note which were present
+    # before we fill in defaults so we can signal absence in output.
     # ------------------------------------------------------------------
     _original_cols = set(df.columns)
-    _OPTIONAL_PROV = ('suite_version', 'public_track', 'run_spec_hash')
-    for col in _OPTIONAL_PROV:
+    for col in ('suite_version', 'public_track', 'run_spec_hash'):
         if col not in df.columns:
             df[col] = None
-    # entry_kind: if absent assume all rows are run entries
     if 'entry_kind' not in df.columns:
         df['entry_kind'] = 'benchmark_run'
-    # Other commonly expected columns
     for col in ('model', 'scenario_class', 'benchmark_group', 'run_name'):
         if col not in df.columns:
             df[col] = None
 
-    has_suite_version = ('suite_version' in _original_cols
-                         and df['suite_version'].notna().any())
-    has_public_track = ('public_track' in _original_cols
-                        and df['public_track'].notna().any())
-    has_run_spec_hash = ('run_spec_hash' in _original_cols
-                         and df['run_spec_hash'].notna().any())
+    has_suite_version = 'suite_version' in _original_cols and df['suite_version'].notna().any()
+    has_public_track = 'public_track' in _original_cols and df['public_track'].notna().any()
+    has_run_spec_hash = 'run_spec_hash' in _original_cols and df['run_spec_hash'].notna().any()
 
     # ------------------------------------------------------------------
     # Partition rows
     # ------------------------------------------------------------------
     df_runs = df[df['entry_kind'] == 'benchmark_run'].copy()
+    n_benchmark_runs = len(df_runs)
     n_structural_non_run = int((df['entry_kind'] == 'structural_non_run').sum())
     n_unknown_entry = int((df['entry_kind'] == 'unknown').sum())
-
-    # ------------------------------------------------------------------
-    # Top-level counts
-    # ------------------------------------------------------------------
     total_rows = len(df)
-    n_benchmark_runs = len(df_runs)
 
+    # ------------------------------------------------------------------
+    # Cardinality (benchmark runs only for run/model/benchmark counts)
+    # ------------------------------------------------------------------
     tracks = sorted(df['public_track'].dropna().unique().tolist())
     suite_versions = sorted(df['suite_version'].dropna().unique().tolist())
-
     distinct_run_names = int(df_runs['run_name'].dropna().nunique())
     distinct_models = int(df_runs['model'].dropna().nunique())
     distinct_benchmarks = int(df_runs['benchmark_group'].dropna().nunique())
     distinct_scenario_classes = int(df_runs['scenario_class'].dropna().nunique())
 
     # ------------------------------------------------------------------
-    # Multi-version / multi-track / hash-drift counts
-    # ------------------------------------------------------------------
-    run_name_version_counts = df_runs.groupby('run_name')['suite_version'].nunique()
-    run_name_track_counts = df_runs.groupby('run_name')['public_track'].nunique()
-    hash_df = df_runs[df_runs['run_spec_hash'].notna()]
-    run_name_hash_counts = hash_df.groupby('run_name')['run_spec_hash'].nunique()
-
-    n_run_names_multi_version = int((run_name_version_counts > 1).sum())
-    n_run_names_multi_track = int((run_name_track_counts > 1).sum())
-    n_run_names_with_hash_drift = int((run_name_hash_counts > 1).sum())
-
-    # ------------------------------------------------------------------
-    # Dedup views
-    # ------------------------------------------------------------------
-    dedup_views = {
-        'raw_benchmark_run_rows': n_benchmark_runs,
-        'distinct_run_name': distinct_run_names,
-        'distinct_run_name_x_track': int(
-            df_runs[['run_name', 'public_track']].drop_duplicates().shape[0]
-        ),
-        'distinct_run_spec_hash': int(df_runs['run_spec_hash'].dropna().nunique()),
-    }
-
-    # ------------------------------------------------------------------
-    # Per-track breakdown
+    # Grouped breakdowns
     # ------------------------------------------------------------------
     by_track = _agg_by_group(df, df_runs, 'public_track')
-
-    # ------------------------------------------------------------------
-    # Per-suite-version breakdown
-    # ------------------------------------------------------------------
     by_suite = _agg_by_group(df, df_runs, 'suite_version')
     if has_suite_version:
         by_suite = by_suite.sort_values('suite_version')
 
-    # ------------------------------------------------------------------
-    # Per-model breakdown (benchmark runs only)
-    # ------------------------------------------------------------------
     by_model = (
         df_runs.groupby('model', dropna=False)
         .agg(
@@ -172,9 +138,6 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
         .sort_values('total_runs', ascending=False)
     )
 
-    # ------------------------------------------------------------------
-    # Per-benchmark-group breakdown (benchmark runs only)
-    # ------------------------------------------------------------------
     by_benchmark = (
         df_runs.groupby('benchmark_group', dropna=False)
         .agg(
@@ -187,91 +150,42 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
         .sort_values('total_runs', ascending=False)
     )
 
-    # ------------------------------------------------------------------
-    # Duplicates by run_name (run names that appear in >1 row)
-    # ------------------------------------------------------------------
-    _count_agg_col = 'public_run_dir' if 'public_run_dir' in df_runs.columns else 'run_name'
-    dup_groups = (
-        df_runs.groupby('run_name')
-        .agg(
-            n_occurrences=(_count_agg_col, 'count'),
-            n_tracks=('public_track', 'nunique'),
-            n_suite_versions=('suite_version', 'nunique'),
-            n_distinct_hashes=('run_spec_hash', lambda s: s.dropna().nunique()),
-            tracks=('public_track', lambda s: '|'.join(sorted(s.dropna().unique()))),
-            suite_versions=('suite_version', lambda s: '|'.join(sorted(s.dropna().unique()))),
-        )
-        .reset_index()
-    )
-    duplicates = (
-        dup_groups[dup_groups['n_occurrences'] > 1]
-        .sort_values('n_occurrences', ascending=False)
+    by_entry_kind = (
+        df.groupby('entry_kind', dropna=False)
+        .size()
+        .reset_index(name='total_rows')
+        .sort_values('total_rows', ascending=False)
     )
 
     # ------------------------------------------------------------------
-    # Version drift: run names with >1 distinct run_spec_hash
+    # Build summary dict — complete, no top-k truncation
     # ------------------------------------------------------------------
-    version_drift: pd.DataFrame
-    if has_run_spec_hash:
-        drift_groups = (
-            hash_df.groupby('run_name')
-            .agg(
-                n_distinct_hashes=('run_spec_hash', 'nunique'),
-                n_occurrences=('run_name', 'count'),
-                n_suite_versions=('suite_version', 'nunique'),
-                n_tracks=('public_track', 'nunique'),
-                hashes=('run_spec_hash', lambda s: '|'.join(sorted(s.unique()))),
-                suite_versions=('suite_version',
-                                lambda s: '|'.join(sorted(s.dropna().unique()))),
-                tracks=('public_track',
-                        lambda s: '|'.join(sorted(s.dropna().unique()))),
-            )
-            .reset_index()
-        )
-        version_drift = (
-            drift_groups[drift_groups['n_distinct_hashes'] > 1]
-            .sort_values('n_distinct_hashes', ascending=False)
-        )
-    else:
-        version_drift = pd.DataFrame(
-            columns=['run_name', 'n_distinct_hashes', 'n_occurrences',
-                     'n_suite_versions', 'n_tracks', 'hashes',
-                     'suite_versions', 'tracks']
-        )
-
-    # ------------------------------------------------------------------
-    # Build summary dict
-    # ------------------------------------------------------------------
-    top_models = (
-        by_model.head(10)[['model', 'total_runs']].to_dict(orient='records')
-    )
-    top_benchmarks = (
-        by_benchmark.head(10)[['benchmark_group', 'total_runs']].to_dict(orient='records')
-    )
-
     summary: dict = {
         'index_fpath': str(index_fpath),
-        'total_rows': total_rows,
-        'n_benchmark_runs': n_benchmark_runs,
-        'n_structural_non_run': n_structural_non_run,
-        'n_unknown_entry': n_unknown_entry,
-        'has_suite_version': has_suite_version,
-        'has_public_track': has_public_track,
-        'has_run_spec_hash': has_run_spec_hash,
-        'n_tracks': len(tracks),
-        'tracks': tracks,
-        'n_suite_versions': len(suite_versions),
-        'suite_versions': suite_versions,
-        'distinct_run_names': distinct_run_names,
-        'distinct_models': distinct_models,
-        'distinct_benchmark_groups': distinct_benchmarks,
-        'distinct_scenario_classes': distinct_scenario_classes,
-        'n_run_names_in_multiple_versions': n_run_names_multi_version,
-        'n_run_names_in_multiple_tracks': n_run_names_multi_track,
-        'n_run_names_with_hash_drift': n_run_names_with_hash_drift,
-        'dedup_views': dedup_views,
-        'top_models': top_models,
-        'top_benchmarks': top_benchmarks,
+        'row_counts': {
+            'total_rows': total_rows,
+            'benchmark_runs': n_benchmark_runs,
+            'structural_non_run': n_structural_non_run,
+            'unknown_entry': n_unknown_entry,
+        },
+        'column_presence': {
+            'has_suite_version': has_suite_version,
+            'has_public_track': has_public_track,
+            'has_run_spec_hash': has_run_spec_hash,
+        },
+        'cardinality': {
+            'tracks': len(tracks),
+            'suite_versions': len(suite_versions),
+            'run_names': distinct_run_names,
+            'models': distinct_models,
+            'benchmark_groups': distinct_benchmarks,
+            'scenario_classes': distinct_scenario_classes,
+        },
+        'counts_by_track': by_track.to_dict(orient='records'),
+        'counts_by_suite_version': by_suite.to_dict(orient='records'),
+        'counts_by_model': by_model.to_dict(orient='records'),
+        'counts_by_benchmark': by_benchmark.to_dict(orient='records'),
+        'counts_by_entry_kind': by_entry_kind.to_dict(orient='records'),
     }
 
     # ------------------------------------------------------------------
@@ -298,16 +212,47 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
         logger.success('Wrote {}', p)
         return p
 
-    summary_text = _format_summary_text(summary, df, tracks, suite_versions)
-
+    # TXT — human-readable, top-10 truncation allowed
+    summary_text = _format_summary_text(
+        summary, df, tracks, suite_versions, by_model, by_benchmark,
+    )
     _write_txt(summary_text, 'index_snapshot_summary.latest.txt')
     _write_json(summary, 'index_snapshot_summary.latest.json')
+
     _write_csv(by_track, 'index_snapshot_by_track.latest.csv')
     _write_csv(by_suite, 'index_snapshot_by_suite_version.latest.csv')
     _write_csv(by_model, 'index_snapshot_by_model.latest.csv')
     _write_csv(by_benchmark, 'index_snapshot_by_benchmark.latest.csv')
-    _write_csv(duplicates, 'index_snapshot_duplicates_by_run_name.latest.csv')
-    _write_csv(version_drift, 'index_snapshot_version_drift.latest.csv')
+    _write_csv(by_entry_kind, 'index_snapshot_by_entry_kind.latest.csv')
+
+    # HTML figures
+    _write_html_bar(
+        by_track, y_col='public_track', x_col='total_rows',
+        title='HELM Index Snapshot — Rows by Track',
+        fpath=out_dpath / 'index_snapshot_tracks.latest.html',
+    )
+    _write_html_bar(
+        by_suite, y_col='suite_version', x_col='total_rows',
+        title='HELM Index Snapshot — Rows by Suite Version',
+        fpath=out_dpath / 'index_snapshot_suite_versions.latest.html',
+    )
+    _write_html_bar(
+        by_model, y_col='model', x_col='total_runs',
+        title='HELM Index Snapshot — Runs by Model (top 30)',
+        fpath=out_dpath / 'index_snapshot_models.latest.html',
+        max_bars=30,
+    )
+    _write_html_bar(
+        by_benchmark, y_col='benchmark_group', x_col='total_runs',
+        title='HELM Index Snapshot — Runs by Benchmark Group (top 30)',
+        fpath=out_dpath / 'index_snapshot_benchmarks.latest.html',
+        max_bars=30,
+    )
+    _write_html_bar(
+        by_entry_kind, y_col='entry_kind', x_col='total_rows',
+        title='HELM Index Snapshot — Rows by Entry Kind',
+        fpath=out_dpath / 'index_snapshot_entry_kinds.latest.html',
+    )
 
     print(summary_text)
     logger.success('Analysis complete — artifacts written to {}', out_dpath)
@@ -323,7 +268,7 @@ def _agg_by_group(
     df_runs: pd.DataFrame,
     group_col: str,
 ) -> pd.DataFrame:
-    """Compute per-group breakdown combining all-rows and benchmark-runs-only counts."""
+    """Per-group breakdown combining all-rows totals and benchmark-run sub-counts."""
     total = df.groupby(group_col, dropna=False).size().rename('total_rows')
     runs = df_runs.groupby(group_col, dropna=False).size().rename('benchmark_runs')
     non_run = (
@@ -358,6 +303,26 @@ def _agg_by_group(
     return result
 
 
+def _write_html_bar(
+    df: pd.DataFrame,
+    y_col: str,
+    x_col: str,
+    title: str,
+    fpath: Path,
+    max_bars: int = 200,
+) -> Path:
+    """Write a horizontal bar chart to an HTML file using Plotly."""
+    import plotly.express as px
+
+    df_plot = df[[y_col, x_col]].dropna(subset=[y_col]).head(max_bars)
+    fig = px.bar(df_plot, x=x_col, y=y_col, orientation='h', title=title)
+    if not df_plot.empty:
+        fig.update_layout(yaxis={'categoryorder': 'total ascending'})
+    fig.write_html(str(fpath), include_plotlyjs='cdn')
+    logger.success('Wrote {}', fpath)
+    return fpath
+
+
 def _absent(flag: bool) -> str:
     return '' if flag else ' (column absent)'
 
@@ -367,26 +332,29 @@ def _format_summary_text(
     df: pd.DataFrame,
     tracks: list[str],
     suite_versions: list[str],
+    by_model: pd.DataFrame,
+    by_benchmark: pd.DataFrame,
 ) -> str:
-    dv = summary['dedup_views']
-    has_sv = summary['has_suite_version']
-    has_tr = summary['has_public_track']
-    has_h = summary['has_run_spec_hash']
+    rc = summary['row_counts']
+    card = summary['cardinality']
+    cp = summary['column_presence']
+    has_sv = cp['has_suite_version']
+    has_tr = cp['has_public_track']
 
     lines = [
         '=' * 70,
-        'HELM INDEX SNAPSHOT — EXECUTIVE SUMMARY',
+        'HELM INDEX SNAPSHOT — INVENTORY SUMMARY',
         '=' * 70,
         f"Index file: {summary['index_fpath']}",
         '',
         '--- Row counts ---',
-        f"  Total rows:                {summary['total_rows']:>8,}",
-        f"  Benchmark runs:            {summary['n_benchmark_runs']:>8,}",
-        f"  Structural non-run:        {summary['n_structural_non_run']:>8,}",
-        f"  Unknown entry kind:        {summary['n_unknown_entry']:>8,}",
+        f"  Total rows:                {rc['total_rows']:>8,}",
+        f"  Benchmark runs:            {rc['benchmark_runs']:>8,}",
+        f"  Structural non-run:        {rc['structural_non_run']:>8,}",
+        f"  Unknown entry kind:        {rc['unknown_entry']:>8,}",
         '',
         f"--- Public tracks{_absent(has_tr)} ---",
-        f"  Number of tracks:          {summary['n_tracks']:>8}",
+        f"  Number of tracks:          {card['tracks']:>8}",
     ]
     for t in tracks:
         n = int((df['public_track'] == t).sum())
@@ -396,7 +364,7 @@ def _format_summary_text(
     lines += [
         '',
         f"--- Suite versions{_absent(has_sv)} ---",
-        f"  Number of suite versions:  {summary['n_suite_versions']:>8}",
+        f"  Number of suite versions:  {card['suite_versions']:>8}",
     ]
     for sv in suite_versions:
         n = int((df['suite_version'] == sv).sum())
@@ -405,44 +373,27 @@ def _format_summary_text(
         lines.append('    (no suite_version column in this index)')
     lines += [
         '',
-        '--- Diversity (benchmark runs only) ---',
-        f"  Distinct run names:        {summary['distinct_run_names']:>8,}",
-        f"  Distinct models:           {summary['distinct_models']:>8,}",
-        f"  Distinct benchmark groups: {summary['distinct_benchmark_groups']:>8,}",
-        f"  Distinct scenario classes: {summary['distinct_scenario_classes']:>8,}",
-        '',
-        '--- Version / track overlap ---',
-        f"  Run names in >1 version:   {summary['n_run_names_in_multiple_versions']:>8,}"
-        + ('' if has_sv else '  [no suite_version]'),
-        f"  Run names in >1 track:     {summary['n_run_names_in_multiple_tracks']:>8,}"
-        + ('' if has_tr else '  [no public_track]'),
-        f"  Run names with hash drift: {summary['n_run_names_with_hash_drift']:>8,}"
-        + ('' if has_h else '  [no run_spec_hash]'),
-        '',
-        '--- Deduplication views ---',
-        f"  Raw benchmark-run rows:    {dv['raw_benchmark_run_rows']:>8,}",
-        f"  Distinct run_name:         {dv['distinct_run_name']:>8,}",
-        f"  Distinct (run_name,track): {dv['distinct_run_name_x_track']:>8,}"
-        + ('' if has_tr else '  [no public_track]'),
-        f"  Distinct run_spec_hash:    {dv['distinct_run_spec_hash']:>8,}"
-        + ('' if has_h else '  [no run_spec_hash]'),
+        '--- Cardinality (benchmark runs only) ---',
+        f"  Distinct run names:        {card['run_names']:>8,}",
+        f"  Distinct models:           {card['models']:>8,}",
+        f"  Distinct benchmark groups: {card['benchmark_groups']:>8,}",
+        f"  Distinct scenario classes: {card['scenario_classes']:>8,}",
         '',
         '--- Top 10 models by run count ---',
     ]
-    for row in summary['top_models']:
-        lines.append(f"  {row['model']}: {row['total_runs']:,}")
+    for _, row in by_model.head(10).iterrows():
+        lines.append(f"  {row['model']}: {int(row['total_runs']):,}")
     lines += [
         '',
         '--- Top 10 benchmarks by run count ---',
     ]
-    for row in summary['top_benchmarks']:
-        lines.append(f"  {row['benchmark_group']}: {row['total_runs']:,}")
+    for _, row in by_benchmark.head(10).iterrows():
+        lines.append(f"  {row['benchmark_group']}: {int(row['total_runs']):,}")
     lines.append('=' * 70)
     return '\n'.join(lines) + '\n'
 
 
-# Thin alias so callers that did `from … import analyze_official_index` keep working
-# during any transitional period.
+# Thin alias kept for any callers from the previous module name.
 analyze_official_index = analyze_index_snapshot
 
 
