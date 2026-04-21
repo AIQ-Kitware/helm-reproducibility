@@ -253,6 +253,27 @@ Design takeaways:
 2. Ordering should never stand in for semantics once the data model contains the semantic fields directly.
 3. Cleaning up old filenames matters because directory surfaces teach future maintainers what the real model is.
 
+## 2026-04-21 23:37:57 +0000
+
+Summary of user intent: push the manifest-driven core-report packet model up into experiment-analysis and aggregate-summary so higher layers load `components_manifest.latest.json` and `comparisons_manifest.latest.json` directly, stop depending on `report_selection.latest.json` and old pair names, derive sample artifacts from current comparison ids, and render surfaced filesystem paths through the repo’s rich-link helper in human-facing summary text.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This slice is mostly about making the pipeline honest end-to-end. The core report layer already had the right packet model, but the layers above it were still behaving as if the old sidecar selection file and legacy pair labels were the real semantics. That kind of split-brain state is especially risky because it can look “compatible” while silently teaching future maintainers the wrong abstraction. The right move was not to bolt more translation logic onto the summary code; it was to give those layers a small shared way to load the packet and ask packet-shaped questions directly.
+
+I introduced a narrow packet-summary helper instead of spreading manifest lookups across multiple workflows. That helper centralizes packet loading, comparison lookup, component selection by source kind, sample-artifact naming from `comparison_id`, and rich-link path rendering. The tradeoff is one additional helper module, but it meaningfully reduces duplicated ad hoc logic in `analyze_experiment.py`, `build_reports_summary.py`, and `aggregate.py`. I think that is the right kind of indirection here because it removes semantic duplication rather than adding it.
+
+The most important cleanup was deleting the last hidden dependence on `report_selection.latest.json`. In the reproducibility row loader and experiment summary builder, the authoritative values now come from the packet manifests themselves: experiment name, run entry, selected local run dirs, single-run vs multi-run shape, and the current comparison ids. That means old labels like `official_vs_kwdagger` and `kwdagger_repeat` are no longer needed by the higher layers. The sample-artifact lookup follows the same principle now: if a packet declares `official_vs_local` and `local_repeat`, those are the exact sample artifacts the prioritized-example logic expects and links.
+
+I also applied `rich_link`-based path rendering to the human-facing text surfaces I touched, especially the experiment summary text and prioritized breakdown checklist. The main consideration there was to avoid sprinkling raw path concatenation all over the place. A helper-backed path formatter makes the output more consistent and keeps the text-writing code focused on structure rather than path markup details.
+
+What I intentionally did not do: redesign grouping, change indexing, or rewrite the broader aggregate vocabulary around every field name. Some output field names like `official_instance_agree_*` remain because they still describe the metric cleanly even though the loader logic beneath them is now packet-driven. If we later want a more systematic naming pass across all downstream tables, that should be a separate explicit refactor.
+
+Design takeaways:
+1. Once manifests become the source of truth, every layer above them should load them directly instead of reconstructing their meaning from old sidecars or filenames.
+2. Dynamic artifact lookup should be derived from declared comparisons, not from remembered historical labels.
+3. A small shared packet helper is worth it when it removes repeated semantic translation logic across multiple reporting layers.
+
 ## 2026-04-21 00:18:44 +0000
 
 Summary of user intent: make a narrow presentation-layer fix in `helm_audit/workflows/build_reports_summary.py` so aggregate-summary plots keep full data and full HTML labels, but static JPG/PNG exports become bounded, slide-usable, and more readable for categorical axes without truncating categories or redesigning the report set.

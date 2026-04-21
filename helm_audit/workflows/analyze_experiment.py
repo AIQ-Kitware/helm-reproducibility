@@ -13,20 +13,27 @@ from typing import Any
 import pandas as pd
 from loguru import logger
 
-from helm_audit.reports.aggregate import _find_curve_value, _find_pair
+from helm_audit.reports.aggregate import _find_curve_value
 from helm_audit.infra.api import audit_root, default_index_root
 from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.utils.numeric import nested_get
 from helm_audit.infra.fs_publish import symlink_to, write_latest_alias
 from helm_audit.infra.paths import experiment_analysis_dpath
 from helm_audit.infra.report_layout import compat_core_run_reports_root, portable_repo_root_lines, write_reproduce_script
+from helm_audit.reports.core_packet_summary import (
+    find_report_pair,
+    load_core_report_packet,
+    packet_component_by_source_kind,
+    packet_local_reference_component,
+    render_path_link,
+)
 from helm_audit.reports import pair_report
 from helm_audit.reports.paper_labels import load_paper_label_manager
 from helm_audit.workflows.rebuild_core_report import (
     latest_index_csv,
     load_rows,
     main as rebuild_core_report_main,
-    slugify,
+    slugify_identifier,
 )
 
 
@@ -139,6 +146,44 @@ def _benchmark_completion_summary(rows: list[dict[str, Any]]) -> list[dict[str, 
     return summary_rows
 
 
+def _summarize_core_report(report_json: Path, *, experiment_name: str) -> dict[str, Any]:
+    bundle = {
+        "report": _load_json(report_json),
+        "packet": load_core_report_packet(report_json.parent),
+    }
+    report = bundle["report"]
+    packet = bundle["packet"]
+    official_pair = find_report_pair(report, "official_vs_local")
+    repeat_pair = find_report_pair(report, "local_repeat")
+    official_component = packet_component_by_source_kind(packet, "official_vs_local", "official")
+    local_component = packet_local_reference_component(packet)
+    run_diagnostics = report.get("run_diagnostics", {}) or {}
+    official_diag = run_diagnostics.get(official_component.get("component_id"), {})
+    local_diag = run_diagnostics.get(local_component.get("component_id"), {})
+    return {
+        "experiment_name": experiment_name,
+        "run_spec_name": report.get("run_spec_name"),
+        "run_entry": packet["components_manifest"].get("run_entry"),
+        "report_dir": str(report_json.parent),
+        "generated_utc": report.get("generated_utc"),
+        "diagnostic_flags": report.get("diagnostic_flags", []),
+        "components_manifest": str(packet["components_manifest_path"]),
+        "comparisons_manifest": str(packet["comparisons_manifest_path"]),
+        "local_reference_empty_completion_rate": local_diag.get("empty_completion_rate"),
+        "local_reference_mean_output_tokens": nested_get(local_diag, "output_token_count", "mean"),
+        "official_empty_completion_rate": official_diag.get("empty_completion_rate"),
+        "official_mean_output_tokens": nested_get(official_diag, "output_token_count", "mean"),
+        "repeat_instance_agree_0": _find_curve_value(repeat_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.0),
+        "official_instance_agree_0": _find_curve_value(official_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.0),
+        "official_instance_agree_01": _find_curve_value(official_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.1),
+        "official_instance_agree_025": _find_curve_value(official_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.25),
+        "official_instance_agree_05": _find_curve_value(official_pair.get("instance_level", {}).get("agreement_vs_abs_tol", []), 0.5),
+        "official_runlevel_p90": nested_get(official_pair, "run_level", "overall_quantiles", "abs_delta", "p90"),
+        "official_runlevel_max": nested_get(official_pair, "run_level", "overall_quantiles", "abs_delta", "max"),
+        "analysis_single_run": not bool(repeat_pair),
+    }
+
+
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
     parser = argparse.ArgumentParser()
@@ -162,7 +207,7 @@ def main(argv: list[str] | None = None) -> None:
 
     out_dpath = experiment_analysis_dpath(args.experiment_name)
     # Migrate existing real dir from legacy compat location to canonical store location.
-    compat_dpath = compat_core_run_reports_root() / f'experiment-analysis-{slugify(args.experiment_name)}'
+    compat_dpath = compat_core_run_reports_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
     if compat_dpath.is_dir() and not compat_dpath.is_symlink() and not out_dpath.exists():
         import shutil
         logger.info(f'Migrating legacy report dir: {compat_dpath} → {out_dpath}')
@@ -175,7 +220,7 @@ def main(argv: list[str] | None = None) -> None:
     built_report_paths = []
     skipped_run_entries: list[dict[str, Any]] = []
     for run_entry in run_entries:
-        report_dpath = reports_dpath / f'core-metrics-{slugify(run_entry)}'
+        report_dpath = reports_dpath / f'core-metrics-{slugify_identifier(run_entry)}'
         try:
             argv = [
                 '--run-entry', str(run_entry),
@@ -200,31 +245,7 @@ def main(argv: list[str] | None = None) -> None:
     for report_json in built_report_paths:
         if not report_json.exists():
             continue
-        report = _load_json(report_json)
-        report_dir = report_json.parent
-        selection_fpath = report_dir / 'report_selection.latest.json'
-        selection = _load_json(selection_fpath) if selection_fpath.exists() else {}
-        repeat = _find_pair(report, 'kwdagger_repeat')
-        official = _find_pair(report, 'official_vs_kwdagger')
-        summary_rows.append({
-            'experiment_name': args.experiment_name,
-            'run_spec_name': report.get('run_spec_name'),
-            'run_entry': selection.get('run_entry'),
-            'report_dir': str(report_dir),
-            'generated_utc': report.get('generated_utc'),
-            'diagnostic_flags': report.get('diagnostic_flags', []),
-            'kwdagger_a_empty_completion_rate': nested_get(report, 'run_diagnostics', 'kwdagger_a', 'empty_completion_rate'),
-            'kwdagger_a_mean_output_tokens': nested_get(report, 'run_diagnostics', 'kwdagger_a', 'output_token_count', 'mean'),
-            'official_empty_completion_rate': nested_get(report, 'run_diagnostics', 'official', 'empty_completion_rate'),
-            'official_mean_output_tokens': nested_get(report, 'run_diagnostics', 'official', 'output_token_count', 'mean'),
-            'repeat_instance_agree_0': _find_curve_value(repeat.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.0),
-            'official_instance_agree_0': _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.0),
-            'official_instance_agree_01': _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.1),
-            'official_instance_agree_025': _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.25),
-            'official_instance_agree_05': _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.5),
-            'official_runlevel_p90': nested_get(official, 'run_level', 'overall_quantiles', 'abs_delta', 'p90'),
-            'official_runlevel_max': nested_get(official, 'run_level', 'overall_quantiles', 'abs_delta', 'max'),
-        })
+        summary_rows.append(_summarize_core_report(report_json, experiment_name=args.experiment_name))
 
     paper_labels = load_paper_label_manager(style='paper_short')
     summary_by_run_spec = {
@@ -333,7 +354,7 @@ def main(argv: list[str] | None = None) -> None:
     lines.append('')
     lines.append(f'generated_utc: {stamp}')
     lines.append(f'experiment_name: {args.experiment_name}')
-    lines.append(f'index_fpath: {index_fpath}')
+    lines.append(f'index_fpath: {render_path_link(index_fpath)}')
     lines.append(f'n_run_entries: {len(run_entries)}')
     lines.append(f'n_built_reports: {len(summary_rows)}')
     lines.append(f'n_skipped_run_entries: {len(skipped_run_entries)}')
@@ -368,8 +389,8 @@ def main(argv: list[str] | None = None) -> None:
             lines.append(f"    machine_a_display: {row['machine_a_display']}")
             lines.append(f"    machine_b: {row['machine_b']}")
             lines.append(f"    machine_b_display: {row['machine_b_display']}")
-            lines.append(f"    report_dir: {row['report_dir']}")
-            lines.append(f"    report_txt: {row['report_txt']}")
+            lines.append(f"    report_dir: {render_path_link(row['report_dir'])}")
+            lines.append(f"    report_txt: {render_path_link(row['report_txt'])}")
             lines.append(f"    diagnosis_label: {row['diagnosis_label']}")
             lines.append(f"    primary_reason_names: {row['primary_reason_names']}")
             lines.append(f"    run_level_agree_ratio: {row['run_level_agree_ratio']}")
@@ -382,10 +403,12 @@ def main(argv: list[str] | None = None) -> None:
     lines.append('per_run_spec:')
     for row in summary_rows:
         lines.append(f"  - run_spec_name: {row['run_spec_name']}")
-        lines.append(f"    report_dir: {row['report_dir']}")
+        lines.append(f"    report_dir: {render_path_link(row['report_dir'])}")
+        lines.append(f"    components_manifest: {render_path_link(row['components_manifest'])}")
+        lines.append(f"    comparisons_manifest: {render_path_link(row['comparisons_manifest'])}")
         lines.append(f"    diagnostic_flags: {row['diagnostic_flags']}")
-        lines.append(f"    kwdagger_a_empty_completion_rate: {row['kwdagger_a_empty_completion_rate']}")
-        lines.append(f"    kwdagger_a_mean_output_tokens: {row['kwdagger_a_mean_output_tokens']}")
+        lines.append(f"    local_reference_empty_completion_rate: {row['local_reference_empty_completion_rate']}")
+        lines.append(f"    local_reference_mean_output_tokens: {row['local_reference_mean_output_tokens']}")
         lines.append(f"    official_empty_completion_rate: {row['official_empty_completion_rate']}")
         lines.append(f"    official_mean_output_tokens: {row['official_mean_output_tokens']}")
         lines.append(f"    repeat_instance_agree_0: {row['repeat_instance_agree_0']}")
@@ -447,7 +470,7 @@ def main(argv: list[str] | None = None) -> None:
     logger.debug(f'Write to: {rich_link(provenance_fpath)}')
 
     # Publish backward-compat symlink at the legacy repo/reports location.
-    compat_link = compat_core_run_reports_root() / f'experiment-analysis-{slugify(args.experiment_name)}'
+    compat_link = compat_core_run_reports_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
     if not compat_link.is_symlink():
         try:
             symlink_to(out_dpath, compat_link)

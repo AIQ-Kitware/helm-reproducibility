@@ -14,6 +14,12 @@ from typing import Any
 import pandas as pd
 
 from helm_audit.infra.api import default_report_root
+from helm_audit.reports.core_packet_summary import (
+    find_report_pair,
+    load_core_report_packet,
+    packet_component_by_source_kind,
+    packet_local_reference_component,
+)
 from helm_audit.utils.numeric import nested_get
 
 
@@ -22,10 +28,7 @@ def _load_json(fpath: Path) -> dict[str, Any]:
 
 
 def _find_pair(report: dict[str, Any], label: str) -> dict[str, Any]:
-    for pair in report.get('pairs', []):
-        if pair.get('label') == label:
-            return pair
-    return {}
+    return find_report_pair(report, label)
 
 
 def _find_curve_value(rows: list[dict[str, Any]], abs_tol: float) -> float | None:
@@ -85,24 +88,29 @@ def main(argv: list[str] | None = None) -> None:
     for p in report_paths:
         fpath = Path(p)
         report = _load_json(fpath)
-        repeat = _find_pair(report, 'kwdagger_repeat')
-        official = _find_pair(report, 'official_vs_kwdagger')
+        packet = load_core_report_packet(fpath.parent)
+        repeat = _find_pair(report, 'local_repeat')
+        official = _find_pair(report, 'official_vs_local')
         repeat_agree_0 = _find_curve_value(repeat.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.0)
         official_agree_0 = _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.0)
         official_agree_01 = _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.1)
         official_agree_025 = _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.25)
         official_agree_05 = _find_curve_value(official.get('instance_level', {}).get('agreement_vs_abs_tol', []), 0.5)
+        local_component = packet_local_reference_component(packet)
+        official_component = packet_component_by_source_kind(packet, 'official_vs_local', 'official')
         rows.append({
             'report_dir': str(fpath.parent),
             'report_json': str(fpath),
             'run_spec_name': report.get('run_spec_name'),
             'generated_utc': report.get('generated_utc'),
-            'n_core_metrics': len((_find_pair(report, 'kwdagger_repeat').get('core_metrics') or [])),
+            'components_manifest': str(packet['components_manifest_path']),
+            'comparisons_manifest': str(packet['comparisons_manifest_path']),
+            'n_core_metrics': len((official.get('core_metrics') or [])),
             'diagnostic_flags': report.get('diagnostic_flags', []),
-            'kwdagger_a_empty_completion_rate': nested_get(report, 'run_diagnostics', 'kwdagger_a', 'empty_completion_rate'),
-            'kwdagger_a_mean_output_tokens': nested_get(report, 'run_diagnostics', 'kwdagger_a', 'output_token_count', 'mean'),
-            'official_empty_completion_rate': nested_get(report, 'run_diagnostics', 'official', 'empty_completion_rate'),
-            'official_mean_output_tokens': nested_get(report, 'run_diagnostics', 'official', 'output_token_count', 'mean'),
+            'local_reference_empty_completion_rate': nested_get(report, 'run_diagnostics', local_component.get('component_id'), 'empty_completion_rate'),
+            'local_reference_mean_output_tokens': nested_get(report, 'run_diagnostics', local_component.get('component_id'), 'output_token_count', 'mean'),
+            'official_empty_completion_rate': nested_get(report, 'run_diagnostics', official_component.get('component_id'), 'empty_completion_rate'),
+            'official_mean_output_tokens': nested_get(report, 'run_diagnostics', official_component.get('component_id'), 'output_token_count', 'mean'),
             'repeat_instance_agree_0': repeat_agree_0,
             'official_instance_agree_0': official_agree_0,
             'official_instance_agree_01': official_agree_01,
@@ -148,8 +156,8 @@ def main(argv: list[str] | None = None) -> None:
         lines.append(f"  - run_spec_name: {row['run_spec_name']}")
         lines.append(f"    assessment_label: {row['assessment_label']}")
         lines.append(f"    diagnostic_flags: {row['diagnostic_flags']}")
-        lines.append(f"    kwdagger_a_empty_completion_rate: {row['kwdagger_a_empty_completion_rate']}")
-        lines.append(f"    kwdagger_a_mean_output_tokens: {row['kwdagger_a_mean_output_tokens']}")
+        lines.append(f"    local_reference_empty_completion_rate: {row['local_reference_empty_completion_rate']}")
+        lines.append(f"    local_reference_mean_output_tokens: {row['local_reference_mean_output_tokens']}")
         lines.append(f"    official_empty_completion_rate: {row['official_empty_completion_rate']}")
         lines.append(f"    official_mean_output_tokens: {row['official_mean_output_tokens']}")
         lines.append(f"    repeat_instance_agree_0: {row['repeat_instance_agree_0']}")

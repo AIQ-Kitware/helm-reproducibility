@@ -21,6 +21,15 @@ from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.infra.paths import experiment_analysis_dpath
 from helm_audit.infra.report_layout import aggregate_summary_reports_root, compat_core_run_reports_root, core_run_reports_root, portable_repo_root_lines
 from helm_audit.model_registry import local_model_registry_by_name
+from helm_audit.reports.core_packet_summary import (
+    find_report_pair,
+    load_core_report_bundle,
+    packet_component_by_source_kind,
+    packet_local_reference_component,
+    packet_sample_artifact_names,
+    prioritized_example_artifact_names,
+    render_path_link,
+)
 from helm_audit.utils.numeric import nested_get
 from helm_audit.utils.sankey import emit_sankey_artifacts
 from helm_audit.utils import sankey_builder
@@ -38,11 +47,6 @@ DEFAULT_BREAKDOWN_DIMS = [
 ]
 
 CANONICAL_AGREEMENT_TOL = 0.05
-PRIORITIZED_EXAMPLE_ARTIFACTS = [
-    "core_metric_report.latest.png",
-    "core_metric_management_summary.latest.txt",
-    "instance_samples_official_vs_kwdagger.latest.txt",
-]
 
 
 def latest_index_csv(index_dpath: Path) -> Path:
@@ -81,10 +85,7 @@ def _write_text(lines: list[str], fpath: Path) -> None:
 
 
 def _find_pair(report: dict[str, Any], label: str) -> dict[str, Any]:
-    for pair in report.get("pairs", []):
-        if pair.get("label") == label:
-            return pair
-    return {}
+    return find_report_pair(report, label)
 
 
 def _find_curve_value(rows: list[dict[str, Any]], abs_tol: float) -> float | None:
@@ -880,47 +881,49 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
     deduped: dict[tuple[str | None, str | None], dict[str, Any]] = {}
     for report_json in report_jsons:
         try:
-            report = _load_json(report_json)
+            bundle = load_core_report_bundle(report_json)
         except Exception:
             continue
-        selection_fpath = report_json.parent / "report_selection.latest.json"
-        selection = _load_json(selection_fpath) if selection_fpath.exists() else {}
-        experiment_name = selection.get("experiment_name")
-        run_entry = selection.get("run_entry")
+        report = bundle["report"]
+        packet = bundle["packet"]
+        experiment_name = packet["components_manifest"].get("experiment_name")
+        run_entry = packet["components_manifest"].get("run_entry")
         if not experiment_name or not run_entry:
             continue
-        selected_run_dirs = []
-        for key in ["left_run_a", "left_run_b"]:
-            value = _clean_optional_text(selection.get(key))
-            if value:
-                selected_run_dirs.append(value)
-        for ref in selection.get("selected_local_attempt_refs") or []:
-            if not isinstance(ref, dict):
-                continue
-            value = _clean_optional_text(ref.get("run_dir"))
-            if value:
-                selected_run_dirs.append(value)
-        selected_run_dirs = sorted(set(selected_run_dirs))
-        official = _find_pair(report, "official_vs_kwdagger") or {}
-        repeat = _find_pair(report, "kwdagger_repeat") or {}
+        local_components = [
+            component
+            for component in packet.get("components", [])
+            if component.get("source_kind") == "local"
+        ]
+        selected_run_dirs = sorted({
+            str(component.get("run_path"))
+            for component in local_components
+            if component.get("run_path")
+        })
+        official = find_report_pair(report, "official_vs_local") or {}
+        repeat = find_report_pair(report, "local_repeat") or {}
         official_diag = official.get("diagnosis", {}) or {}
         repeat_diag = repeat.get("diagnosis", {}) or {}
         official_instance_level = official.get("instance_level") or {}
         official_agree_curve = official_instance_level.get("agreement_vs_abs_tol") or []
         agree_0 = _find_curve_value(official_agree_curve, 0.0)
         agree_005 = _find_curve_value(official_agree_curve, CANONICAL_AGREEMENT_TOL)
+        local_reference = packet_local_reference_component(packet)
+        official_component = packet_component_by_source_kind(packet, "official_vs_local", "official")
         row = {
             "experiment_name": experiment_name,
             "run_entry": run_entry,
             "run_spec_name": report.get("run_spec_name"),
             "report_dir": str(report_json.parent),
             "report_json": str(report_json),
-            "analysis_left_run_a": _clean_optional_text(selection.get("left_run_a")),
-            "analysis_left_run_b": _clean_optional_text(selection.get("left_run_b")),
+            "components_manifest": str(packet["components_manifest_path"]),
+            "comparisons_manifest": str(packet["comparisons_manifest_path"]),
+            "analysis_local_reference_run": _clean_optional_text(local_reference.get("run_path")),
+            "analysis_official_run": _clean_optional_text(official_component.get("run_path")),
             "analysis_selected_run_dirs": selected_run_dirs,
-            "analysis_selected_attempt_refs": selection.get("selected_local_attempt_refs") or [],
-            "analysis_selected_attempt_identities": selection.get("selected_local_attempt_identities") or [],
-            "analysis_single_run": bool(selection.get("single_run")),
+            "analysis_selected_attempt_refs": [component.get("selection_ref") for component in local_components if component.get("selection_ref")],
+            "analysis_selected_attempt_identities": [component.get("attempt_identity") for component in local_components if component.get("attempt_identity")],
+            "analysis_single_run": not bool(repeat),
             "repeat_diagnosis": repeat_diag.get("label"),
             "repeat_primary_reasons": repeat_diag.get("primary_reason_names") or [],
             "official_diagnosis": official_diag.get("label"),
@@ -2168,8 +2171,8 @@ def _format_prioritized_breakdown_summary_text(
             flags = row.get("interesting_flags") or []
             if flags:
                 lines.append(f"  flags: {', '.join(flags)}")
-            lines.append(f"  breakdown_dir: {row['breakdown_dir']}")
-            lines.append(f"  breakdown_index_dir: {row['breakdown_index_dir']}")
+            lines.append(f"  breakdown_dir: {render_path_link(row['breakdown_dir'])}")
+            lines.append(f"  breakdown_index_dir: {render_path_link(row['breakdown_index_dir'])}")
             example_runs = row.get("example_run_entries") or []
             example_reports = row.get("example_report_dirs") or []
             if example_runs:
@@ -2179,7 +2182,7 @@ def _format_prioritized_breakdown_summary_text(
             if example_reports:
                 lines.append("  example_report_dirs:")
                 for item in example_reports:
-                    lines.append(f"    - {item}")
+                    lines.append(f"    - {render_path_link(item)}")
     return lines
 
 
@@ -2201,13 +2204,26 @@ def _iter_prioritized_example_rows(summary: dict[str, Any]) -> list[dict[str, An
     return rows
 
 
+def _prioritized_example_artifact_names(report_dir: Path) -> list[str]:
+    try:
+        packet = load_core_report_bundle(report_dir / "core_metric_report.latest.json")["packet"]
+    except Exception:
+        return [
+            "core_metric_report.latest.png",
+            "core_metric_management_summary.latest.txt",
+            "components_manifest.latest.json",
+            "comparisons_manifest.latest.json",
+        ]
+    return prioritized_example_artifact_names(packet)
+
+
 def _report_artifact_is_usable(fpath: Path) -> bool:
     return fpath.exists()
 
 
 def _prioritized_example_missing_artifacts(report_dir: Path) -> list[str]:
     return [
-        name for name in PRIORITIZED_EXAMPLE_ARTIFACTS
+        name for name in _prioritized_example_artifact_names(report_dir)
         if not _report_artifact_is_usable(report_dir / name)
     ]
 
@@ -2230,7 +2246,7 @@ def _repair_prioritized_example_reports(
                     "report_dir": str(report_dir),
                     "run_entry": run_entry,
                     "status": "missing_report_dir",
-                    "missing_artifacts": PRIORITIZED_EXAMPLE_ARTIFACTS,
+                    "missing_artifacts": _prioritized_example_artifact_names(report_dir),
                 }
             )
             continue
@@ -2316,10 +2332,7 @@ def _publish_prioritized_examples_tree(
                 example_report_dir = _clean_optional_text(example_row.get("report_dir"))
                 if example_report_dir and Path(example_report_dir).exists():
                     symlink_to(example_report_dir, ex_dpath / "report_dir")
-                    for artifact_name in [
-                        *PRIORITIZED_EXAMPLE_ARTIFACTS,
-                        "report_selection.latest.json",
-                    ]:
+                    for artifact_name in _prioritized_example_artifact_names(Path(example_report_dir)):
                         artifact_fpath = Path(example_report_dir) / artifact_name
                         if artifact_fpath.exists():
                             symlink_to(artifact_fpath, ex_dpath / artifact_name)
