@@ -413,6 +413,7 @@ analyze_official_index = analyze_index_snapshot
 
 __cli__ = AnalyzeIndexSnapshotConfig
 
+main = __cli__.main
+
 if __name__ == '__main__':
-    setup_cli_logging()
     __cli__.main()
