@@ -19,6 +19,7 @@ from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
 from helm_audit.infra.paths import experiment_analysis_dpath
 from helm_audit.infra.report_layout import aggregate_summary_reports_root, compat_core_run_reports_root, core_run_reports_root, portable_repo_root_lines
+from helm_audit.model_registry import local_model_registry_by_name
 from helm_audit.utils.numeric import nested_get
 from helm_audit.utils.sankey import emit_sankey_artifacts
 from helm_audit.utils import sankey_builder
@@ -102,6 +103,138 @@ def _coerce_float(value: Any) -> float:
         return float(value)
     except Exception:
         return float("-inf")
+
+
+def _clean_optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.lower() in {"none", "nan"}:
+        return None
+    return text
+
+
+def _preview_values(values: list[str], *, max_items: int = 6) -> list[str]:
+    unique = sorted({value for value in values if _clean_optional_text(value)})
+    if len(unique) <= max_items:
+        return unique
+    return unique[:max_items] + [f"... (+{len(unique) - max_items} more)"]
+
+
+def _build_attempt_fallback_key_from_row(row: dict[str, Any]) -> str:
+    parts = {
+        "experiment_name": _clean_optional_text(row.get("experiment_name")) or "unknown",
+        "job_id": _clean_optional_text(row.get("job_id")) or "unknown",
+        "run_entry": _clean_optional_text(row.get("run_entry")) or "unknown",
+        "manifest_timestamp": _clean_optional_text(row.get("manifest_timestamp")) or "unknown",
+        "machine_host": _clean_optional_text(row.get("machine_host")) or "unknown",
+        "run_dir": _clean_optional_text(row.get("run_dir")) or "unknown",
+    }
+    return "fallback::" + "|".join(f"{key}={value}" for key, value in parts.items())
+
+
+def _resolve_attempt_identity(row: dict[str, Any]) -> dict[str, str | None]:
+    attempt_uuid = _clean_optional_text(row.get("attempt_uuid"))
+    attempt_fallback_key = _clean_optional_text(row.get("attempt_fallback_key")) or _build_attempt_fallback_key_from_row(row)
+    attempt_identity = _clean_optional_text(row.get("attempt_identity")) or attempt_uuid or attempt_fallback_key
+    attempt_identity_kind = _clean_optional_text(row.get("attempt_identity_kind")) or ("attempt_uuid" if attempt_uuid else "fallback")
+    return {
+        "attempt_uuid": attempt_uuid,
+        "attempt_fallback_key": attempt_fallback_key,
+        "attempt_identity": attempt_identity,
+        "attempt_identity_kind": attempt_identity_kind,
+    }
+
+
+def _storyline_status(expected_local_served: bool, replaces_helm_deployment: str | None) -> str:
+    if expected_local_served and replaces_helm_deployment:
+        return "on_story"
+    if expected_local_served:
+        return "off_story"
+    return "not_local_story"
+
+
+def _storyline_reason(expected_local_served: bool, replaces_helm_deployment: str | None) -> str:
+    if expected_local_served and replaces_helm_deployment:
+        return "expected_local_served=True and replaces_helm_deployment points to a public HELM deployment"
+    if expected_local_served:
+        return "expected_local_served=True but replaces_helm_deployment is null, so this is a local extension outside the public HELM storyline"
+    return "model is not marked as expected_local_served in the checked-in local model registry"
+
+
+def _filter_inventory_lookup_by_run_entry(filter_inventory_rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for row in filter_inventory_rows:
+        run_entry = _clean_optional_text(row.get("run_spec_name"))
+        if not run_entry:
+            continue
+        lookup[run_entry] = row
+    return lookup
+
+
+def _storyline_metadata_for_model(
+    *,
+    model: str | None,
+    registry_lookup: dict[str, Any],
+    filter_row: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    reg_entry = registry_lookup.get(model or "")
+    if reg_entry is not None:
+        expected_local_served = bool(reg_entry.expected_local_served)
+        replaces_helm_deployment = reg_entry.replaces_helm_deployment
+        local_registry_source = reg_entry.source
+        registry_notes = reg_entry.notes or None
+    else:
+        expected_local_served = _is_truthy_text((filter_row or {}).get("expected_local_served"))
+        replaces_helm_deployment = _clean_optional_text((filter_row or {}).get("replaces_helm_deployment"))
+        local_registry_source = _clean_optional_text((filter_row or {}).get("local_registry_source"))
+        registry_notes = None
+    status = _storyline_status(expected_local_served, replaces_helm_deployment)
+    return {
+        "expected_local_served": expected_local_served,
+        "replaces_helm_deployment": replaces_helm_deployment,
+        "local_registry_source": local_registry_source,
+        "registry_notes": registry_notes,
+        "storyline_status": status,
+        "storyline_reason": _storyline_reason(expected_local_served, replaces_helm_deployment),
+    }
+
+
+def _run_entry_metadata_lookup(
+    filter_inventory_rows: list[dict[str, Any]],
+    scope_rows: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for row in filter_inventory_rows:
+        run_entry = _clean_optional_text(row.get("run_spec_name"))
+        if not run_entry:
+            continue
+        info = lookup.setdefault(run_entry, {})
+        for src_key, dst_key in [
+            ("model", "model"),
+            ("benchmark", "benchmark"),
+            ("scenario", "scenario"),
+            ("suite", "suite"),
+            ("dataset", "dataset"),
+            ("setting", "setting"),
+        ]:
+            value = _clean_optional_text(row.get(src_key))
+            if value and not info.get(dst_key):
+                info[dst_key] = value
+    for row in scope_rows:
+        run_entry = _clean_optional_text(row.get("run_entry"))
+        if not run_entry:
+            continue
+        info = lookup.setdefault(run_entry, {})
+        for src_key, dst_key in [
+            ("model", "model"),
+            ("benchmark", "benchmark"),
+            ("suite", "suite"),
+        ]:
+            value = _clean_optional_text(row.get(src_key))
+            if value and not info.get(dst_key):
+                info[dst_key] = value
+    return lookup
 
 
 def _default_filter_inventory_json() -> Path:
@@ -749,6 +882,18 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
         run_entry = selection.get("run_entry")
         if not experiment_name or not run_entry:
             continue
+        selected_run_dirs = []
+        for key in ["left_run_a", "left_run_b"]:
+            value = _clean_optional_text(selection.get(key))
+            if value:
+                selected_run_dirs.append(value)
+        for ref in selection.get("selected_local_attempt_refs") or []:
+            if not isinstance(ref, dict):
+                continue
+            value = _clean_optional_text(ref.get("run_dir"))
+            if value:
+                selected_run_dirs.append(value)
+        selected_run_dirs = sorted(set(selected_run_dirs))
         official = _find_pair(report, "official_vs_kwdagger") or {}
         repeat = _find_pair(report, "kwdagger_repeat") or {}
         official_diag = official.get("diagnosis", {}) or {}
@@ -763,6 +908,12 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
             "run_spec_name": report.get("run_spec_name"),
             "report_dir": str(report_json.parent),
             "report_json": str(report_json),
+            "analysis_left_run_a": _clean_optional_text(selection.get("left_run_a")),
+            "analysis_left_run_b": _clean_optional_text(selection.get("left_run_b")),
+            "analysis_selected_run_dirs": selected_run_dirs,
+            "analysis_selected_attempt_refs": selection.get("selected_local_attempt_refs") or [],
+            "analysis_selected_attempt_identities": selection.get("selected_local_attempt_identities") or [],
+            "analysis_single_run": bool(selection.get("single_run")),
             "repeat_diagnosis": repeat_diag.get("label"),
             "repeat_primary_reasons": repeat_diag.get("primary_reason_names") or [],
             "official_diagnosis": official_diag.get("label"),
@@ -824,6 +975,471 @@ def _write_table_artifacts(
             lines.append(f"... ({len(rows) - 200} more rows)")
         txt_fpath.write_text("\n".join(lines) + "\n")
     return {"json": str(json_fpath), "csv": str(csv_fpath), "txt": str(txt_fpath)}
+
+
+def _write_structured_summary_artifacts(
+    *,
+    rows: list[dict[str, Any]],
+    payload: dict[str, Any],
+    txt_lines: list[str],
+    stem: Path,
+    machine_dpath: Path,
+    static_dpath: Path,
+) -> dict[str, str]:
+    machine_dpath.mkdir(parents=True, exist_ok=True)
+    static_dpath.mkdir(parents=True, exist_ok=True)
+    json_fpath = (machine_dpath / stem.name).with_suffix(".json")
+    csv_fpath = (static_dpath / stem.name).with_suffix(".csv")
+    txt_fpath = (static_dpath / stem.name).with_suffix(".txt")
+    _write_json(payload, json_fpath)
+    fieldnames = sorted({key for row in rows for key in row.keys()})
+    with csv_fpath.open("w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=fieldnames)
+        if fieldnames:
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(row)
+        else:
+            file.write("")
+    _write_text(txt_lines, txt_fpath)
+    return {"json": str(json_fpath), "csv": str(csv_fpath), "txt": str(txt_fpath)}
+
+
+def _build_off_story_summary(
+    *,
+    filter_inventory_rows: list[dict[str, Any]],
+    scope_rows: list[dict[str, Any]],
+    repro_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    registry_lookup = local_model_registry_by_name()
+    run_entry_meta = _run_entry_metadata_lookup(filter_inventory_rows, scope_rows)
+    model_filter_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    model_scope_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    model_analyzed_run_entries: dict[str, set[str]] = defaultdict(set)
+    model_repro_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
+
+    for row in filter_inventory_rows:
+        model = _clean_optional_text(row.get("model"))
+        if model:
+            model_filter_rows[model].append(row)
+    for row in scope_rows:
+        model = _clean_optional_text(row.get("model"))
+        if model:
+            model_scope_rows[model].append(row)
+    for row in repro_rows:
+        run_entry = _clean_optional_text(row.get("run_entry"))
+        if not run_entry:
+            continue
+        model = _clean_optional_text((run_entry_meta.get(run_entry) or {}).get("model"))
+        if not model:
+            continue
+        model_analyzed_run_entries[model].add(run_entry)
+        model_repro_rows[model].append(row)
+
+    candidate_models = sorted(set(model_filter_rows) | set(model_scope_rows) | set(model_analyzed_run_entries))
+    headline_sets: dict[str, dict[str, set[str]]] = {
+        "off_story": {
+            "models": set(),
+            "selected_run_entries": set(),
+            "attempted_run_entries": set(),
+            "completed_run_entries": set(),
+            "analyzed_run_entries": set(),
+        },
+        "on_story": {
+            "models": set(),
+            "selected_run_entries": set(),
+            "attempted_run_entries": set(),
+            "completed_run_entries": set(),
+            "analyzed_run_entries": set(),
+        },
+    }
+
+    off_story_rows: list[dict[str, Any]] = []
+    for model in candidate_models:
+        filter_rows = model_filter_rows.get(model, [])
+        scope_model_rows = model_scope_rows.get(model, [])
+        filter_row = filter_rows[0] if filter_rows else None
+        story = _storyline_metadata_for_model(model=model, registry_lookup=registry_lookup, filter_row=filter_row)
+        status = story["storyline_status"]
+        if status not in headline_sets:
+            continue
+
+        selected_run_entries = {
+            str(row.get("run_spec_name"))
+            for row in filter_rows
+            if row.get("selection_status") == "selected" and row.get("run_spec_name")
+        }
+        attempted_run_entries = {
+            str(row.get("run_entry"))
+            for row in scope_model_rows
+            if row.get("run_entry")
+        }
+        completed_run_entries = {
+            str(row.get("run_entry"))
+            for row in scope_model_rows
+            if row.get("run_entry") and _is_truthy_text(row.get("has_run_spec"))
+        }
+        analyzed_run_entries = set(model_analyzed_run_entries.get(model, set()))
+        context = headline_sets[status]
+        context["models"].add(model)
+        context["selected_run_entries"].update(selected_run_entries)
+        context["attempted_run_entries"].update(attempted_run_entries)
+        context["completed_run_entries"].update(completed_run_entries)
+        context["analyzed_run_entries"].update(analyzed_run_entries)
+
+        if status != "off_story":
+            continue
+
+        off_story_rows.append(
+            {
+                "model": model,
+                "storyline_status": status,
+                "why_off_story": story["storyline_reason"],
+                "expected_local_served": story["expected_local_served"],
+                "replaces_helm_deployment": story["replaces_helm_deployment"],
+                "local_registry_source": story["local_registry_source"],
+                "registry_notes": story["registry_notes"],
+                "n_selected_run_entries": len(selected_run_entries),
+                "n_attempted_run_entries": len(attempted_run_entries),
+                "n_completed_run_entries": len(completed_run_entries),
+                "n_analyzed_run_entries": len(analyzed_run_entries),
+                "n_attempt_rows": len(scope_model_rows),
+                "n_completed_rows": sum(1 for row in scope_model_rows if _is_truthy_text(row.get("has_run_spec"))),
+                "n_analysis_reports": len(model_repro_rows.get(model, [])),
+                "selected_run_entries": _preview_values(sorted(selected_run_entries)),
+                "attempted_run_entries": _preview_values(sorted(attempted_run_entries)),
+                "analyzed_run_entries": _preview_values(sorted(analyzed_run_entries)),
+                "attempted_experiment_names": _preview_values([
+                    str(row.get("experiment_name")) for row in scope_model_rows if row.get("experiment_name")
+                ]),
+            }
+        )
+
+    off_story_rows.sort(
+        key=lambda row: (
+            -int(row.get("n_selected_run_entries") or 0),
+            -int(row.get("n_attempted_run_entries") or 0),
+            str(row.get("model") or ""),
+        )
+    )
+    headline_counts = {
+        status: {
+            "n_models": len(values["models"]),
+            "selected_run_entries": len(values["selected_run_entries"]),
+            "attempted_run_entries": len(values["attempted_run_entries"]),
+            "completed_run_entries": len(values["completed_run_entries"]),
+            "analyzed_run_entries": len(values["analyzed_run_entries"]),
+        }
+        for status, values in headline_sets.items()
+    }
+    return {
+        "definitions": {
+            "off_story": "expected_local_served=True and replaces_helm_deployment is null in helm_audit/model_registry.py",
+            "on_story": "expected_local_served=True and replaces_helm_deployment points at a public HELM deployment",
+            "count_semantics": "selected counts are Stage 1 selected run_entry values; attempted/completed/analyzed counts are unique run_entry values observed in the current summary scope",
+        },
+        "headline_counts": headline_counts,
+        "rows": off_story_rows,
+    }
+
+
+def _format_off_story_summary_text(
+    *,
+    scope_title: str,
+    generated_utc: str,
+    summary: dict[str, Any],
+) -> list[str]:
+    off_story_counts = summary["headline_counts"].get("off_story", {})
+    on_story_counts = summary["headline_counts"].get("on_story", {})
+    lines = [
+        "Off-Story Local Serving Summary",
+        "================================",
+        f"Generated: {generated_utc}",
+        f"Scope: {scope_title}",
+        "",
+        "Definitions:",
+        f"  off_story: {summary['definitions']['off_story']}",
+        f"  on_story:  {summary['definitions']['on_story']}",
+        f"  counts:    {summary['definitions']['count_semantics']}",
+        "",
+        "Headline counts:",
+        f"  off_story_models: {off_story_counts.get('n_models', 0)}",
+        f"  off_story_selected_run_entries: {off_story_counts.get('selected_run_entries', 0)}",
+        f"  off_story_attempted_run_entries: {off_story_counts.get('attempted_run_entries', 0)}",
+        f"  off_story_completed_run_entries: {off_story_counts.get('completed_run_entries', 0)}",
+        f"  off_story_analyzed_run_entries: {off_story_counts.get('analyzed_run_entries', 0)}",
+        "",
+        "On-story context:",
+        f"  on_story_models: {on_story_counts.get('n_models', 0)}",
+        f"  on_story_selected_run_entries: {on_story_counts.get('selected_run_entries', 0)}",
+        f"  on_story_attempted_run_entries: {on_story_counts.get('attempted_run_entries', 0)}",
+        f"  on_story_completed_run_entries: {on_story_counts.get('completed_run_entries', 0)}",
+        f"  on_story_analyzed_run_entries: {on_story_counts.get('analyzed_run_entries', 0)}",
+        "",
+        "Per off-story model:",
+    ]
+    rows = summary.get("rows") or []
+    if not rows:
+        lines.append("  (no off-story models found in this scope)")
+        return lines
+    header = (
+        f"{'model':<32} {'sel':>4} {'att':>4} {'cmp':>4} {'ana':>4} "
+        f"{'source':<28} why_off_story"
+    )
+    lines.append(header)
+    lines.append("-" * len(header))
+    for row in rows:
+        lines.append(
+            f"{str(row.get('model') or ''):<32} "
+            f"{int(row.get('n_selected_run_entries') or 0):>4} "
+            f"{int(row.get('n_attempted_run_entries') or 0):>4} "
+            f"{int(row.get('n_completed_run_entries') or 0):>4} "
+            f"{int(row.get('n_analyzed_run_entries') or 0):>4} "
+            f"{str(row.get('local_registry_source') or ''):<28} "
+            f"{str(row.get('why_off_story') or '')}"
+        )
+    return lines
+
+
+def _build_analyzed_attempt_keys(
+    repro_rows: list[dict[str, Any]],
+) -> tuple[set[tuple[str, str, str]], set[tuple[str, str]]]:
+    explicit_attempt_keys: set[tuple[str, str, str]] = set()
+    analyzed_groups: set[tuple[str, str]] = set()
+    for row in repro_rows:
+        experiment_name = _clean_optional_text(row.get("experiment_name"))
+        run_entry = _clean_optional_text(row.get("run_entry"))
+        if not experiment_name or not run_entry:
+            continue
+        analyzed_groups.add((experiment_name, run_entry))
+        selected_run_dirs = row.get("analysis_selected_run_dirs") or []
+        if isinstance(selected_run_dirs, str):
+            try:
+                selected_run_dirs = json.loads(selected_run_dirs)
+            except Exception:
+                selected_run_dirs = [selected_run_dirs]
+        for run_dir in selected_run_dirs:
+            run_dir_text = _clean_optional_text(run_dir)
+            if run_dir_text:
+                explicit_attempt_keys.add((experiment_name, run_entry, run_dir_text))
+    return explicit_attempt_keys, analyzed_groups
+
+
+def _is_row_analyzed(
+    row: dict[str, Any],
+    *,
+    explicit_attempt_keys: set[tuple[str, str, str]],
+    explicit_groups: set[tuple[str, str]],
+    analyzed_groups: set[tuple[str, str]],
+) -> bool:
+    if not _is_truthy_text(row.get("has_run_spec")):
+        return False
+    experiment_name = _clean_optional_text(row.get("experiment_name"))
+    run_entry = _clean_optional_text(row.get("run_entry"))
+    if not experiment_name or not run_entry:
+        return False
+    run_dir = _clean_optional_text(row.get("run_dir"))
+    if run_dir and (experiment_name, run_entry, run_dir) in explicit_attempt_keys:
+        return True
+    if (experiment_name, run_entry) in explicit_groups:
+        return False
+    return (experiment_name, run_entry) in analyzed_groups
+
+
+def _build_run_multiplicity_summary(
+    *,
+    filter_inventory_rows: list[dict[str, Any]],
+    scope_rows: list[dict[str, Any]],
+    repro_rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    registry_lookup = local_model_registry_by_name()
+    filter_lookup = _filter_inventory_lookup_by_run_entry(filter_inventory_rows)
+    run_entry_meta = _run_entry_metadata_lookup(filter_inventory_rows, scope_rows)
+    explicit_attempt_keys, analyzed_groups = _build_analyzed_attempt_keys(repro_rows)
+    explicit_groups = {(exp, run_entry) for exp, run_entry, _ in explicit_attempt_keys}
+    repro_by_run_entry = _group_repro_rows_by_run_entry(repro_rows)
+
+    grouped_rows = _group_scope_rows_by_run_entry(scope_rows)
+    summary_rows: list[dict[str, Any]] = []
+    for run_entry, rows in grouped_rows.items():
+        resolved_rows = []
+        for row in rows:
+            resolved = dict(row)
+            resolved.update(_resolve_attempt_identity(row))
+            resolved_rows.append(resolved)
+        resolved_rows.sort(
+            key=lambda row: (
+                _coerce_float(row.get("manifest_timestamp")),
+                str(row.get("experiment_name") or ""),
+                str(row.get("job_id") or ""),
+            ),
+            reverse=True,
+        )
+        completed_rows = [row for row in resolved_rows if _is_truthy_text(row.get("has_run_spec"))]
+        analyzed_rows = [
+            row for row in resolved_rows
+            if _is_row_analyzed(
+                row,
+                explicit_attempt_keys=explicit_attempt_keys,
+                explicit_groups=explicit_groups,
+                analyzed_groups=analyzed_groups,
+            )
+        ]
+        attempt_ids = [str(row.get("attempt_identity")) for row in resolved_rows if row.get("attempt_identity")]
+        attempt_uuids = [str(row.get("attempt_uuid")) for row in resolved_rows if row.get("attempt_uuid")]
+        fallback_attempt_ids = [
+            str(row.get("attempt_fallback_key"))
+            for row in resolved_rows
+            if not row.get("attempt_uuid") and row.get("attempt_fallback_key")
+        ]
+        manifest_timestamps = [str(row.get("manifest_timestamp")) for row in resolved_rows if row.get("manifest_timestamp") not in {None, ""}]
+        experiment_names = [str(row.get("experiment_name")) for row in resolved_rows if row.get("experiment_name")]
+        machine_hosts = [str(row.get("machine_host")) for row in resolved_rows if row.get("machine_host")]
+        process_context_sources = [str(row.get("process_context_source")) for row in resolved_rows if row.get("process_context_source")]
+        attempt_uuid_sources = [str(row.get("attempt_uuid_source")) for row in resolved_rows if row.get("attempt_uuid_source")]
+        meta = run_entry_meta.get(run_entry, {})
+        model = _clean_optional_text(meta.get("model")) or _clean_optional_text(resolved_rows[0].get("model"))
+        benchmark = _clean_optional_text(meta.get("benchmark")) or _clean_optional_text(resolved_rows[0].get("benchmark"))
+        scenario = _clean_optional_text(meta.get("scenario")) or benchmark or _clean_optional_text(meta.get("suite"))
+        story = _storyline_metadata_for_model(
+            model=model,
+            registry_lookup=registry_lookup,
+            filter_row=filter_lookup.get(run_entry),
+        )
+        summary_rows.append(
+            {
+                "logical_run_key": run_entry,
+                "run_entry": run_entry,
+                "model": model,
+                "benchmark": benchmark,
+                "scenario": scenario,
+                "storyline_status": story["storyline_status"],
+                "local_registry_source": story["local_registry_source"],
+                "replaces_helm_deployment": story["replaces_helm_deployment"],
+                "n_rows": len(resolved_rows),
+                "n_completed_rows": len(completed_rows),
+                "n_analyzed_rows": len(analyzed_rows),
+                "n_analysis_reports": len(repro_by_run_entry.get(run_entry, [])),
+                "n_experiments": len({item for item in experiment_names if item}),
+                "n_machines": len({item for item in machine_hosts if item}),
+                "n_manifest_timestamps": len({item for item in manifest_timestamps if item}),
+                "n_attempt_ids": len(set(attempt_ids)),
+                "n_attempt_uuids": len(set(attempt_uuids)),
+                "n_rows_with_attempt_uuid": sum(1 for row in resolved_rows if row.get("attempt_uuid")),
+                "n_rows_without_attempt_uuid": sum(1 for row in resolved_rows if not row.get("attempt_uuid")),
+                "machine_hosts": _preview_values(machine_hosts, max_items=8),
+                "experiment_names": _preview_values(experiment_names, max_items=8),
+                "attempt_ids": _preview_values(attempt_ids, max_items=8),
+                "attempt_uuids": _preview_values(attempt_uuids, max_items=8),
+                "fallback_attempt_ids": _preview_values(fallback_attempt_ids, max_items=6),
+                "process_context_sources": _preview_values(process_context_sources, max_items=4),
+                "attempt_uuid_sources": _preview_values(attempt_uuid_sources, max_items=4),
+                "manifest_timestamps": _preview_values(manifest_timestamps, max_items=6),
+                "latest_manifest_timestamp": resolved_rows[0].get("manifest_timestamp"),
+                "latest_attempt_identity": resolved_rows[0].get("attempt_identity"),
+                "latest_attempt_identity_kind": resolved_rows[0].get("attempt_identity_kind"),
+                "latest_attempt_uuid": resolved_rows[0].get("attempt_uuid"),
+                "analysis_report_dirs": _preview_values([
+                    str(row.get("report_dir")) for row in repro_by_run_entry.get(run_entry, []) if row.get("report_dir")
+                ], max_items=4),
+            }
+        )
+    summary_rows.sort(
+        key=lambda row: (
+            -int(row.get("n_rows") or 0),
+            -int(row.get("n_completed_rows") or 0),
+            -int(row.get("n_analyzed_rows") or 0),
+            str(row.get("run_entry") or ""),
+        )
+    )
+    headline = {
+        "n_logical_runs": len(summary_rows),
+        "n_logical_runs_with_multiple_rows": sum(1 for row in summary_rows if int(row.get("n_rows") or 0) > 1),
+        "n_logical_runs_with_multiple_completed_rows": sum(1 for row in summary_rows if int(row.get("n_completed_rows") or 0) > 1),
+        "n_logical_runs_with_multiple_analyzed_rows": sum(1 for row in summary_rows if int(row.get("n_analyzed_rows") or 0) > 1),
+        "n_logical_runs_spanning_multiple_machines": sum(1 for row in summary_rows if int(row.get("n_machines") or 0) > 1),
+        "n_logical_runs_spanning_multiple_experiments": sum(1 for row in summary_rows if int(row.get("n_experiments") or 0) > 1),
+        "n_logical_runs_with_multiple_manifest_timestamps": sum(1 for row in summary_rows if int(row.get("n_manifest_timestamps") or 0) > 1),
+        "n_logical_runs_with_multiple_attempt_ids": sum(1 for row in summary_rows if int(row.get("n_attempt_ids") or 0) > 1),
+        "n_logical_runs_with_multiple_attempt_uuids": sum(1 for row in summary_rows if int(row.get("n_attempt_uuids") or 0) > 1),
+    }
+    return {
+        "definitions": {
+            "logical_result": "logical_run_key == run_entry; this is the current report-layer identity for a logical result",
+            "attempt": "one indexed kwdagger/materialize job row",
+            "attempt_uuid": "process_context.properties.uuid when available from process_context.json or embedded adapter_manifest.process_context",
+            "attempt_fallback_key": "fallback::experiment_name|job_id|run_entry|manifest_timestamp|machine_host|run_dir when UUID is missing",
+            "attempt_identity": "attempt_uuid when present, otherwise attempt_fallback_key",
+            "version": "a distinct attempt_identity observed under the same logical_run_key",
+            "cross_machine_repeat": "same logical_run_key observed on more than one distinct machine_host",
+            "analyzed_row": "a completed indexed row explicitly selected into a reproducibility report when selection provenance is available; otherwise a completed row in an analyzed (experiment_name, run_entry) group",
+        },
+        "headline_counts": headline,
+        "rows": summary_rows,
+    }
+
+
+def _format_run_multiplicity_summary_text(
+    *,
+    scope_title: str,
+    generated_utc: str,
+    summary: dict[str, Any],
+) -> list[str]:
+    counts = summary["headline_counts"]
+    lines = [
+        "Run Multiplicity Summary",
+        "========================",
+        f"Generated: {generated_utc}",
+        f"Scope: {scope_title}",
+        "",
+        "Identity contract:",
+        f"  logical_result: {summary['definitions']['logical_result']}",
+        f"  attempt: {summary['definitions']['attempt']}",
+        f"  attempt_uuid: {summary['definitions']['attempt_uuid']}",
+        f"  attempt_fallback_key: {summary['definitions']['attempt_fallback_key']}",
+        f"  attempt_identity: {summary['definitions']['attempt_identity']}",
+        f"  version: {summary['definitions']['version']}",
+        f"  cross_machine_repeat: {summary['definitions']['cross_machine_repeat']}",
+        f"  analyzed_row: {summary['definitions']['analyzed_row']}",
+        "",
+        "Headline counts:",
+        f"  n_logical_runs: {counts['n_logical_runs']}",
+        f"  n_logical_runs_with_multiple_rows: {counts['n_logical_runs_with_multiple_rows']}",
+        f"  n_logical_runs_with_multiple_completed_rows: {counts['n_logical_runs_with_multiple_completed_rows']}",
+        f"  n_logical_runs_with_multiple_analyzed_rows: {counts['n_logical_runs_with_multiple_analyzed_rows']}",
+        f"  n_logical_runs_spanning_multiple_machines: {counts['n_logical_runs_spanning_multiple_machines']}",
+        f"  n_logical_runs_spanning_multiple_experiments: {counts['n_logical_runs_spanning_multiple_experiments']}",
+        f"  n_logical_runs_with_multiple_manifest_timestamps: {counts['n_logical_runs_with_multiple_manifest_timestamps']}",
+        f"  n_logical_runs_with_multiple_attempt_ids: {counts['n_logical_runs_with_multiple_attempt_ids']}",
+        f"  n_logical_runs_with_multiple_attempt_uuids: {counts['n_logical_runs_with_multiple_attempt_uuids']}",
+        "",
+        "Per logical run:",
+    ]
+    rows = summary.get("rows") or []
+    if not rows:
+        lines.append("  (no attempted runs found in this scope)")
+        return lines
+    header = (
+        f"{'run_entry':<44} {'rows':>4} {'cmp':>4} {'ana':>4} {'exp':>4} "
+        f"{'mach':>4} {'ids':>4} {'uuids':>5} latest_manifest"
+    )
+    lines.append(header)
+    lines.append("-" * len(header))
+    for row in rows[:200]:
+        lines.append(
+            f"{str(row.get('run_entry') or ''):<44} "
+            f"{int(row.get('n_rows') or 0):>4} "
+            f"{int(row.get('n_completed_rows') or 0):>4} "
+            f"{int(row.get('n_analyzed_rows') or 0):>4} "
+            f"{int(row.get('n_experiments') or 0):>4} "
+            f"{int(row.get('n_machines') or 0):>4} "
+            f"{int(row.get('n_attempt_ids') or 0):>4} "
+            f"{int(row.get('n_attempt_uuids') or 0):>5} "
+            f"{str(row.get('latest_manifest_timestamp') or '')}"
+        )
+    if len(rows) > 200:
+        lines.append(f"... ({len(rows) - 200} more rows)")
+    return lines
 
 
 _AXIS_COUNT_TAGS = {
@@ -1213,6 +1829,8 @@ def _build_high_level_readme(
             "start_here:",
             "  story_index.latest.txt — canonical 5-step reading order for the sankey visualizations",
             "  cardinality_summary.latest.txt — run/model/benchmark counts at each stage of the funnel",
+            "  off_story_summary.latest.txt — off-story local-extension models with selected/attempted/completed/analyzed counts",
+            "  run_multiplicity_summary.latest.txt — repeated attempts, machine spread, experiment spread, and UUID/fallback identity coverage",
             "",
             "  understand_upstream_filtering:",
             "    1. What runs were excluded at Stage 1 (discovery)? See reports/filtering/ which contains",
@@ -1242,6 +1860,7 @@ def _build_high_level_readme(
             "",
             "  drill_down_by_dimension:",
             "    - follow next_level/ for breakdown tables by benchmark, model, suite, machine, experiment",
+            "    - use off_story_summary.latest.* and run_multiplicity_summary.latest.* for storyline/attempt identity tables",
             "    - run reproduce.latest.sh to regenerate this report from current data",
             "",
             "default_breakdowns:",
@@ -1311,8 +1930,24 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
         "benchmark_summary.latest.csv",
         "run_inventory.latest.csv",
         "reproducibility_rows.latest.csv",
+        "off_story_summary.latest.csv",
+        "run_multiplicity_summary.latest.csv",
     ]:
         src = level_002_static / src_name
+        if src.exists() or src.is_symlink():
+            write_latest_alias(src, summary_root, src_name)
+    for src_name in [
+        "off_story_summary.latest.txt",
+        "run_multiplicity_summary.latest.txt",
+    ]:
+        src = level_002_static / src_name
+        if src.exists() or src.is_symlink():
+            write_latest_alias(src, summary_root, src_name)
+    for src_name in [
+        "off_story_summary.latest.json",
+        "run_multiplicity_summary.latest.json",
+    ]:
+        src = level_002 / "machine" / src_name
         if src.exists() or src.is_symlink():
             write_latest_alias(src, summary_root, src_name)
 
@@ -2161,11 +2796,33 @@ def _render_scope_summary(
         for row in repro_rows
         if row.get("experiment_name") and row.get("run_entry")
     }
+    filter_lookup = _filter_inventory_lookup_by_run_entry(filter_inventory_rows)
+    registry_lookup = local_model_registry_by_name()
 
     enriched_rows: list[dict[str, Any]] = []
     failed_rows: list[dict[str, Any]] = []
     for row in scope_rows:
         enriched = dict(row)
+        enriched["logical_run_key"] = str(row.get("run_entry") or "")
+        enriched.update(_resolve_attempt_identity(row))
+        filter_row = filter_lookup.get(str(row.get("run_entry") or ""))
+        if filter_row is not None:
+            for src_key, dst_key in [
+                ("scenario", "scenario"),
+                ("dataset", "dataset"),
+                ("setting", "setting"),
+                ("selection_status", "selection_status"),
+                ("candidate_pool", "candidate_pool"),
+            ]:
+                if dst_key not in enriched or not enriched.get(dst_key):
+                    enriched[dst_key] = filter_row.get(src_key)
+        enriched.update(
+            _storyline_metadata_for_model(
+                model=_clean_optional_text(enriched.get("model")),
+                registry_lookup=registry_lookup,
+                filter_row=filter_row,
+            )
+        )
         completed = _is_truthy_text(row.get("has_run_spec"))
         enriched["completed_with_run_artifacts"] = completed
         enriched["lifecycle_stage"] = "completed_with_run_artifacts" if completed else "failed_or_incomplete"
@@ -2214,6 +2871,16 @@ def _render_scope_summary(
     benchmark_summary = _summarize_by_dimension(enriched_rows, dimension="benchmark", repro_keyed=repro_keyed)
     run_inventory = enriched_rows
     repro_inventory = repro_rows
+    off_story_summary = _build_off_story_summary(
+        filter_inventory_rows=filter_inventory_rows,
+        scope_rows=scope_rows,
+        repro_rows=repro_rows,
+    )
+    run_multiplicity_summary = _build_run_multiplicity_summary(
+        filter_inventory_rows=filter_inventory_rows,
+        scope_rows=scope_rows,
+        repro_rows=repro_rows,
+    )
 
     operational_sankey_rows = []
     for row in enriched_rows:
@@ -2591,6 +3258,38 @@ def _render_scope_summary(
     benchmark_table = _write_table_artifacts(benchmark_summary, level_002 / f"benchmark_summary_{generated_utc}", machine_dpath=level_002_machine, static_dpath=level_002_static)
     run_inventory_table = _write_table_artifacts(run_inventory, level_002 / f"run_inventory_{generated_utc}", machine_dpath=level_002_machine, static_dpath=level_002_static)
     repro_table = _write_table_artifacts(repro_inventory, level_002 / f"reproducibility_rows_{generated_utc}", machine_dpath=level_002_machine, static_dpath=level_002_static)
+    off_story_table = _write_structured_summary_artifacts(
+        rows=off_story_summary["rows"],
+        payload={
+            "generated_utc": generated_utc,
+            "scope_title": scope_title,
+            **off_story_summary,
+        },
+        txt_lines=_format_off_story_summary_text(
+            scope_title=scope_title,
+            generated_utc=generated_utc,
+            summary=off_story_summary,
+        ),
+        stem=level_002 / f"off_story_summary_{generated_utc}",
+        machine_dpath=level_002_machine,
+        static_dpath=level_002_static,
+    )
+    run_multiplicity_table = _write_structured_summary_artifacts(
+        rows=run_multiplicity_summary["rows"],
+        payload={
+            "generated_utc": generated_utc,
+            "scope_title": scope_title,
+            **run_multiplicity_summary,
+        },
+        txt_lines=_format_run_multiplicity_summary_text(
+            scope_title=scope_title,
+            generated_utc=generated_utc,
+            summary=run_multiplicity_summary,
+        ),
+        stem=level_002 / f"run_multiplicity_summary_{generated_utc}",
+        machine_dpath=level_002_machine,
+        static_dpath=level_002_static,
+    )
 
     if include_visuals:
         benchmark_plot = _write_plotly_bar(
@@ -2712,8 +3411,10 @@ def _render_scope_summary(
         "",
         "contents:",
         "  - benchmark_summary.latest.csv: benchmark-level counts and top failure reason",
-        "  - run_inventory.latest.csv: one row per scheduled job with completion, failure, and repro fields",
+        "  - run_inventory.latest.csv: one row per scheduled job with completion, failure, repro, and attempt identity/provenance fields",
         "  - reproducibility_rows.latest.csv: analyzed per-run reproducibility cases in this scope",
+        "  - off_story_summary.latest.{txt,csv,json}: off-story local extensions plus on-story context counts",
+        "  - run_multiplicity_summary.latest.{txt,csv,json}: logical-run multiplicity, attempt identity, machine spread, and experiment spread",
     ]
     if breakdown_dims:
         level_002_lines.append("  - breakdowns/: reusable summaries for additional cuts of the same data")
@@ -2737,6 +3438,12 @@ def _render_scope_summary(
         (Path(repro_table["json"]), level_002_machine, "reproducibility_rows.latest.json"),
         (Path(repro_table["csv"]), level_002_static, "reproducibility_rows.latest.csv"),
         (Path(repro_table["txt"]), level_002_static, "reproducibility_rows.latest.txt"),
+        (Path(off_story_table["json"]), level_002_machine, "off_story_summary.latest.json"),
+        (Path(off_story_table["csv"]), level_002_static, "off_story_summary.latest.csv"),
+        (Path(off_story_table["txt"]), level_002_static, "off_story_summary.latest.txt"),
+        (Path(run_multiplicity_table["json"]), level_002_machine, "run_multiplicity_summary.latest.json"),
+        (Path(run_multiplicity_table["csv"]), level_002_static, "run_multiplicity_summary.latest.csv"),
+        (Path(run_multiplicity_table["txt"]), level_002_static, "run_multiplicity_summary.latest.txt"),
     ]
     for src, root, name in latest_pairs:
         write_latest_alias(src, root, name)
@@ -2793,6 +3500,9 @@ def _render_scope_summary(
         "coverage_matrix_plot": coverage_matrix_plot,
         "failure_taxonomy_plot": failure_taxonomy_plot,
         "filter_selection_by_model_plot": filter_selection_by_model_plot,
+        "off_story_summary": off_story_table,
+        "run_multiplicity_summary": run_multiplicity_table,
+        "identity_contract": run_multiplicity_summary.get("definitions"),
     }
     manifest_fpath = level_001_machine / f"summary_manifest_{generated_utc}.json"
     _write_json(manifest, manifest_fpath)
@@ -2864,6 +3574,8 @@ def _render_scope_summary(
         "  File: sankey_s05_reproducibility.latest.{html,jpg,txt}",
         "",
         "Supplementary",
+        "  off_story_summary.latest.txt: off-story local extensions with stage counts and provenance",
+        "  run_multiplicity_summary.latest.txt: logical-result identity, repeated attempts, machines, experiments, UUIDs",
         "  sankey_repro_by_metric: per-metric drift (max |official - local| across runs)",
         "  alt_tolerances/: tolerance sweep variants for s03, s04, s05",
         "  agreement_curve.latest.html: agreement-rate vs tolerance curve",

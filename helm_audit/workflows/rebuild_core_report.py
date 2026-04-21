@@ -39,6 +39,44 @@ def _coerce_float(x):
         return float('-inf')
 
 
+def _clean_optional_text(value: Any) -> str | None:
+    text = str(value or '').strip()
+    return text or None
+
+
+def _build_attempt_fallback_key(row: dict[str, Any]) -> str:
+    parts = {
+        'experiment_name': _clean_optional_text(row.get('experiment_name')) or 'unknown',
+        'job_id': _clean_optional_text(row.get('job_id')) or 'unknown',
+        'run_entry': _clean_optional_text(row.get('run_entry')) or 'unknown',
+        'manifest_timestamp': _clean_optional_text(row.get('manifest_timestamp')) or 'unknown',
+        'machine_host': _clean_optional_text(row.get('machine_host')) or 'unknown',
+        'run_dir': _clean_optional_text(row.get('run_dir')) or 'unknown',
+    }
+    return 'fallback::' + '|'.join(f'{key}={value}' for key, value in parts.items())
+
+
+def _attempt_ref(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if row is None:
+        return None
+    attempt_uuid = _clean_optional_text(row.get('attempt_uuid'))
+    attempt_fallback_key = _clean_optional_text(row.get('attempt_fallback_key')) or _build_attempt_fallback_key(row)
+    return {
+        'experiment_name': row.get('experiment_name'),
+        'job_id': row.get('job_id'),
+        'job_dpath': row.get('job_dpath'),
+        'run_entry': row.get('run_entry'),
+        'run_dir': row.get('run_dir'),
+        'machine_host': row.get('machine_host'),
+        'manifest_timestamp': row.get('manifest_timestamp'),
+        'attempt_uuid': attempt_uuid,
+        'attempt_uuid_source': row.get('attempt_uuid_source'),
+        'attempt_fallback_key': attempt_fallback_key,
+        'attempt_identity': row.get('attempt_identity') or attempt_uuid or attempt_fallback_key,
+        'attempt_identity_kind': row.get('attempt_identity_kind') or ('attempt_uuid' if attempt_uuid else 'fallback'),
+    }
+
+
 def matching_rows(
     rows: list[dict[str, Any]],
     run_entry: str,
@@ -138,10 +176,14 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(f'No indexed kwdagger runs found for run_entry={args.run_entry!r}')
 
     if len(matches) >= 2:
+        left_a_row = matches[0]
+        left_b_row = matches[1]
         left_a = matches[0]['run_dir']
         left_b = matches[1]['run_dir']
         single_run = False
     elif args.allow_single_repeat:
+        left_a_row = matches[0]
+        left_b_row = matches[0]
         left_a = matches[0]['run_dir']
         left_b = matches[0]['run_dir']
         single_run = True
@@ -187,7 +229,18 @@ def main(argv: list[str] | None = None) -> None:
         'experiment_name': args.experiment_name,
         'historic_info': info,
         'single_run': single_run,
+        'left_attempt_a_ref': _attempt_ref(left_a_row),
+        'left_attempt_b_ref': _attempt_ref(left_b_row),
     }
+    selection['selected_local_attempt_refs'] = [
+        ref for ref in [selection.get('left_attempt_a_ref'), selection.get('left_attempt_b_ref')]
+        if ref is not None
+    ]
+    selection['selected_local_attempt_identities'] = [
+        ref['attempt_identity']
+        for ref in selection['selected_local_attempt_refs']
+        if ref.get('attempt_identity')
+    ]
     selection_fpath = _write_latest_selection(report_dpath, selection)
     link_info = _write_selected_run_symlinks(report_dpath, selection)
     selection['selected_run_links'] = link_info

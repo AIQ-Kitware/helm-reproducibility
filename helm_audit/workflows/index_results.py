@@ -17,6 +17,7 @@ from helm_audit.helm.run_entries import parse_run_entry_description
 
 from loguru import logger
 
+
 def _safe_json_load(fpath: Path) -> dict[str, Any]:
     if not fpath.exists():
         return {}
@@ -40,6 +41,31 @@ def _first_run_dir(job_dpath: Path) -> Path | None:
     if not runs:
         return None
     return Path(runs[0].path)
+
+
+def _clean_optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _build_attempt_fallback_key(
+    *,
+    experiment_name: str | None,
+    job_id: str | None,
+    run_entry: str | None,
+    manifest_timestamp: Any,
+    machine_host: str | None,
+    run_dir: str | None,
+) -> str:
+    parts = {
+        "experiment_name": _clean_optional_text(experiment_name) or "unknown",
+        "job_id": _clean_optional_text(job_id) or "unknown",
+        "run_entry": _clean_optional_text(run_entry) or "unknown",
+        "manifest_timestamp": _clean_optional_text(manifest_timestamp) or "unknown",
+        "machine_host": _clean_optional_text(machine_host) or "unknown",
+        "run_dir": _clean_optional_text(run_dir) or "unknown",
+    }
+    return "fallback::" + "|".join(f"{key}={value}" for key, value in parts.items())
 
 
 def _process_context_info(process_context: dict[str, Any], fallback_host: str | None) -> dict[str, Any]:
@@ -70,6 +96,37 @@ def _process_context_info(process_context: dict[str, Any], fallback_host: str | 
     }
 
 
+def _process_context_provenance(job_dpath: Path, adapter_manifest: dict[str, Any], process_context: dict[str, Any]) -> dict[str, Any]:
+    process_context_json_fpath = job_dpath / 'process_context.json'
+    manifest_process_context_fpath = _clean_optional_text(adapter_manifest.get('process_context_fpath'))
+    process_context_fpath = (
+        str(process_context_json_fpath)
+        if process_context_json_fpath.exists() else
+        manifest_process_context_fpath
+    )
+    if process_context_json_fpath.exists():
+        process_context_source = 'process_context.json'
+    elif process_context:
+        process_context_source = 'adapter_manifest.process_context'
+    else:
+        process_context_source = 'missing'
+
+    props = process_context.get('properties', {}) if isinstance(process_context, dict) else {}
+    attempt_uuid = _clean_optional_text(props.get('uuid'))
+
+    return {
+        'adapter_manifest_fpath': str(job_dpath / 'adapter_manifest.json') if (job_dpath / 'adapter_manifest.json').exists() else None,
+        'process_context_fpath': process_context_fpath,
+        'process_context_source': process_context_source,
+        'materialize_out_dpath': _clean_optional_text(adapter_manifest.get('out_dpath')),
+        'process_start_timestamp': _clean_optional_text(props.get('start_timestamp')),
+        'process_stop_timestamp': _clean_optional_text(props.get('stop_timestamp')),
+        'process_duration': _clean_optional_text(props.get('duration')),
+        'attempt_uuid': attempt_uuid,
+        'attempt_uuid_source': 'process_context.properties.uuid' if attempt_uuid else 'missing',
+    }
+
+
 def _row_for_job(job_config_fpath: Path, fallback_host: str | None) -> dict[str, Any]:
     job_dpath = job_config_fpath.parent
     adapter_manifest = _safe_json_load(job_dpath / 'adapter_manifest.json')
@@ -93,11 +150,23 @@ def _row_for_job(job_config_fpath: Path, fallback_host: str | None) -> dict[str,
             benchmark = None
 
     context_info = _process_context_info(process_context, fallback_host)
+    process_info = _process_context_provenance(job_dpath, adapter_manifest, process_context)
     adapter_spec = run_spec.get('adapter_spec', {}) if isinstance(run_spec, dict) else {}
     metric_specs = run_spec.get('metric_specs', []) if isinstance(run_spec, dict) else []
+    experiment_name = job_dpath.parent.parent.name if job_dpath.parent.name == 'helm' else job_dpath.parent.name
+    run_dir_text = str(run_dir) if run_dir else None
+    attempt_fallback_key = _build_attempt_fallback_key(
+        experiment_name=experiment_name,
+        job_id=job_dpath.name,
+        run_entry=run_entry,
+        manifest_timestamp=adapter_manifest.get('timestamp'),
+        machine_host=context_info.get('machine_host'),
+        run_dir=run_dir_text,
+    )
+    attempt_identity = process_info['attempt_uuid'] or attempt_fallback_key
 
     row = {
-        'experiment_name': job_dpath.parent.parent.name if job_dpath.parent.name == 'helm' else job_dpath.parent.name,
+        'experiment_name': experiment_name,
         'job_id': job_dpath.name,
         'job_dpath': str(job_dpath),
         'status': adapter_manifest.get('status'),
@@ -108,15 +177,19 @@ def _row_for_job(job_config_fpath: Path, fallback_host: str | None) -> dict[str,
         'method': method,
         'suite': job_config.get('helm.suite'),
         'max_eval_instances': job_config.get('helm.max_eval_instances'),
-        'run_dir': str(run_dir) if run_dir else None,
+        'run_dir': run_dir_text,
         'has_run_dir': bool(run_dir and run_dir.exists()),
         'has_run_spec': bool(run_dir and (run_dir / 'run_spec.json').exists()),
         'has_stats': bool(run_dir and (run_dir / 'stats.json').exists()),
         'has_per_instance_stats': bool(run_dir and (run_dir / 'per_instance_stats.json').exists()),
         'model_deployment': adapter_spec.get('model_deployment'),
         'metric_class_names': [m.get('class_name') for m in metric_specs if isinstance(m, dict)],
+        'attempt_fallback_key': attempt_fallback_key,
+        'attempt_identity': attempt_identity,
+        'attempt_identity_kind': 'attempt_uuid' if process_info['attempt_uuid'] else 'fallback',
     }
     row.update(context_info)
+    row.update(process_info)
     return row
 
 
@@ -189,8 +262,12 @@ def main(argv: list[str] | None = None) -> None:
     if not table.empty:
         preferred = [
             'experiment_name', 'job_id', 'status', 'benchmark', 'model', 'method',
+            'attempt_identity_kind', 'attempt_uuid', 'attempt_identity',
+            'manifest_timestamp', 'process_start_timestamp', 'process_stop_timestamp',
             'max_eval_instances', 'machine_host', 'gpu_count', 'gpu_names',
-            'cuda_visible_devices', 'provenance_source', 'run_dir',
+            'cuda_visible_devices', 'provenance_source', 'process_context_source',
+            'run_dir', 'materialize_out_dpath', 'adapter_manifest_fpath',
+            'process_context_fpath',
         ]
         cols = [c for c in preferred if c in table.columns] + [c for c in table.columns if c not in preferred]
         table = table[cols]
