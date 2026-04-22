@@ -1,0 +1,574 @@
+from __future__ import annotations
+
+import csv
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from helm_audit.indexing.schema import (
+    component_id_for_local,
+    extract_run_spec_fields,
+    logical_run_key_for_local,
+    logical_run_key_for_official,
+    now_utc_iso,
+)
+from helm_audit.reports.core_packet import slugify_identifier
+
+
+PLANNER_VERSION = "core_report_packet_planner.v1"
+
+
+def _clean_optional_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    if text.lower() in {"none", "nan"}:
+        return None
+    return text
+
+
+def _coerce_float(value: Any) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return float("-inf")
+
+
+def _build_attempt_fallback_key(row: dict[str, Any]) -> str:
+    parts = {
+        "experiment_name": _clean_optional_text(row.get("experiment_name")) or "unknown",
+        "job_id": _clean_optional_text(row.get("job_id")) or "unknown",
+        "run_entry": _clean_optional_text(row.get("run_entry")) or "unknown",
+        "manifest_timestamp": _clean_optional_text(row.get("manifest_timestamp")) or "unknown",
+        "machine_host": _clean_optional_text(row.get("machine_host")) or "unknown",
+        "run_path": _clean_optional_text(row.get("run_path") or row.get("run_dir")) or "unknown",
+    }
+    return "fallback::" + "|".join(f"{key}={value}" for key, value in parts.items())
+
+
+def _attempt_identity(row: dict[str, Any]) -> tuple[str | None, str | None]:
+    attempt_uuid = _clean_optional_text(row.get("attempt_uuid"))
+    attempt_identity = _clean_optional_text(row.get("attempt_identity")) or attempt_uuid
+    if attempt_identity:
+        return attempt_uuid, attempt_identity
+    fallback = _clean_optional_text(row.get("attempt_fallback_key")) or _build_attempt_fallback_key(row)
+    return None, fallback
+
+
+def _read_run_spec(run_spec_fpath: str | Path | None) -> dict[str, Any]:
+    if run_spec_fpath is None:
+        return {}
+    fpath = Path(run_spec_fpath)
+    if not fpath.exists():
+        return {}
+    try:
+        data = json.loads(fpath.read_text())
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+@dataclass(frozen=True)
+class NormalizedPlannerComponent:
+    component_id: str
+    source_kind: str
+    logical_run_key: str | None
+    run_entry: str | None
+    run_path: str | None
+    job_path: str | None
+    run_spec_fpath: str | None
+    run_spec_name: str | None
+    model: str | None
+    scenario_class: str | None
+    benchmark_group: str | None
+    model_deployment: str | None
+    max_eval_instances: str | None
+    suite: str | None
+    public_track: str | None
+    suite_version: str | None
+    experiment_name: str | None
+    machine_host: str | None
+    attempt_uuid: str | None
+    attempt_identity: str | None
+    display_name: str
+    tags: list[str]
+    manifest_timestamp: str | None
+    provenance: dict[str, Any]
+    extra_metadata: dict[str, Any]
+
+    def to_manifest_component(self) -> dict[str, Any]:
+        return {
+            "component_id": self.component_id,
+            "source_kind": self.source_kind,
+            "run_path": self.run_path,
+            "job_path": self.job_path,
+            "attempt_uuid": self.attempt_uuid,
+            "attempt_identity": self.attempt_identity,
+            "display_name": self.display_name,
+            "tags": list(self.tags),
+            "machine_host": self.machine_host,
+            "experiment_name": self.experiment_name,
+            "run_entry": self.run_entry,
+            "logical_run_key": self.logical_run_key,
+            "provenance": self.provenance,
+            "model": self.model,
+            "scenario_class": self.scenario_class,
+            "benchmark_group": self.benchmark_group,
+            "model_deployment": self.model_deployment,
+            "max_eval_instances": self.max_eval_instances,
+            "suite": self.suite,
+            "public_track": self.public_track,
+            "suite_version": self.suite_version,
+            **self.extra_metadata,
+        }
+
+
+def load_index_rows(index_fpath: str | Path) -> list[dict[str, Any]]:
+    with Path(index_fpath).open(newline="") as file:
+        return [{k: ("" if v is None else v) for k, v in row.items()} for row in csv.DictReader(file)]
+
+
+def normalize_local_index_rows(rows: list[dict[str, Any]], *, index_fpath: str | Path) -> list[NormalizedPlannerComponent]:
+    index_fpath = str(Path(index_fpath).expanduser().resolve())
+    components: list[NormalizedPlannerComponent] = []
+    for row_index, row in enumerate(rows):
+        run_path = _clean_optional_text(row.get("run_path") or row.get("run_dir"))
+        run_spec_fpath = _clean_optional_text(row.get("run_spec_fpath"))
+        spec_fields = extract_run_spec_fields(run_spec_fpath)
+        attempt_uuid, attempt_identity = _attempt_identity(row)
+        component_id = _clean_optional_text(row.get("component_id")) or component_id_for_local(
+            experiment_name=_clean_optional_text(row.get("experiment_name")),
+            job_id=_clean_optional_text(row.get("job_id")),
+            attempt_identity=attempt_identity,
+        )
+        logical_run_key = _clean_optional_text(row.get("logical_run_key")) or logical_run_key_for_local(
+            run_spec_name=spec_fields.get("run_spec_name"),
+            run_entry=_clean_optional_text(row.get("run_entry")),
+        )
+        tags = ["local"]
+        if attempt_uuid:
+            tags.append("has_attempt_uuid")
+        else:
+            tags.append("fallback_attempt_identity")
+        components.append(
+            NormalizedPlannerComponent(
+                component_id=component_id,
+                source_kind="local",
+                logical_run_key=logical_run_key,
+                run_entry=_clean_optional_text(row.get("run_entry")),
+                run_path=run_path,
+                job_path=_clean_optional_text(row.get("job_dpath")),
+                run_spec_fpath=run_spec_fpath,
+                run_spec_name=spec_fields.get("run_spec_name") or _clean_optional_text(row.get("run_spec_name")),
+                model=spec_fields.get("model") or _clean_optional_text(row.get("model")),
+                scenario_class=spec_fields.get("scenario_class") or _clean_optional_text(row.get("scenario_class")),
+                benchmark_group=spec_fields.get("benchmark_group") or _clean_optional_text(row.get("benchmark_group")),
+                model_deployment=spec_fields.get("model_deployment") or _clean_optional_text(row.get("model_deployment")),
+                max_eval_instances=_clean_optional_text(row.get("max_eval_instances")),
+                suite=_clean_optional_text(row.get("suite")),
+                public_track=None,
+                suite_version=None,
+                experiment_name=_clean_optional_text(row.get("experiment_name")),
+                machine_host=_clean_optional_text(row.get("machine_host")),
+                attempt_uuid=attempt_uuid,
+                attempt_identity=attempt_identity,
+                display_name=f"local: {Path(run_path).name if run_path else component_id}",
+                tags=tags,
+                manifest_timestamp=_clean_optional_text(row.get("manifest_timestamp")),
+                provenance={
+                    "source_index_kind": "local",
+                    "source_index_fpath": index_fpath,
+                    "source_row_index": row_index,
+                    "source_component_id": _clean_optional_text(row.get("component_id")),
+                    "source_job_id": _clean_optional_text(row.get("job_id")),
+                },
+                extra_metadata={
+                    "attempt_identity_kind": _clean_optional_text(row.get("attempt_identity_kind")) or ("attempt_uuid" if attempt_uuid else "fallback"),
+                    "attempt_fallback_key": _clean_optional_text(row.get("attempt_fallback_key")) or (_build_attempt_fallback_key(row) if not attempt_uuid else None),
+                    "status": _clean_optional_text(row.get("status")),
+                },
+            )
+        )
+    return components
+
+
+def normalize_official_index_rows(rows: list[dict[str, Any]], *, index_fpath: str | Path) -> list[NormalizedPlannerComponent]:
+    index_fpath = str(Path(index_fpath).expanduser().resolve())
+    components: list[NormalizedPlannerComponent] = []
+    for row_index, row in enumerate(rows):
+        run_path = _clean_optional_text(row.get("run_path") or row.get("public_run_dir"))
+        run_spec_fpath = _clean_optional_text(row.get("run_spec_fpath"))
+        spec_fields = extract_run_spec_fields(run_spec_fpath)
+        logical_run_key = _clean_optional_text(row.get("logical_run_key")) or logical_run_key_for_official(
+            run_spec_name=spec_fields.get("run_spec_name"),
+            run_name=_clean_optional_text(row.get("run_name")),
+        )
+        components.append(
+            NormalizedPlannerComponent(
+                component_id=_clean_optional_text(row.get("component_id")) or f"official::{row_index}",
+                source_kind="official",
+                logical_run_key=logical_run_key,
+                run_entry=None,
+                run_path=run_path,
+                job_path=None,
+                run_spec_fpath=run_spec_fpath,
+                run_spec_name=spec_fields.get("run_spec_name") or _clean_optional_text(row.get("run_spec_name")),
+                model=spec_fields.get("model") or _clean_optional_text(row.get("model")),
+                scenario_class=spec_fields.get("scenario_class") or _clean_optional_text(row.get("scenario_class")),
+                benchmark_group=spec_fields.get("benchmark_group") or _clean_optional_text(row.get("benchmark_group")),
+                model_deployment=spec_fields.get("model_deployment") or _clean_optional_text(row.get("model_deployment")),
+                max_eval_instances=_clean_optional_text(row.get("max_eval_instances")),
+                suite=None,
+                public_track=_clean_optional_text(row.get("public_track")),
+                suite_version=_clean_optional_text(row.get("suite_version")),
+                experiment_name=None,
+                machine_host=None,
+                attempt_uuid=None,
+                attempt_identity=_clean_optional_text(row.get("component_id")) or f"official::{row_index}",
+                display_name=f"official: {Path(run_path).name if run_path else logical_run_key or row_index}",
+                tags=["official", "public_reference_candidate"],
+                manifest_timestamp=None,
+                provenance={
+                    "source_index_kind": "official",
+                    "source_index_fpath": index_fpath,
+                    "source_row_index": row_index,
+                    "source_component_id": _clean_optional_text(row.get("component_id")),
+                    "source_public_track": _clean_optional_text(row.get("public_track")),
+                    "source_suite_version": _clean_optional_text(row.get("suite_version")),
+                },
+                extra_metadata={
+                    "run_name": _clean_optional_text(row.get("run_name")),
+                },
+            )
+        )
+    return components
+
+
+def normalize_index_rows(
+    *,
+    local_rows: list[dict[str, Any]],
+    official_rows: list[dict[str, Any]],
+    local_index_fpath: str | Path,
+    official_index_fpath: str | Path,
+) -> list[NormalizedPlannerComponent]:
+    return [
+        *normalize_local_index_rows(local_rows, index_fpath=local_index_fpath),
+        *normalize_official_index_rows(official_rows, index_fpath=official_index_fpath),
+    ]
+
+
+def _component_sort_key(component: NormalizedPlannerComponent) -> tuple[Any, ...]:
+    if component.source_kind == "local":
+        return (
+            0,
+            -_coerce_float(component.manifest_timestamp),
+            component.experiment_name or "",
+            component.component_id,
+        )
+    return (
+        1,
+        component.public_track or "",
+        component.suite_version or "",
+        component.component_id,
+    )
+
+
+def _unique_nonempty(values: list[str | None]) -> list[str]:
+    seen: list[str] = []
+    for value in values:
+        text = _clean_optional_text(value)
+        if text and text not in seen:
+            seen.append(text)
+    return seen
+
+
+def _fact_status(values: list[str | None]) -> tuple[str, list[str]]:
+    present = _unique_nonempty(values)
+    if not present:
+        return "unknown", []
+    if len(present) == 1:
+        return "yes", present
+    return "no", present
+
+
+def _component_instructions(component: NormalizedPlannerComponent) -> str | None:
+    run_spec = _read_run_spec(component.run_spec_fpath)
+    adapter = run_spec.get("adapter_spec") or {}
+    if isinstance(adapter, dict):
+        return _clean_optional_text(adapter.get("instructions"))
+    return None
+
+
+def _component_suite_descriptor(component: NormalizedPlannerComponent) -> str | None:
+    if component.source_kind == "local":
+        return component.suite
+    parts = [part for part in [component.public_track, component.suite_version] if _clean_optional_text(part)]
+    return "::".join(parts) if parts else None
+
+
+def build_comparability_facts(components: list[NormalizedPlannerComponent]) -> dict[str, Any]:
+    facts = {
+        "same_model": {},
+        "same_scenario_class": {},
+        "same_benchmark_family": {},
+        "same_deployment": {},
+        "same_instructions": {},
+        "same_max_eval_instances": {},
+        "same_suite_or_track_version": {},
+    }
+    fact_inputs = {
+        "same_model": [component.model for component in components],
+        "same_scenario_class": [component.scenario_class for component in components],
+        "same_benchmark_family": [component.benchmark_group for component in components],
+        "same_deployment": [component.model_deployment for component in components],
+        "same_instructions": [_component_instructions(component) for component in components],
+        "same_max_eval_instances": [component.max_eval_instances for component in components],
+        "same_suite_or_track_version": [_component_suite_descriptor(component) for component in components],
+    }
+    for name, values in fact_inputs.items():
+        status, present_values = _fact_status(values)
+        facts[name] = {
+            "status": status,
+            "values": present_values,
+        }
+    return facts
+
+
+def _warning_lines(
+    *,
+    local_components: list[NormalizedPlannerComponent],
+    official_components: list[NormalizedPlannerComponent],
+    comparability_facts: dict[str, Any],
+) -> list[str]:
+    warnings: list[str] = []
+    if not local_components:
+        warnings.append("no_local_components")
+    if not official_components:
+        warnings.append("no_official_components")
+    if len(local_components) > 1:
+        warnings.append("multiple_local_components")
+    if len(official_components) > 1:
+        warnings.append("multiple_official_components")
+    for name, fact in comparability_facts.items():
+        status = fact.get("status")
+        if status == "no":
+            warnings.append(f"comparability_drift:{name}")
+        elif status == "unknown":
+            warnings.append(f"comparability_unknown:{name}")
+    return warnings
+
+
+def _comparison_caveats(comparability_facts: dict[str, Any]) -> list[str]:
+    caveats: list[str] = []
+    for name, fact in comparability_facts.items():
+        status = fact.get("status")
+        if status == "no":
+            caveats.append(f"{name}=no values={fact.get('values')}")
+        elif status == "unknown":
+            caveats.append(f"{name}=unknown")
+    return caveats
+
+
+def build_packet_intents(
+    components: list[NormalizedPlannerComponent],
+    *,
+    experiment_name: str | None = None,
+    run_entry: str | None = None,
+) -> list[dict[str, Any]]:
+    filtered = []
+    for component in components:
+        if experiment_name is not None and component.source_kind == "local" and component.experiment_name != experiment_name:
+            continue
+        if run_entry is not None and component.logical_run_key != run_entry and component.run_entry != run_entry:
+            continue
+        filtered.append(component)
+
+    grouped: dict[str, list[NormalizedPlannerComponent]] = {}
+    for component in filtered:
+        key = component.logical_run_key or component.run_entry or component.component_id
+        grouped.setdefault(key, []).append(component)
+
+    packets: list[dict[str, Any]] = []
+    for group_key, group_components in sorted(grouped.items()):
+        sorted_components = sorted(group_components, key=_component_sort_key)
+        local_components = [component for component in sorted_components if component.source_kind == "local"]
+        official_components = [component for component in sorted_components if component.source_kind == "official"]
+        local_reference = local_components[0] if local_components else None
+        official_reference = official_components[0] if official_components else None
+        comparability_facts = build_comparability_facts(sorted_components)
+        packet_caveats = _comparison_caveats(comparability_facts)
+        comparisons: list[dict[str, Any]] = []
+        if official_reference is not None:
+            for local_component in local_components:
+                comparisons.append(
+                    {
+                        "comparison_id": f"official_vs_local::{local_component.component_id}",
+                        "comparison_kind": "official_vs_local",
+                        "component_ids": [official_reference.component_id, local_component.component_id],
+                        "reference_component_id": official_reference.component_id,
+                        "enabled": True,
+                        "notes": "planner first-pass official-vs-local comparison",
+                        "caveats": list(packet_caveats),
+                    }
+                )
+        if local_reference is not None:
+            for repeat_component in local_components[1:]:
+                comparisons.append(
+                    {
+                        "comparison_id": f"local_repeat::{local_reference.component_id}::{repeat_component.component_id}",
+                        "comparison_kind": "local_repeat",
+                        "component_ids": [local_reference.component_id, repeat_component.component_id],
+                        "reference_component_id": local_reference.component_id,
+                        "enabled": True,
+                        "notes": "planner first-pass local repeat comparison",
+                        "caveats": list(packet_caveats),
+                    }
+                )
+        packet_experiment_name = experiment_name
+        if packet_experiment_name is None:
+            experiment_names = _unique_nonempty([component.experiment_name for component in local_components])
+            packet_experiment_name = experiment_names[0] if len(experiment_names) == 1 else None
+        packet_id = slugify_identifier(
+            f"{packet_experiment_name or 'all-experiments'}::{group_key}"
+        )
+        packets.append(
+            {
+                "packet_id": packet_id,
+                "run_entry": run_entry or next((component.run_entry for component in local_components if component.run_entry), None) or group_key,
+                "logical_run_key": group_key,
+                "experiment_name": packet_experiment_name,
+                "components": [component.to_manifest_component() for component in sorted_components],
+                "comparisons": comparisons,
+                "comparability_facts": comparability_facts,
+                "warnings": _warning_lines(
+                    local_components=local_components,
+                    official_components=official_components,
+                    comparability_facts=comparability_facts,
+                ),
+                "caveats": packet_caveats,
+                "planner_version": PLANNER_VERSION,
+            }
+        )
+    return packets
+
+
+def build_planning_artifact(
+    *,
+    local_index_fpath: str | Path,
+    official_index_fpath: str | Path,
+    experiment_name: str | None = None,
+    run_entry: str | None = None,
+) -> dict[str, Any]:
+    local_rows = load_index_rows(local_index_fpath)
+    official_rows = load_index_rows(official_index_fpath)
+    normalized_components = normalize_index_rows(
+        local_rows=local_rows,
+        official_rows=official_rows,
+        local_index_fpath=local_index_fpath,
+        official_index_fpath=official_index_fpath,
+    )
+    packets = build_packet_intents(
+        normalized_components,
+        experiment_name=experiment_name,
+        run_entry=run_entry,
+    )
+    return {
+        "generated_utc": now_utc_iso(),
+        "planner_version": PLANNER_VERSION,
+        "local_index_fpath": str(Path(local_index_fpath).expanduser().resolve()),
+        "official_index_fpath": str(Path(official_index_fpath).expanduser().resolve()),
+        "experiment_name": experiment_name,
+        "run_entry": run_entry,
+        "packet_count": len(packets),
+        "packets": packets,
+    }
+
+
+def comparison_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for packet in artifact.get("packets", []):
+        for comparison in packet.get("comparisons", []):
+            rows.append(
+                {
+                    "packet_id": packet.get("packet_id"),
+                    "logical_run_key": packet.get("logical_run_key"),
+                    "experiment_name": packet.get("experiment_name"),
+                    **comparison,
+                }
+            )
+    return rows
+
+
+def component_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for packet in artifact.get("packets", []):
+        for component in packet.get("components", []):
+            rows.append(
+                {
+                    "packet_id": packet.get("packet_id"),
+                    "logical_run_key": packet.get("logical_run_key"),
+                    "experiment_name": packet.get("experiment_name"),
+                    **component,
+                }
+            )
+    return rows
+
+
+def packet_rows(artifact: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for packet in artifact.get("packets", []):
+        rows.append(
+            {
+                "packet_id": packet.get("packet_id"),
+                "logical_run_key": packet.get("logical_run_key"),
+                "run_entry": packet.get("run_entry"),
+                "experiment_name": packet.get("experiment_name"),
+                "n_components": len(packet.get("components", [])),
+                "n_comparisons": len(packet.get("comparisons", [])),
+                "warnings": packet.get("warnings", []),
+                "caveats": packet.get("caveats", []),
+            }
+        )
+    return rows
+
+
+def planning_summary_lines(artifact: dict[str, Any]) -> list[str]:
+    lines = [
+        "Core Report Packet Planning Summary",
+        "",
+        f"generated_utc: {artifact.get('generated_utc')}",
+        f"planner_version: {artifact.get('planner_version')}",
+        f"local_index_fpath: {artifact.get('local_index_fpath')}",
+        f"official_index_fpath: {artifact.get('official_index_fpath')}",
+        f"experiment_name: {artifact.get('experiment_name')}",
+        f"run_entry: {artifact.get('run_entry')}",
+        f"packet_count: {artifact.get('packet_count')}",
+        "",
+    ]
+    for packet in artifact.get("packets", []):
+        lines.append(f"packet: {packet['packet_id']}")
+        lines.append(f"  logical_run_key: {packet.get('logical_run_key')}")
+        lines.append(f"  run_entry: {packet.get('run_entry')}")
+        lines.append(f"  experiment_name: {packet.get('experiment_name')}")
+        lines.append(f"  warnings: {packet.get('warnings')}")
+        lines.append(f"  caveats: {packet.get('caveats')}")
+        lines.append("  components:")
+        for component in packet.get("components", []):
+            lines.append(
+                f"    - {component['component_id']} source_kind={component.get('source_kind')} "
+                f"tags={component.get('tags')} run_path={component.get('run_path')}"
+            )
+        lines.append("  comparisons:")
+        for comparison in packet.get("comparisons", []):
+            lines.append(
+                f"    - {comparison['comparison_id']} kind={comparison.get('comparison_kind')} "
+                f"component_ids={comparison.get('component_ids')} reference={comparison.get('reference_component_id')}"
+            )
+        lines.append("  comparability_facts:")
+        for fact_name, fact in (packet.get("comparability_facts") or {}).items():
+            lines.append(
+                f"    - {fact_name}: status={fact.get('status')} values={fact.get('values')}"
+            )
+        lines.append("")
+    return lines

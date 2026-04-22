@@ -291,6 +291,27 @@ Design takeaways:
 2. Tiny polish passes go best when they reuse the established helper directly instead of introducing a second “cleanup” abstraction.
 3. Unused imports are low-stakes, but removing them in a narrow pass helps keep the change obviously intentional.
 
+## 2026-04-21 23:59:47 +0000
+
+Summary of user intent: add a new explicit comparison-intent / packet-planning stage between indexing and core-report rendering, with a normalized component model over local and official indexes, machine-readable planning artifacts, and human-inspectable summaries, while intentionally deferring full renderer migration and aggregate rewiring.
+
+Model and configuration: Codex based on GPT-5, collaboration mode `Default`, working in the shared repo checkout with local shell/tool execution.
+
+This slice is really about giving the pipeline a place to think before it renders. Up to now, the packet model existed mainly at the report layer, which meant the decision logic for “what should be in this packet?” was still too entangled with rebuilding and too easy to rediscover in multiple places. The key design choice here was to make the planner its own explicit stage and to have it speak in normalized component terms from the start. That keeps planning concerns focused on intent, provenance, and comparability, and leaves rendering as a later consumer rather than an implicit source of semantics.
+
+I leaned on the existing indexing schema rather than inventing a second identity system. That was important for local runs especially: the planner now prefers the indexed `attempt_uuid` and otherwise reuses the same explicit fallback identity story the repo already established. For official rows, the planner trusts the stable index-derived component ids and logical run keys. This keeps the planner grounded in identities that were already designed to survive retries and source differences, which is much better than building packet ids from row order or report-specific naming.
+
+The first-pass comparison logic is intentionally simple but explicit. The planner groups by logical run key, carries all discovered official and local components into the packet, chooses a first-pass official reference candidate and local reference candidate by stable sorting, then declares comparisons from there: one `official_vs_local` comparison for each local component against the chosen official reference, and one `local_repeat` comparison from the chosen local reference to each additional local. I think this strikes the right balance for this slice. It avoids hardcoding “exactly one official and exactly two locals,” but it also avoids a combinatorial pair explosion or a premature policy framework.
+
+The comparability block is deliberately not clever. It computes a compact set of yes/no/unknown facts for model, scenario class, benchmark family, deployment, instructions, max-eval setting, and suite/track/version shape, then surfaces disagreement as warnings and caveats rather than silently suppressing comparisons. That is the right bias for a planning artifact: explicit uncertainty is more useful than a false sense of comparability purity.
+
+What I intentionally deferred is just as important as what I added. The new planner does not yet drive `rebuild_core_report.py`, does not replace the current renderer inputs, and does not attempt a broad pipeline migration. That restraint matters here. The planner slice is only successful if it creates a clean, inspectable declaration surface that later stages can adopt without first untangling another half-finished redesign.
+
+Design takeaways:
+1. A planning stage earns its keep when it records intent and caveats explicitly enough that rendering no longer has to rediscover selection logic.
+2. Reusing stable index identities is better than inventing report-local component naming, especially for retry-heavy local runs.
+3. First-pass comparison policy should be explicit and inspectable before it is made exhaustive or automatic.
+
 ## 2026-04-21 00:18:44 +0000
 
 Summary of user intent: make a narrow presentation-layer fix in `helm_audit/workflows/build_reports_summary.py` so aggregate-summary plots keep full data and full HTML labels, but static JPG/PNG exports become bounded, slide-usable, and more readable for categorical axes without truncating categories or redesigning the report set.
