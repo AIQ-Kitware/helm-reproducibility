@@ -4,7 +4,10 @@ import csv
 import json
 from pathlib import Path
 
-from helm_audit.planning.core_report_planner import build_planning_artifact
+from helm_audit.planning.core_report_planner import (
+    build_planning_artifact,
+    _comparability_warning_lines,
+)
 from helm_audit.reports.core_packet import comparison_sample_latest_name
 from helm_audit.workflows import rebuild_core_report
 from helm_audit.workflows.rebuild_core_report import (
@@ -51,9 +54,12 @@ def _write_index_inputs(tmp_path: Path, *, single_run: bool) -> tuple[Path, Path
     local_b = local_root / "exp" / "helm" / "job-b" / "benchmark_output" / "runs" / "suite" / "bench:model=test"
     for path in [official_run, local_a, local_b]:
         path.mkdir(parents=True, exist_ok=True)
-    _write_json(official_run / "run_spec.json", _make_run_spec("bench:model=test", deployment="hf/meta-llama-3-8b", instructions="official"))
-    _write_json(local_a / "run_spec.json", _make_run_spec("bench:model=test", deployment="local/meta-llama-3-8b", instructions="local"))
-    _write_json(local_b / "run_spec.json", _make_run_spec("bench:model=test", deployment="local/meta-llama-3-8b", instructions="local"))
+    # Use empty instructions for all runs so the fixture represents routine
+    # deployment-only drift (expected in every local-vs-official comparison).
+    # Tests that need instructions drift build their own packets explicitly.
+    _write_json(official_run / "run_spec.json", _make_run_spec("bench:model=test", deployment="hf/meta-llama-3-8b", instructions=""))
+    _write_json(local_a / "run_spec.json", _make_run_spec("bench:model=test", deployment="local/meta-llama-3-8b", instructions=""))
+    _write_json(local_b / "run_spec.json", _make_run_spec("bench:model=test", deployment="local/meta-llama-3-8b", instructions=""))
     for job_root in [local_a.parents[3], local_b.parents[3]]:
         (job_root / "job_config.json").write_text("{}\n")
 
@@ -257,34 +263,49 @@ def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_pat
     assert "comparisons_manifest.latest.json" in script_text
 
 
-def test_auto_render_policy_deployment_drift_alone_does_not_trigger(tmp_path):
-    """Deployment-only drift is expected for all local reproductions; should not trigger."""
+def test_auto_render_policy_deployment_and_suite_drift_alone_do_not_trigger(tmp_path):
+    """Deployment and suite-version drift are expected in every local-vs-official comparison."""
     packet = {
         "packet_id": "some-packet",
         "run_entry": "bench:model=test",
-        "warnings": ["comparability_drift:same_deployment"],
+        "warnings": [
+            "comparability_drift:same_deployment",
+            "comparability_drift:same_suite_or_track_version",
+        ],
     }
     comparisons = [
         {
             "comparison_kind": "official_vs_local",
             "enabled": True,
-            "warnings": ["comparability_drift:same_deployment"],
+            "warnings": [
+                "comparability_drift:same_deployment",
+                "comparability_drift:same_suite_or_track_version",
+            ],
         },
     ]
     assert not _should_auto_render_heavy_pairwise_plots(packet, comparisons, tmp_path)
 
 
-def test_auto_render_policy_adapter_instructions_drift_triggers(tmp_path):
-    """Adapter-instructions drift is unusual; should trigger heavy plot rendering."""
+def test_auto_render_policy_instructions_drift_triggers(tmp_path):
+    """Instructions drift is unusual; uses correct planner name same_instructions."""
     packet = {
         "packet_id": "some-packet",
         "warnings": [
             "comparability_drift:same_deployment",
-            "comparability_drift:same_adapter_instructions",
+            "comparability_drift:same_instructions",
         ],
     }
     comparisons = [{"comparison_kind": "official_vs_local", "enabled": True, "warnings": []}]
     assert _should_auto_render_heavy_pairwise_plots(packet, comparisons, tmp_path)
+
+
+def test_auto_render_policy_model_drift_triggers(tmp_path):
+    """Model drift triggers; uses correct planner name same_model (not same_base_model)."""
+    packet = {
+        "packet_id": "some-packet",
+        "warnings": ["comparability_drift:same_model"],
+    }
+    assert _should_auto_render_heavy_pairwise_plots(packet, [], tmp_path)
 
 
 def test_auto_render_policy_unexpected_drift_in_comparison_triggers(tmp_path):
@@ -307,7 +328,7 @@ def test_auto_render_policy_disabled_comparison_warnings_ignored(tmp_path):
         {
             "comparison_kind": "official_vs_local",
             "enabled": False,
-            "warnings": ["comparability_drift:same_adapter_instructions"],
+            "warnings": ["comparability_drift:same_instructions"],
         }
     ]
     assert not _should_auto_render_heavy_pairwise_plots(packet, comparisons, tmp_path)
@@ -322,3 +343,46 @@ def test_auto_render_policy_interface_takes_full_packet_not_kind(tmp_path):
     assert "comparisons" in param_names
     assert "report_dpath" in param_names
     assert "comparison_kind" not in param_names
+
+
+def test_trigger_prefixes_match_real_planner_warning_names(tmp_path):
+    """Selection rule is tested against actual warning names emitted by _comparability_warning_lines.
+
+    This test uses the real planner machinery so that if fact names change in the
+    planner, this test will fail and catch the mismatch before production does.
+    """
+    # Build comparability facts the same way the planner does, with unexpected drift
+    unexpected_drift_facts = {
+        "same_model": {"status": "no", "values": ["model-a", "model-b"]},
+        "same_instructions": {"status": "no", "values": ["instr-a", "instr-b"]},
+        "same_scenario_class": {"status": "yes", "values": ["SomeScenario"]},
+        "same_benchmark_family": {"status": "yes", "values": ["bench"]},
+        "same_max_eval_instances": {"status": "yes", "values": [100]},
+        "same_deployment": {"status": "no", "values": ["deploy-a", "deploy-b"]},
+        "same_suite_or_track_version": {"status": "no", "values": ["suite", "main::v1"]},
+    }
+    # Use the real planner function to emit the actual warning strings
+    real_warnings = _comparability_warning_lines(unexpected_drift_facts)
+
+    # Verify the warnings include the names we expect (guards against planner renames)
+    assert "comparability_drift:same_model" in real_warnings
+    assert "comparability_drift:same_instructions" in real_warnings
+    assert "comparability_drift:same_deployment" in real_warnings
+
+    # The selection function should trigger on model/instructions drift
+    packet_with_unexpected = {"warnings": real_warnings}
+    assert _should_auto_render_heavy_pairwise_plots(packet_with_unexpected, [], tmp_path)
+
+    # Deployment + suite drift only → should NOT trigger
+    deployment_only_facts = {
+        "same_model": {"status": "yes", "values": ["model-a"]},
+        "same_instructions": {"status": "unknown", "values": []},
+        "same_scenario_class": {"status": "yes", "values": ["SomeScenario"]},
+        "same_benchmark_family": {"status": "yes", "values": ["bench"]},
+        "same_max_eval_instances": {"status": "yes", "values": [100]},
+        "same_deployment": {"status": "no", "values": ["deploy-a", "deploy-b"]},
+        "same_suite_or_track_version": {"status": "no", "values": ["suite", "main::v1"]},
+    }
+    deployment_only_warnings = _comparability_warning_lines(deployment_only_facts)
+    packet_deploy_only = {"warnings": deployment_only_warnings}
+    assert not _should_auto_render_heavy_pairwise_plots(packet_deploy_only, [], tmp_path)

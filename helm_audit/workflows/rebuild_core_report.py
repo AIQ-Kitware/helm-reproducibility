@@ -241,14 +241,18 @@ def _enabled_comparisons(comparisons_manifest: dict[str, Any]) -> list[dict[str,
 
 
 # Comparability warning prefixes that trigger auto-rendering of heavy pairwise plots.
-# Deployment substitution (comparability_drift:same_deployment) is expected for all
-# local reproductions and intentionally excluded. Any other comparability drift — in
-# base model, scenario class, adapter instructions, or eval size — is unusual and
-# warrants visual inspection via the distribution and agreement-curve plots.
+# These match the fact names emitted by build_comparability_facts() in core_report_planner.py.
+#
+# Intentionally excluded (expected to differ in every local-vs-official comparison):
+#   comparability_drift:same_deployment         — local vLLM vs official HuggingFace API
+#   comparability_drift:same_suite_or_track_version — local suite tag vs official track+version
+#
+# Everything else is unusual and warrants visual inspection of metric distributions.
 _UNEXPECTED_DRIFT_WARNING_PREFIXES: tuple[str, ...] = (
-    'comparability_drift:same_base_model',
+    'comparability_drift:same_model',
     'comparability_drift:same_scenario_class',
-    'comparability_drift:same_adapter_instructions',
+    'comparability_drift:same_benchmark_family',
+    'comparability_drift:same_instructions',
     'comparability_drift:same_max_eval_instances',
 )
 
@@ -261,13 +265,14 @@ def _should_auto_render_heavy_pairwise_plots(
     """Auto-render heavy pairwise PNG plots for selected cases of interest.
 
     Returns True when the packet or its enabled comparisons carry comparability
-    warnings beyond routine deployment substitution. Deployment drift
-    (comparability_drift:same_deployment) is expected for all local reproductions
-    and does not trigger heavy rendering alone.
+    warnings beyond routine deployment/suite-version substitution.
 
-    Warnings that do trigger: drift in base model, scenario class, adapter
-    instructions, or max_eval_instances. These are unusual and distribution plots
-    are the most direct way to diagnose them.
+    Warnings that trigger (see _UNEXPECTED_DRIFT_WARNING_PREFIXES):
+        same_model, same_scenario_class, same_benchmark_family,
+        same_instructions, same_max_eval_instances
+
+    Warnings that do not trigger (expected for every local-vs-official run):
+        same_deployment, same_suite_or_track_version
 
     To extend with specific packet IDs:
         if packet.get('packet_id') in {'boolq::vicuna-7b::v1'}:

@@ -434,3 +434,23 @@ Any other drift — adapter instructions, base model, scenario class, max_eval_i
 The function collects all warnings from the packet and all enabled comparisons, then checks for any matching prefix. This handles both packet-level and comparison-level warnings from the planner.
 
 Design insight: grounding the policy in planner-emitted warning strings (not comparison kinds or hardcoded packet IDs) means the selection automatically tracks the planner's comparability analysis. If the planner flags something unusual, heavy plots follow without needing manual curation of a shortlist. The deployment exclusion is explicit and commented.
+
+## 2026-04-22 01:30:00 +0000
+
+User intent: Correctness bug — `_UNEXPECTED_DRIFT_WARNING_PREFIXES` used guessed fact names (`same_base_model`, `same_adapter_instructions`) that don't match what `build_comparability_facts()` actually emits. Also, add a test that uses real planner machinery so future renames are caught.
+
+Model and configuration: claude-sonnet-4-6, Claude Code CLI.
+
+**Corrected fact names (from build_comparability_facts in core_report_planner.py):**
+- `same_base_model` → `same_model`
+- `same_adapter_instructions` → `same_instructions`
+- Added: `same_benchmark_family`
+- Excluded (expected to differ): `same_suite_or_track_version` (parallel to `same_deployment`)
+
+**Test fixture alignment:**
+`_write_index_inputs` previously used `instructions="official"` vs `instructions="local"`, which would now emit `comparability_drift:same_instructions` and trigger heavy rendering in the integration tests. Changed to `instructions=""` (both empty → `same_instructions=unknown`) so the fixture represents routine deployment-only drift without triggering the hook.
+
+**Real-machinery test:**
+`test_trigger_prefixes_match_real_planner_warning_names` calls `_comparability_warning_lines` directly (the real planner function) to get actual warning strings, then verifies the selection function responds correctly. This test will fail if the planner renames a fact and the prefix list isn't updated.
+
+Design insight: import and test against the real emitter function, not hand-written string literals. The test becomes self-validating: it checks that the emitter produces the exact strings the consumer expects, closing the gap between two modules that must stay in sync.
