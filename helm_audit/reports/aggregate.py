@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 
+from loguru import logger
+
 from helm_audit.infra.logging import rich_link, setup_cli_logging
 import datetime as datetime_mod
 import glob
@@ -156,8 +158,8 @@ def main(argv: list[str] | None = None) -> None:
     lines.append('per_run_spec:')
     for row in rows:
         lines.append(f"  - run_spec_name: {row['run_spec_name']}")
-        lines.append(f"    report_dir: {rich_link(row['report_dir'])}")
-        lines.append(f"    warnings_manifest: {rich_link(row['warnings_manifest'])}")
+        lines.append(f"    report_dir: {row['report_dir']}")
+        lines.append(f"    warnings_manifest: {row['warnings_manifest']}")
         lines.append(f"    packet_warnings: {row['packet_warnings']}")
         lines.append(f"    assessment_label: {row['assessment_label']}")
         lines.append(f"    diagnostic_flags: {row['diagnostic_flags']}")
@@ -182,10 +184,10 @@ def main(argv: list[str] | None = None) -> None:
     ]:
         _write_latest_alias(src, out_dpath, latest_name)
 
-    print(f'Wrote summary json: {rich_link(json_fpath)}')
-    print(f'Wrote summary csv: {rich_link(csv_fpath)}')
-    print(f'Wrote summary md: {rich_link(md_fpath)}')
-    print(f'Wrote summary txt: {rich_link(txt_fpath)}')
+    logger.info(f'Wrote summary json: {rich_link(json_fpath)}')
+    logger.info(f'Wrote summary csv: {rich_link(csv_fpath)}')
+    logger.info(f'Wrote summary md: {rich_link(md_fpath)}')
+    logger.info(f'Wrote summary txt: {rich_link(txt_fpath)}')
 
 
 if __name__ == '__main__':

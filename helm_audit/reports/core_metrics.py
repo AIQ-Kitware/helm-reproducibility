@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 
+from loguru import logger
+
 from helm_audit.infra.logging import rich_link, setup_cli_logging
 import datetime as datetime_mod
 import json
@@ -1582,23 +1584,23 @@ def main(argv: list[str] | None = None) -> None:
     for latest_name in known_latest_names - set(latest_map.values()):
         safe_unlink(report_dpath / latest_name)
 
-    print(f'Wrote core metric report: {rich_link(json_fpath)}')
-    print(f'Wrote core metric text: {rich_link(txt_fpath)}')
-    print(f'Wrote core metric management summary: {rich_link(mgmt_fpath)}')
-    print(f'Wrote core metric warnings json: {rich_link(warnings_json_fpath)}')
-    print(f'Wrote core metric warnings text: {rich_link(warnings_txt_fpath)}')
-    print(f'Wrote core metric plot: {rich_link(fig_fpath)}')
+    logger.info(f'Wrote core metric report: {rich_link(json_fpath)}')
+    logger.info(f'Wrote core metric text: {rich_link(txt_fpath)}')
+    logger.info(f'Wrote core metric management summary: {rich_link(mgmt_fpath)}')
+    logger.info(f'Wrote core metric warnings json: {rich_link(warnings_json_fpath)}')
+    logger.info(f'Wrote core metric warnings text: {rich_link(warnings_txt_fpath)}')
+    logger.info(f'Wrote core metric plot: {rich_link(fig_fpath)}')
     if dist_fig_fpath is not None:
-        print(f'Wrote core metric distributions: {rich_link(dist_fig_fpath)}')
+        logger.info(f'Wrote core metric distributions: {rich_link(dist_fig_fpath)}')
     if overlay_dist_fpath is not None:
-        print(f'Wrote core metric overlay distributions: {rich_link(overlay_dist_fpath)}')
+        logger.info(f'Wrote core metric overlay distributions: {rich_link(overlay_dist_fpath)}')
     if ecdf_fig_fpath is not None:
-        print(f'Wrote core metric ecdfs: {rich_link(ecdf_fig_fpath)}')
+        logger.info(f'Wrote core metric ecdfs: {rich_link(ecdf_fig_fpath)}')
     if per_metric_agree_fpath is not None:
-        print(f'Wrote per-metric agreement curves: {rich_link(per_metric_agree_fpath)}')
-    print(f'Wrote core run-level table csv: {rich_link(runlevel_csv_fpath)}')
+        logger.info(f'Wrote per-metric agreement curves: {rich_link(per_metric_agree_fpath)}')
+    logger.info(f'Wrote core run-level table csv: {rich_link(runlevel_csv_fpath)}')
     if runlevel_md_fpath is not None:
-        print(f'Wrote core run-level table md: {rich_link(runlevel_md_fpath)}')
+        logger.info(f'Wrote core run-level table md: {rich_link(runlevel_md_fpath)}')
 
 
 if __name__ == '__main__':

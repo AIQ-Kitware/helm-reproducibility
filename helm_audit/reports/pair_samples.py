@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 
+from loguru import logger
+
 from helm_audit.infra.logging import rich_link, setup_cli_logging
 import datetime as datetime_mod
 from pathlib import Path
@@ -88,8 +90,8 @@ def main(argv: list[str] | None = None) -> None:
         level=args.level,
     )
     latest_fpath = Path(args.report_dpath).expanduser().resolve() / comparison_sample_latest_name(args.label)
-    print(f'Wrote instance sample report: {rich_link(out_fpath)}')
-    print(f'Updated latest link: {rich_link(latest_fpath)}')
+    logger.info(f'Wrote instance sample report: {rich_link(out_fpath)}')
+    logger.info(f'Updated latest link: {rich_link(latest_fpath)}')
 
 
 if __name__ == '__main__':

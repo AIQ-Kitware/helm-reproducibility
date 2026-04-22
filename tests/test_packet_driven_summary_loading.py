@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from helm_audit.infra.logging import rich_link
 from helm_audit.reports.core_packet import comparison_sample_latest_name
 from helm_audit.workflows import analyze_experiment, build_reports_summary
 
@@ -240,7 +239,7 @@ def test_sample_artifact_lookup_is_derived_from_packet_comparison_ids(tmp_path):
     assert "instance_samples_official_vs_kwdagger.latest.txt" not in artifact_names
 
 
-def test_prioritized_breakdown_text_uses_rich_links_for_paths():
+def test_prioritized_breakdown_text_uses_plain_paths():
     summary = {
         "definitions": {"rank_population": "all analyzed rows"},
         "rows": [
@@ -272,6 +271,7 @@ def test_prioritized_breakdown_text_uses_rich_links_for_paths():
     )
     text = "\n".join(lines)
 
-    assert rich_link("/tmp/breakdown") in text
-    assert rich_link("/tmp/breakdown-index") in text
-    assert rich_link("/tmp/report-a") in text
+    assert "/tmp/breakdown" in text
+    assert "/tmp/breakdown-index" in text
+    assert "/tmp/report-a" in text
+    assert "[link=" not in text
