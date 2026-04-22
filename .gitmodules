@@ -10,3 +10,6 @@
 [submodule "submodules/kwdagger"]
 	path = submodules/kwdagger
 	url = https://github.com/AIQ-Kitware/kwdagger.git
+[submodule "submodules/every_eval_ever"]
+	path = submodules/every_eval_ever
+	url = https://github.com/evaleval/every_eval_ever.git
