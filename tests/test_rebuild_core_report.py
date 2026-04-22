@@ -257,42 +257,68 @@ def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_pat
     assert "comparisons_manifest.latest.json" in script_text
 
 
-def test_auto_render_policy_is_conservative_by_default(tmp_path):
-    """_should_auto_render_heavy_pairwise_plots returns False for any normal packet."""
-    packet = {"packet_id": "some-packet", "run_entry": "bench:model=test"}
+def test_auto_render_policy_deployment_drift_alone_does_not_trigger(tmp_path):
+    """Deployment-only drift is expected for all local reproductions; should not trigger."""
+    packet = {
+        "packet_id": "some-packet",
+        "run_entry": "bench:model=test",
+        "warnings": ["comparability_drift:same_deployment"],
+    }
     comparisons = [
-        {"comparison_kind": "official_vs_local", "enabled": True},
-        {"comparison_kind": "local_repeat", "enabled": True},
+        {
+            "comparison_kind": "official_vs_local",
+            "enabled": True,
+            "warnings": ["comparability_drift:same_deployment"],
+        },
     ]
     assert not _should_auto_render_heavy_pairwise_plots(packet, comparisons, tmp_path)
 
 
-def test_auto_render_policy_accepts_packet_and_report_dpath(tmp_path):
-    """Policy hook operates on full packet metadata and report_dpath, not comparison_kind alone.
+def test_auto_render_policy_adapter_instructions_drift_triggers(tmp_path):
+    """Adapter-instructions drift is unusual; should trigger heavy plot rendering."""
+    packet = {
+        "packet_id": "some-packet",
+        "warnings": [
+            "comparability_drift:same_deployment",
+            "comparability_drift:same_adapter_instructions",
+        ],
+    }
+    comparisons = [{"comparison_kind": "official_vs_local", "enabled": True, "warnings": []}]
+    assert _should_auto_render_heavy_pairwise_plots(packet, comparisons, tmp_path)
 
-    This test verifies the interface: the function accepts packet, comparisons, and
-    report_dpath so that extensions can key on packet_id, diagnostic flags, or any
-    other report metadata — not just comparison_kind.
-    """
+
+def test_auto_render_policy_unexpected_drift_in_comparison_triggers(tmp_path):
+    """Unexpected drift carried on a comparison (not the packet) also triggers."""
+    packet = {"packet_id": "some-packet", "warnings": ["comparability_drift:same_deployment"]}
+    comparisons = [
+        {
+            "comparison_kind": "official_vs_local",
+            "enabled": True,
+            "warnings": ["comparability_drift:same_max_eval_instances"],
+        }
+    ]
+    assert _should_auto_render_heavy_pairwise_plots(packet, comparisons, tmp_path)
+
+
+def test_auto_render_policy_disabled_comparison_warnings_ignored(tmp_path):
+    """Warnings on disabled comparisons do not trigger heavy rendering."""
+    packet = {"packet_id": "some-packet", "warnings": []}
+    comparisons = [
+        {
+            "comparison_kind": "official_vs_local",
+            "enabled": False,
+            "warnings": ["comparability_drift:same_adapter_instructions"],
+        }
+    ]
+    assert not _should_auto_render_heavy_pairwise_plots(packet, comparisons, tmp_path)
+
+
+def test_auto_render_policy_interface_takes_full_packet_not_kind(tmp_path):
+    """Policy hook signature includes packet, comparisons, and report_dpath — not comparison_kind."""
     import inspect
     sig = inspect.signature(_should_auto_render_heavy_pairwise_plots)
     param_names = list(sig.parameters)
     assert "packet" in param_names
     assert "comparisons" in param_names
     assert "report_dpath" in param_names
-    # No comparison_kind shortcut; the function gets the full comparison list
     assert "comparison_kind" not in param_names
-
-
-def test_auto_render_policy_can_be_overridden_via_monkeypatch(tmp_path, monkeypatch):
-    """The policy function is the single extension point; patching it enables heavy rendering."""
-    monkeypatch.setattr(
-        rebuild_core_report,
-        "_should_auto_render_heavy_pairwise_plots",
-        lambda packet, comparisons, report_dpath: True,
-    )
-    packet = {"packet_id": "interesting-packet"}
-    comparisons = [{"comparison_kind": "official_vs_local", "enabled": True}]
-    assert rebuild_core_report._should_auto_render_heavy_pairwise_plots(
-        packet, comparisons, tmp_path
-    )

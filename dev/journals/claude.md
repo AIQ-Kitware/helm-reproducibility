@@ -418,3 +418,19 @@ Key differences:
 This prevents the "I added official_vs_local and suddenly 200 reports render heavy plots" accident. Any extension must be explicit about *which specific packet or report* warrants heavy rendering.
 
 Design insight: name and interface shape together signal intent. `frozenset[str]` of comparison kinds says "broad category match"; a function taking `(packet, comparisons, report_dpath)` says "narrow predicate over full context." The interface shape is itself the policy documentation.
+
+## 2026-04-22 01:00:00 +0000
+
+User intent: Fill in the missing behavior in `_should_auto_render_heavy_pairwise_plots`. The function existed but returned False unconditionally. "Some reports should auto-render; most should not; the rule should be explicit and inspectable." Preferred signal: pipeline warnings, not comparison kind.
+
+Model and configuration: claude-sonnet-4-6, Claude Code CLI.
+
+**Signal chosen: unexpected comparability drift warnings**
+
+The planner emits `comparability_drift:{fact_name}` when a comparability fact is "no". For local reproductions, `comparability_drift:same_deployment` is always expected (local vLLM deployment vs official HuggingFace). Deployment-only drift is intentional and boring.
+
+Any other drift — adapter instructions, base model, scenario class, max_eval_instances — is not expected and warrants visual inspection. A module-level tuple `_UNEXPECTED_DRIFT_WARNING_PREFIXES` makes the selection rule explicit and easy to adjust.
+
+The function collects all warnings from the packet and all enabled comparisons, then checks for any matching prefix. This handles both packet-level and comparison-level warnings from the planner.
+
+Design insight: grounding the policy in planner-emitted warning strings (not comparison kinds or hardcoded packet IDs) means the selection automatically tracks the planner's comparability analysis. If the planner flags something unusual, heavy plots follow without needing manual curation of a shortlist. The deployment exclusion is explicit and commented.

@@ -240,28 +240,48 @@ def _enabled_comparisons(comparisons_manifest: dict[str, Any]) -> list[dict[str,
     return [comparison for comparison in comparisons if comparison.get("enabled", True)]
 
 
+# Comparability warning prefixes that trigger auto-rendering of heavy pairwise plots.
+# Deployment substitution (comparability_drift:same_deployment) is expected for all
+# local reproductions and intentionally excluded. Any other comparability drift — in
+# base model, scenario class, adapter instructions, or eval size — is unusual and
+# warrants visual inspection via the distribution and agreement-curve plots.
+_UNEXPECTED_DRIFT_WARNING_PREFIXES: tuple[str, ...] = (
+    'comparability_drift:same_base_model',
+    'comparability_drift:same_scenario_class',
+    'comparability_drift:same_adapter_instructions',
+    'comparability_drift:same_max_eval_instances',
+)
+
+
 def _should_auto_render_heavy_pairwise_plots(
     packet: dict[str, Any],
     comparisons: list[dict[str, Any]],
     report_dpath: Path,
 ) -> bool:
-    """Policy point for auto-rendering heavy pairwise PNG plots.
+    """Auto-render heavy pairwise PNG plots for selected cases of interest.
 
-    Default: False (conservative). Extend this function — keyed on packet id,
-    diagnostic flags, shortlist membership, specific comparison ids, or any
-    other report/packet metadata — to auto-render for selected cases.
+    Returns True when the packet or its enabled comparisons carry comparability
+    warnings beyond routine deployment substitution. Deployment drift
+    (comparability_drift:same_deployment) is expected for all local reproductions
+    and does not trigger heavy rendering alone.
 
-    Deliberately richer than a comparison-kind check so that enabling heavy
-    rendering for one specific packet does not silently pull in all reports
-    of the same comparison kind.
+    Warnings that do trigger: drift in base model, scenario class, adapter
+    instructions, or max_eval_instances. These are unusual and distribution plots
+    are the most direct way to diagnose them.
 
-    Examples of narrow extensions:
-        if packet.get('packet_id') in {'boolq::vicuna-7b::official::v1'}:
-            return True
-        if any(f.startswith('empty_completion_pathology') for f in packet.get('diagnostic_flags', [])):
+    To extend with specific packet IDs:
+        if packet.get('packet_id') in {'boolq::vicuna-7b::v1'}:
             return True
     """
-    return False
+    all_warnings: list[str] = list(packet.get('warnings') or [])
+    for comparison in comparisons:
+        if comparison.get('enabled', True):
+            all_warnings.extend(comparison.get('warnings') or [])
+    return any(
+        w.startswith(prefix)
+        for w in all_warnings
+        for prefix in _UNEXPECTED_DRIFT_WARNING_PREFIXES
+    )
 
 
 def _cleanup_legacy_report_surfaces(report_dpath: Path, enabled_comparison_ids: list[str]) -> None:
