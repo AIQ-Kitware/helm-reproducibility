@@ -342,3 +342,39 @@ Standalone tool consuming a single official index CSV. Produces 8 artifacts: sum
 **Tests:** `tests/test_official_public_index.py` — 26 tests, all passing. Covers all 6 required scenarios without needing magnet or real HELM data.
 
 Next: User may want to actually run `--out_official_index_dpath` against `/data/crfm-helm-public` and then run the analysis tool. The scan will be slow (36K dirs + run_spec.json reads) but is a one-time operation.
+
+## 2026-04-22 00:00:00 +0000
+
+User intent: Narrow implementation pass on the report-rendering layer. Stop auto-rendering every heavy pairwise interactive artifact by default. Canonical high-level outputs and selected candidate-of-interest pairwise artifacts still auto-render; the full exhaustive set of heavy per-pair distribution plots does not. Write a nearby `render_pairwise_interactives.sh` script per report directory to regenerate them on demand.
+
+Model and configuration: claude-sonnet-4-6, Claude Code CLI.
+
+**The design switch**
+
+The previous `core_metrics.main()` unconditionally rendered four heavy per-pair distribution plots (`core_metric_distributions`, `core_metric_overlay_distributions`, `core_metric_ecdfs`, `core_metric_per_metric_agreement`) for every single report directory. With hundreds of report directories this becomes expensive and produces an overwhelming number of PNG files in the default report surface.
+
+Architecture Amendment 2 from `ARCHITECTURE.md` calls for exactly this: "Do not auto-render every pairwise interactive artifact. Write a nearby script to generate richer HTML/Plotly outputs on demand."
+
+**Implementation**
+
+Single flag approach: `--render-pairwise-interactives` added to `core_metrics.main()` (default False). All four heavy plots are guarded behind this flag. The canonical outputs (summary 4-panel PNG, runlevel table CSV/MD, text reports, JSON, warnings) are unchanged and always rendered.
+
+`rebuild_core_report.py` gains two things:
+1. `_CANDIDATE_OF_INTEREST_KINDS: frozenset[str] = frozenset()` — the explicit, named selection point for auto-rendering heavy artifacts. Empty by default. Extend this set to designate specific comparison kinds for full auto-rendering.
+2. A `render_pairwise_interactives.latest.sh` script written next to the canonical reproduce script. The render script calls `helm_audit.reports.core_metrics` with `--render-pairwise-interactives` using the stable `components_manifest.latest.json` / `comparisons_manifest.latest.json` aliases (not the timestamped copies) so it stays valid across multiple rebuilds.
+
+The management summary now includes: `on_demand_pairwise_interactives: render_pairwise_interactives.sh (in this directory)`.
+
+**Key design insight**
+
+The one clean switch point (a single `--render-pairwise-interactives` flag gating all heavy calls) is better than per-artifact conditions scattered through `main()`. The selection logic lives in `rebuild_core_report._CANDIDATE_OF_INTEREST_KINDS` rather than in `core_metrics` itself, which keeps the rendering layer unaware of selection policy.
+
+Using `components_manifest.latest.json` in the render script (rather than the timestamped paths passed to `_build_pair`) means the script stays correct after a re-render that updates the manifests — the latest alias tracks.
+
+**Tests**
+
+`test_core_metrics_single_run.py`: updated existing test to assert heavy artifacts absent by default; added second pass with `--render-pairwise-interactives` to assert they appear; asserts management summary contains the on-demand note.
+
+`test_rebuild_core_report.py`: both test functions assert `--render-pairwise-interactives` absent from `core_metrics.main()` calls by default; assert `render_pairwise_interactives.latest.sh` written; assert script content contains flag and canonical manifest names. Two new tests cover the explicit selection mechanism.
+
+6 tests, all passing.

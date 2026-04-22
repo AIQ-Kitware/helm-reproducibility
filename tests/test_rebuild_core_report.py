@@ -7,6 +7,10 @@ from pathlib import Path
 from helm_audit.planning.core_report_planner import build_planning_artifact
 from helm_audit.reports.core_packet import comparison_sample_latest_name
 from helm_audit.workflows import rebuild_core_report
+from helm_audit.workflows.rebuild_core_report import (
+    _CANDIDATE_OF_INTEREST_KINDS,
+    _should_render_pairwise_interactives,
+)
 
 
 def _write_json(path: Path, payload: dict) -> None:
@@ -193,6 +197,18 @@ def test_single_run_core_report_uses_planner_packet_and_cleans_repeat_artifacts(
     assert len(pair_sample_calls) == 1
     assert pair_sample_calls[0]["label"].startswith("official_vs_local::")
 
+    # Canonical heavy artifacts are NOT auto-rendered; --render-pairwise-interactives absent
+    assert "--render-pairwise-interactives" not in core_metric_calls[0]
+
+    # render_pairwise_interactives.latest.sh is written
+    render_script = report_dir / "render_pairwise_interactives.latest.sh"
+    assert render_script.exists(), "render script must be written"
+    script_text = render_script.read_text()
+    assert "--render-pairwise-interactives" in script_text
+    assert "helm_audit.reports.core_metrics" in script_text
+    assert "components_manifest.latest.json" in script_text
+    assert "comparisons_manifest.latest.json" in script_text
+
 
 def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_path, monkeypatch):
     planner_fpath, artifact = _write_planner_artifact(tmp_path, single_run=False)
@@ -228,3 +244,43 @@ def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_pat
     assert len(pair_sample_calls) == 3
     assert {call["label"].split("::", 1)[0] for call in pair_sample_calls} == {"official_vs_local", "local_repeat"}
     assert len(core_metric_calls) == 1
+
+    # Heavy pairwise interactives not auto-rendered by default
+    assert "--render-pairwise-interactives" not in core_metric_calls[0]
+
+    # render_pairwise_interactives.latest.sh written and references canonical manifests
+    render_script = report_dir / "render_pairwise_interactives.latest.sh"
+    assert render_script.exists(), "render script must be written"
+    script_text = render_script.read_text()
+    assert "--render-pairwise-interactives" in script_text
+    assert "helm_audit.reports.core_metrics" in script_text
+    assert "components_manifest.latest.json" in script_text
+    assert "comparisons_manifest.latest.json" in script_text
+
+
+def test_candidate_of_interest_selection_is_explicit():
+    """_CANDIDATE_OF_INTEREST_KINDS is the single named selection point for auto-rendered heavy artifacts.
+    By default it is empty so no heavy rendering is triggered.
+    """
+    assert isinstance(_CANDIDATE_OF_INTEREST_KINDS, frozenset)
+    assert len(_CANDIDATE_OF_INTEREST_KINDS) == 0
+
+    comparisons = [
+        {"comparison_kind": "official_vs_local", "enabled": True},
+        {"comparison_kind": "local_repeat", "enabled": True},
+    ]
+    assert not _should_render_pairwise_interactives(comparisons)
+
+
+def test_candidate_of_interest_triggers_render_when_kind_present(monkeypatch):
+    """Adding a kind to _CANDIDATE_OF_INTEREST_KINDS enables auto-rendering for that comparison kind."""
+    monkeypatch.setattr(
+        rebuild_core_report,
+        "_CANDIDATE_OF_INTEREST_KINDS",
+        frozenset({"official_vs_local"}),
+    )
+    comparisons = [{"comparison_kind": "official_vs_local", "enabled": True}]
+    assert rebuild_core_report._should_render_pairwise_interactives(comparisons)
+
+    comparisons_other = [{"comparison_kind": "local_repeat", "enabled": True}]
+    assert not rebuild_core_report._should_render_pairwise_interactives(comparisons_other)

@@ -1295,6 +1295,9 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
     for fact_name, fact in (report.get('comparability') or {}).get('facts', {}).items():
         lines.append(f"  {fact_name}: {fact.get('status')} values={fact.get('values')}")
     lines.append('')
+    lines.append('on_demand_pairwise_interactives: render_pairwise_interactives.sh (in this directory)')
+    lines.append('  (histogram/ECDF distributions and per-metric agreement curves not rendered by default)')
+    lines.append('')
     lines.append('metric_descriptions:')
     for metric in ref_pair.get('core_metrics', []):
         desc = _metric_descriptor(metric)
@@ -1371,6 +1374,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--report-dpath', required=True)
     parser.add_argument('--components-manifest', default=None)
     parser.add_argument('--comparisons-manifest', default=None)
+    parser.add_argument(
+        '--render-pairwise-interactives',
+        action='store_true',
+        default=False,
+        help=(
+            'Also render heavy per-pair distribution plots (histograms, ECDFs, per-metric agreement). '
+            'Off by default; use render_pairwise_interactives.sh in the report directory instead.'
+        ),
+    )
     args = parser.parse_args(argv)
 
     thresholds = [0.0, 1e-12, 1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 2e-2, 5e-2, 1e-1, 2.5e-1, 5e-1, 1.0]
@@ -1503,34 +1515,41 @@ def main(argv: list[str] | None = None) -> None:
         fig.savefig(fig_fpath, dpi=180)
         plt.close(fig)
 
-    dist_fig_fpath = _plot_pair_metric_distributions(history_dpath, stamp, pairs, run_spec_name)
-    run_specs = [(component['run_path'], component['display_name']) for component in components]
-    overlay_dist_fpath = _plot_run_metric_distributions(
-        history_dpath,
-        stamp,
-        run_specs,
-        run_spec_name,
-        out_name='core_metric_overlay_distributions',
-        title='Overlay of Per-Instance Core Metric Score Distributions by Component',
-        subtitle='Each series comes from a selected report component declared in the components manifest.',
-    )
-    ecdf_fig_fpath = _plot_run_metric_distributions(
-        history_dpath,
-        stamp,
-        run_specs,
-        run_spec_name,
-        out_name='core_metric_ecdfs',
-        title='ECDF of Per-Instance Core Metric Scores by Component',
-        subtitle='Each series comes from a selected report component declared in the components manifest.',
-        ecdf=True,
-    )
-    per_metric_agree_fpath = _plot_per_metric_agreement(
-        history_dpath,
-        stamp,
-        *pairs,
-        level_key='instance_level',
-        thresholds=thresholds,
-    )
+    render_pairwise = args.render_pairwise_interactives
+    if render_pairwise:
+        dist_fig_fpath = _plot_pair_metric_distributions(history_dpath, stamp, pairs, run_spec_name)
+        run_specs = [(component['run_path'], component['display_name']) for component in components]
+        overlay_dist_fpath = _plot_run_metric_distributions(
+            history_dpath,
+            stamp,
+            run_specs,
+            run_spec_name,
+            out_name='core_metric_overlay_distributions',
+            title='Overlay of Per-Instance Core Metric Score Distributions by Component',
+            subtitle='Each series comes from a selected report component declared in the components manifest.',
+        )
+        ecdf_fig_fpath = _plot_run_metric_distributions(
+            history_dpath,
+            stamp,
+            run_specs,
+            run_spec_name,
+            out_name='core_metric_ecdfs',
+            title='ECDF of Per-Instance Core Metric Scores by Component',
+            subtitle='Each series comes from a selected report component declared in the components manifest.',
+            ecdf=True,
+        )
+        per_metric_agree_fpath = _plot_per_metric_agreement(
+            history_dpath,
+            stamp,
+            *pairs,
+            level_key='instance_level',
+            thresholds=thresholds,
+        )
+    else:
+        dist_fig_fpath = None
+        overlay_dist_fpath = None
+        ecdf_fig_fpath = None
+        per_metric_agree_fpath = None
     runlevel_csv_fpath, runlevel_md_fpath = _write_comparison_runlevel_table(
         history_dpath,
         stamp,

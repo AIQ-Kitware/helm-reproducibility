@@ -165,26 +165,33 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
         lambda run_path: {"exact_match": SimpleNamespace(metric="exact_match", mean=1.0 if "local" in run_path else 0.5)},
     )
 
-    core_metrics.main(
-        [
-            "--report-dpath", str(report_dpath),
-            "--components-manifest", str(components_fpath),
-            "--comparisons-manifest", str(comparisons_fpath),
-        ]
-    )
+    base_argv = [
+        "--report-dpath", str(report_dpath),
+        "--components-manifest", str(components_fpath),
+        "--comparisons-manifest", str(comparisons_fpath),
+    ]
 
+    core_metrics.main(base_argv)
+
+    # Canonical lightweight outputs are always present
     for name in [
         "core_metric_report.latest.png",
         "core_metric_management_summary.latest.txt",
-        "core_metric_distributions.latest.png",
-        "core_metric_overlay_distributions.latest.png",
-        "core_metric_ecdfs.latest.png",
-        "core_metric_per_metric_agreement.latest.png",
         "core_runlevel_table.latest.csv",
         "warnings.latest.json",
         "warnings.latest.txt",
     ]:
-        assert (report_dpath / name).exists(), name
+        assert (report_dpath / name).exists(), f"canonical output missing: {name}"
+
+    # Heavy pairwise interactives are NOT rendered by default
+    for name in [
+        "core_metric_distributions.latest.png",
+        "core_metric_overlay_distributions.latest.png",
+        "core_metric_ecdfs.latest.png",
+        "core_metric_per_metric_agreement.latest.png",
+    ]:
+        assert not (report_dpath / name).exists(), f"heavy artifact should not be auto-rendered: {name}"
+
     assert not (report_dpath / "core_metric_three_run_distributions.latest.png").exists()
 
     text = (report_dpath / "core_metric_management_summary.latest.txt").read_text()
@@ -195,8 +202,21 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     assert "selected_components:" in text
     assert "comparisons:" in text
     assert "comparability:" in text
+    assert "on_demand_pairwise_interactives" in text, "management summary must note on-demand rendering"
+    assert "render_pairwise_interactives.sh" in text
     warnings_payload = json.loads((report_dpath / "warnings.latest.json").read_text())
     assert warnings_payload["packet_warnings"] == ["comparability_drift:same_deployment"]
+
+    # With --render-pairwise-interactives flag, heavy outputs ARE written
+    core_metrics.main(base_argv + ["--render-pairwise-interactives"])
+
+    for name in [
+        "core_metric_distributions.latest.png",
+        "core_metric_overlay_distributions.latest.png",
+        "core_metric_ecdfs.latest.png",
+        "core_metric_per_metric_agreement.latest.png",
+    ]:
+        assert (report_dpath / name).exists(), f"heavy artifact missing with --render-pairwise-interactives: {name}"
 
 
 def test_diagnostic_flags_use_manifest_semantics_not_component_order():

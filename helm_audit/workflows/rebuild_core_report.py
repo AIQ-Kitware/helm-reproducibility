@@ -240,6 +240,21 @@ def _enabled_comparisons(comparisons_manifest: dict[str, Any]) -> list[dict[str,
     return [comparison for comparison in comparisons if comparison.get("enabled", True)]
 
 
+# Comparison kinds for which heavy pairwise interactive artifacts are auto-rendered.
+# Empty by default: heavy artifacts are generated on demand via render_pairwise_interactives.sh.
+# Add a comparison kind here to make its report directory auto-render the full detail plots.
+_CANDIDATE_OF_INTEREST_KINDS: frozenset[str] = frozenset()
+
+
+def _should_render_pairwise_interactives(comparisons: list[dict[str, Any]]) -> bool:
+    """Return True if any enabled comparison is designated as a candidate of interest."""
+    return any(
+        comparison.get('comparison_kind') in _CANDIDATE_OF_INTEREST_KINDS
+        for comparison in comparisons
+        if comparison.get('enabled', True)
+    )
+
+
 def _cleanup_legacy_report_surfaces(report_dpath: Path, enabled_comparison_ids: list[str]) -> None:
     for name in [
         "kwdagger_a.run",
@@ -357,17 +372,19 @@ def main(argv: list[str] | None = None) -> None:
         [str(comparison["comparison_id"]) for comparison in enabled_comparisons if comparison.get("comparison_id")],
     )
 
+    render_pairwise = _should_render_pairwise_interactives(enabled_comparisons)
     logger.info(f"Rendering core report packet_id={packet.get('packet_id')} into {rich_link(report_dpath)}")
-    core_metrics.main(
-        [
-            "--report-dpath",
-            str(report_dpath),
-            "--components-manifest",
-            str(components_fpath),
-            "--comparisons-manifest",
-            str(comparisons_fpath),
-        ]
-    )
+    core_metrics_argv = [
+        "--report-dpath",
+        str(report_dpath),
+        "--components-manifest",
+        str(components_fpath),
+        "--comparisons-manifest",
+        str(comparisons_fpath),
+    ]
+    if render_pairwise:
+        core_metrics_argv.append("--render-pairwise-interactives")
+    core_metrics.main(core_metrics_argv)
 
     component_lookup = {
         str(component.get("component_id")): component
@@ -390,6 +407,33 @@ def main(argv: list[str] | None = None) -> None:
             label=str(comparison["comparison_id"]),
             report_dpath=report_dpath,
         )
+
+    pairwise_cmd_parts = [
+        "-m",
+        "helm_audit.reports.core_metrics",
+        "--report-dpath",
+        str(report_dpath),
+        "--components-manifest",
+        str(report_dpath / "components_manifest.latest.json"),
+        "--comparisons-manifest",
+        str(report_dpath / "comparisons_manifest.latest.json"),
+        "--render-pairwise-interactives",
+    ]
+    pairwise_render_fpath = write_reproduce_script(
+        report_dpath / "render_pairwise_interactives.latest.sh",
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            "# Renders the heavier per-pair distribution and per-metric agreement plots on demand.",
+            "# Canonical lightweight outputs are already present in this directory.",
+            *portable_repo_root_lines(),
+            'cd "$REPO_ROOT"',
+            'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" '
+            + " ".join(shlex.quote(part) for part in pairwise_cmd_parts)
+            + ' "$@"',
+        ],
+    )
+    write_latest_alias(pairwise_render_fpath, report_dpath, "render_pairwise_interactives.sh")
 
     cmd_parts = [
         "-m",
@@ -423,6 +467,7 @@ def main(argv: list[str] | None = None) -> None:
     logger.info(f"Wrote components manifest: {rich_link(components_fpath)}")
     logger.info(f"Wrote comparisons manifest: {rich_link(comparisons_fpath)}")
     logger.info(f"Wrote reproduce script: {rich_link(reproduce_fpath)}")
+    logger.info(f"Wrote pairwise render script: {rich_link(pairwise_render_fpath)}")
 
 
 if __name__ == "__main__":
