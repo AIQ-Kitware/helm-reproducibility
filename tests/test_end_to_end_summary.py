@@ -13,6 +13,7 @@ from helm_audit.workflows.build_reports_summary import (
     _build_filter_to_attempt_rows,
     _build_filter_selection_by_model_rows,
     _build_run_multiplicity_summary,
+    _choose_repro_row_for_run_entry,
     _publish_prioritized_examples_tree,
     _repair_prioritized_example_reports,
 )
@@ -192,6 +193,41 @@ def test_attempted_to_repro_rows_start_from_attempted_runs_only():
     assert rows[0]["execution_stage"] == "completed_with_run_artifacts"
     assert rows[0]["analysis_stage"] == "analyzed"
     assert rows[0]["reproduction_stage"] == "exact_or_near_exact"
+
+
+def test_choose_repro_row_for_run_entry_prefers_latest_manifest_then_stable_tiebreakers():
+    run_entry = "bench:model=c"
+    scope_rows_by_key = {
+        ("exp-new", run_entry): [{"manifest_timestamp": "20"}],
+        ("exp-old", run_entry): [{"manifest_timestamp": "10"}],
+    }
+    repro_rows = [
+        {
+            "experiment_name": "exp-old",
+            "run_entry": run_entry,
+            "packet_id": "packet-zzz",
+            "report_dir": "/reports/z",
+            "report_json": "/reports/z/core_metric_report.latest.json",
+        },
+        {
+            "experiment_name": "exp-new",
+            "run_entry": run_entry,
+            "packet_id": "packet-same",
+            "report_dir": "/reports/a",
+            "report_json": "/reports/a/core_metric_report.latest.json",
+        },
+        {
+            "experiment_name": "exp-new",
+            "run_entry": run_entry,
+            "packet_id": "packet-same",
+            "report_dir": "/reports/b",
+            "report_json": "/reports/b/core_metric_report.latest.json",
+        },
+    ]
+
+    chosen = _choose_repro_row_for_run_entry(repro_rows, scope_rows_by_key)
+
+    assert chosen is repro_rows[2]
 
 
 def test_filter_selection_by_model_rows_separate_selected_and_excluded_counts():

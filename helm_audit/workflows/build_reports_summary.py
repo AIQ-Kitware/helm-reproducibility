@@ -356,14 +356,23 @@ def _choose_repro_row_for_run_entry(
 ) -> dict[str, Any] | None:
     if not repro_rows_for_entry:
         return None
-    decorated = []
-    for row in repro_rows_for_entry:
+
+    def _repro_row_rank(row: dict[str, Any]) -> tuple[float, str, str, str, str]:
         key = (str(row.get("experiment_name") or ""), str(row.get("run_entry") or ""))
         matching_scope_rows = scope_rows_by_key.get(key, [])
-        manifest_ts = max((_coerce_float(item.get("manifest_timestamp")) for item in matching_scope_rows), default=float("-inf"))
-        decorated.append((manifest_ts, str(row.get("experiment_name") or ""), row))
-    decorated.sort(reverse=True)
-    return decorated[0][2]
+        manifest_ts = max(
+            (_coerce_float(item.get("manifest_timestamp")) for item in matching_scope_rows),
+            default=float("-inf"),
+        )
+        return (
+            manifest_ts,
+            str(row.get("experiment_name") or ""),
+            str(row.get("packet_id") or ""),
+            str(row.get("report_dir") or ""),
+            str(row.get("report_json") or ""),
+        )
+
+    return max(repro_rows_for_entry, key=_repro_row_rank)
 
 
 def _classify_reproduction_stage(

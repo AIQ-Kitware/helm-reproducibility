@@ -61,6 +61,7 @@ The ideal system lets a person move from:
 * **Report surface**: The human-facing browsing and publication layer.
 * **Latest alias**: A stable filename or symlink that points at the newest version of a generated artifact.
 * **Reproduce script**: A generated script placed near an output that can rebuild that output from saved inputs and metadata.
+* **Packet**: The planner’s canonical comparison unit: a named bundle of normalized run components, the specific comparisons to render between them, and the comparability metadata that explains how trustworthy or caveated those comparisons are. In practice, one packet is the declarative input to one core report
 
 ---
 

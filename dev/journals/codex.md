@@ -1136,3 +1136,22 @@ Design takeaways:
 1. When refactoring a multi-stage pipeline, the finish line is not “each layer has the new data model” but “the handoff between layers is explicit enough that no downstream layer has to rediscover intent.”
 2. Preserve semantic richness in manifests and move operational constraints like filename length into a derived helper layer instead of weakening the source of truth.
 3. Real-data verification is the only reliable way to find the last hidden compatibility assumptions in report-generation pipelines.
+
+## 2026-04-22 16:12:28 +0000
+
+Summary of user intent: fix the narrow crash in `helm_audit/workflows/build_reports_summary.py` where repro-row selection falls through to comparing dict payloads, and add focused tests that prove the selection remains deterministic and still prefers the newest matching scope manifest timestamp.
+
+Model and configuration: Codex GPT-5.4, `reasoning_effort=medium`, collaboration mode `Default`, danger-full-access filesystem, no approval prompts.
+
+This was a good surgical bug fix because the failure mode was clear and the blast radius was small. The selection helper was already doing the right conceptual thing, but the implementation relied on sorting a tuple that ended with the raw repro-row dict. That is the kind of bug that sits quietly until two records tie on the earlier fields, and then the entire summary build falls over in a place that feels unrelated to the real problem. I chose the smallest safe repair: compute a ranking key and use `max(..., key=...)` so the dict never participates in ordering at all.
+
+The important part of the ranking was preserving intent, not inventing new policy. The helper now ranks by the latest matching scope-row manifest timestamp first, then by stable repro-row identity fields: `experiment_name`, `packet_id`, `report_dir`, and `report_json`. That keeps the behavior deterministic while still favoring the row associated with the newest matching manifest. I deliberately avoided broadening the selection logic or changing how rows are grouped, because the user asked for a narrow fix and the existing summary semantics are already good enough.
+
+The test strategy was to cover the exact corner the crash came from and also show that the intended ranking still wins. I added a case with two repro rows that share the same experiment name and manifest timestamp but differ in path-like identity fields, plus an older row that would only win if the timestamp ordering were wrong. That gives us a compact proof that the helper no longer crashes, ties are deterministic, and the newest matching scope row still wins over a lexicographically larger but older candidate. I did not expand the test into a broader summary-pipeline integration because that would have made the patch harder to reason about without adding much extra confidence.
+
+One small risk I kept in mind is that the tie-breaker fields are stable but not intrinsically temporal. That is okay here because the true ordering signal is the manifest timestamp; the extra strings only need to make ties deterministic. If future report producers stop populating `packet_id`, `report_dir`, or `report_json`, the helper will still behave safely, just with emptier tie-breakers. I’m confident the current change is a good tradeoff because it fixes the crash without disturbing broader summary behavior.
+
+Design takeaways:
+1. If a sort key can ever fall through to a dict, it is better to move to an explicit ranking function than to hope the tuple shape stays safe.
+2. Keep the primary semantic ordering signal first and let path/identity strings only break ties.
+3. Regression tests for deterministic selection should include both the crash-shaped tie and a counterexample that would win if the ranking were wrong.
