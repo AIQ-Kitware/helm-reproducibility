@@ -100,28 +100,82 @@ def enumerate_runs(public_root: Path, suite_filter: str | None = None):
 # ---------------------------------------------------------------------------
 # SQLite manifest
 # ---------------------------------------------------------------------------
-def open_db(db_path: Path) -> sqlite3.Connection:
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    con = sqlite3.connect(str(db_path), check_same_thread=False)
+_CREATE_RUNS_TABLE = """
+    CREATE TABLE IF NOT EXISTS runs (
+        suite               TEXT NOT NULL,
+        version             TEXT NOT NULL,
+        run_name            TEXT NOT NULL,
+        run_path            TEXT NOT NULL,
+        scenario_state_mb   REAL,
+        status              TEXT,
+        exception_class     TEXT,
+        failure_snippet     TEXT,
+        returncode          INTEGER,
+        attempt_count       INTEGER NOT NULL DEFAULT 0,
+        updated_at          TEXT,
+        PRIMARY KEY (suite, version, run_name)
+    )
+"""
+
+
+def _configure_con(con: sqlite3.Connection) -> None:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
-    con.execute("PRAGMA synchronous=NORMAL")
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS runs (
-            suite               TEXT NOT NULL,
-            version             TEXT NOT NULL,
-            run_name            TEXT NOT NULL,
-            run_path            TEXT NOT NULL,
-            scenario_state_mb   REAL,
-            status              TEXT,
-            exception_class     TEXT,
-            failure_snippet     TEXT,
-            returncode          INTEGER,
-            attempt_count       INTEGER NOT NULL DEFAULT 0,
-            updated_at          TEXT,
-            PRIMARY KEY (suite, version, run_name)
+    # FULL flushes WAL pages to disk before each commit, preventing the
+    # B-tree corruption that NORMAL can leave behind after a hard kill (-9).
+    con.execute("PRAGMA synchronous=FULL")
+
+
+def _salvage_and_rebuild(db_path: Path) -> None:
+    """
+    Read all recoverable rows from a corrupt DB, back it up, and write a clean
+    replacement.  Called automatically by open_db when integrity_check fails.
+    """
+    print(f"[DB] Corrupt DB detected at {db_path} — attempting recovery...")
+    try:
+        src = sqlite3.connect(str(db_path))
+        src.row_factory = sqlite3.Row
+        rows = src.execute("SELECT * FROM runs").fetchall()
+        src.close()
+        print(f"[DB] Salvaged {len(rows)} rows from corrupt DB")
+    except Exception as exc:
+        print(f"[DB] Could not read corrupt DB: {exc}. Starting empty.")
+        rows = []
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    bak = db_path.with_suffix(f".corrupt.{ts}.bak")
+    db_path.rename(bak)
+    print(f"[DB] Backed up corrupt file to {bak}")
+
+    dst = sqlite3.connect(str(db_path))
+    _configure_con(dst)
+    dst.execute(_CREATE_RUNS_TABLE)
+    if rows:
+        dst.executemany(
+            "INSERT OR REPLACE INTO runs VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [tuple(r) for r in rows],
         )
-    """)
+    dst.commit()
+    dst.close()
+    print(f"[DB] Rebuilt DB with {len(rows)} rows — integrity OK")
+
+
+def open_db(db_path: Path) -> sqlite3.Connection:
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if db_path.exists():
+        try:
+            probe = sqlite3.connect(str(db_path))
+            result = probe.execute("PRAGMA quick_check").fetchone()[0]
+            probe.close()
+            if result != "ok":
+                _salvage_and_rebuild(db_path)
+        except Exception:
+            _salvage_and_rebuild(db_path)
+
+    con = sqlite3.connect(str(db_path), check_same_thread=False)
+    _configure_con(con)
+    con.execute(_CREATE_RUNS_TABLE)
     con.commit()
     return con
 
