@@ -81,8 +81,13 @@ def load_packet_manifests(
     )
 
 
-def component_link_basename(component_id: str) -> str:
-    return slugify_identifier(component_id)
+def component_link_basename(component_id: str, *, max_slug_len: int = 72, hash_len: int = 10) -> str:
+    slug = slugify_identifier(component_id).strip("-") or "component"
+    if len(slug) <= max_slug_len:
+        return slug
+    short_slug = slug[:max_slug_len].rstrip("-") or "component"
+    suffix = stable_hash36({"component_id": str(component_id)})[:hash_len]
+    return f"{short_slug}--{suffix}"
 
 
 def cleanup_glob(root: Path, pattern: str, keep_names: set[str]) -> None:

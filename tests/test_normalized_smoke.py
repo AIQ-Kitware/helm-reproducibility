@@ -160,5 +160,9 @@ def test_eee_artifact_loader_round_trip(tmp_path: Path) -> None:
     assert run.ref.origin.helm_run_path == HELM_FIXTURE_RUN
     assert run.ref.origin.eee_artifact_path is not None
     assert run.metrics_by_id()
-    # Per-instance records should round-trip from the *_samples.jsonl file.
+    # HELM-origin EEE uses the aggregate from EEE, but per-instance drilldown
+    # is normalized from raw HELM so separately converted artifacts keep
+    # stable sample ids for official/local joins.
     assert run.instances
+    assert all(rec.sample_hash is None for rec in run.instances)
+    assert all(rec.metric_id for rec in run.instances)

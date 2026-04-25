@@ -8,7 +8,7 @@ from helm_audit.planning.core_report_planner import (
     build_planning_artifact,
     _comparability_warning_lines,
 )
-from helm_audit.reports.core_packet import comparison_sample_latest_name
+from helm_audit.reports.core_packet import component_link_basename, comparison_sample_latest_name
 from helm_audit.workflows import rebuild_core_report
 from helm_audit.workflows.rebuild_core_report import (
     _should_auto_render_heavy_pairwise_plots,
@@ -213,6 +213,13 @@ def test_single_run_core_report_uses_planner_packet_and_cleans_repeat_artifacts(
     assert "helm_audit.reports.core_metrics" in script_text
     assert "components_manifest.latest.json" in script_text
     assert "comparisons_manifest.latest.json" in script_text
+
+
+def test_component_link_basename_is_bounded_for_verbose_fallback_ids():
+    component_id = "local::exp::job::fallback::" + ("very-long-part|" * 40)
+    basename = component_link_basename(component_id)
+    assert len(basename) < 100
+    assert basename == component_link_basename(component_id)
 
 
 def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_path, monkeypatch):

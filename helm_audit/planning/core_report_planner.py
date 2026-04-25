@@ -173,6 +173,57 @@ def load_index_rows(index_fpath: str | Path) -> list[dict[str, Any]]:
         return [{k: ("" if v is None else v) for k, v in row.items()} for row in csv.DictReader(file)]
 
 
+def _row_logical_keys(row: dict[str, Any]) -> set[str]:
+    keys = {
+        _clean_optional_text(row.get("logical_run_key")),
+        _clean_optional_text(row.get("run_entry")),
+        _clean_optional_text(row.get("run_name")),
+        _clean_optional_text(row.get("run_spec_name")),
+    }
+    return {key for key in keys if key}
+
+
+def _prefilter_index_rows(
+    *,
+    local_rows: list[dict[str, Any]],
+    official_rows: list[dict[str, Any]],
+    experiment_name: str | None,
+    run_entry: str | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Narrow raw CSV rows before expensive EEE discovery.
+
+    The planner historically normalized the whole official public index and
+    filtered later. EEE discovery adds filesystem checks, so small report
+    slices need to apply the cheap CSV-level filters first.
+    """
+    scoped_local_rows = []
+    for row in local_rows:
+        if experiment_name is not None and row.get("experiment_name") != experiment_name:
+            continue
+        if run_entry is not None and run_entry not in _row_logical_keys(row):
+            continue
+        scoped_local_rows.append(row)
+
+    if run_entry is not None:
+        wanted_keys = {run_entry}
+    elif experiment_name is not None:
+        wanted_keys = set().union(*(_row_logical_keys(row) for row in scoped_local_rows)) if scoped_local_rows else set()
+    else:
+        wanted_keys = set()
+
+    if wanted_keys:
+        scoped_official_rows = [
+            row for row in official_rows
+            if _row_logical_keys(row) & wanted_keys
+        ]
+    elif experiment_name is not None or run_entry is not None:
+        scoped_official_rows = []
+    else:
+        scoped_official_rows = official_rows
+
+    return scoped_local_rows, scoped_official_rows
+
+
 def _resolve_artifact_format(row: dict[str, Any]) -> tuple[str, str | None, bool]:
     """Determine ``(artifact_format, eee_artifact_path)`` for an index row.
 
@@ -827,6 +878,12 @@ def build_planning_artifact(
 ) -> dict[str, Any]:
     local_rows = load_index_rows(local_index_fpath)
     official_rows = load_index_rows(official_index_fpath)
+    local_rows, official_rows = _prefilter_index_rows(
+        local_rows=local_rows,
+        official_rows=official_rows,
+        experiment_name=experiment_name,
+        run_entry=run_entry,
+    )
     official_eee_root = official_eee_root or default_official_eee_root()
     local_eee_root = local_eee_root or default_local_eee_root()
     normalized_components = normalize_index_rows(

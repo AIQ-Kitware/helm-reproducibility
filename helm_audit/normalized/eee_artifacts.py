@@ -158,8 +158,7 @@ def _official_sweep_results_by_run_path(root_text: str) -> dict[str, Path]:
         if not run_path or not out_dir:
             continue
         artifact_path = Path(out_dir).expanduser() / "eee_output"
-        if _artifact_has_aggregate(artifact_path):
-            out[str(Path(run_path).expanduser().resolve())] = artifact_path.resolve()
+        out[str(Path(run_path).expanduser().resolve())] = artifact_path.resolve()
     return out
 
 
@@ -213,7 +212,7 @@ def resolve_official_eee_artifact(
     if run_path:
         resolved_run_path = str(Path(run_path).expanduser().resolve())
         artifact_path = _official_sweep_results_by_run_path(str(root)).get(resolved_run_path)
-        if artifact_path is not None:
+        if artifact_path is not None and _artifact_has_aggregate(artifact_path):
             return EeeArtifactResolution(
                 artifact_path=artifact_path,
                 status="found",
