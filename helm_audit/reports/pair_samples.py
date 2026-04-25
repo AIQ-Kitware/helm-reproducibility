@@ -8,9 +8,10 @@ from helm_audit.infra.logging import rich_link, setup_cli_logging
 import datetime as datetime_mod
 from pathlib import Path
 
-from helm_audit.compat.helm_outputs import HelmRun
 from helm_audit.helm.diff import HelmRunDiff
 from helm_audit.infra.fs_publish import write_latest_alias
+from helm_audit.normalized import SourceKind
+from helm_audit.normalized.helm_compat import helm_view_from_path
 from helm_audit.reports.core_packet import comparison_sample_history_name, comparison_sample_latest_name
 
 
@@ -42,8 +43,8 @@ def write_pair_samples(
     history_dpath.mkdir(parents=True, exist_ok=True)
 
     diff = HelmRunDiff(
-        HelmRun.coerce(run_a),
-        HelmRun.coerce(run_b),
+        helm_view_from_path(run_a, source_kind=SourceKind.OFFICIAL),
+        helm_view_from_path(run_b, source_kind=SourceKind.LOCAL),
         a_name=f'{label}:A',
         b_name=f'{label}:B',
     )

@@ -10,8 +10,9 @@ from typing import Any
 
 import kwutil
 
-from helm_audit.compat.helm_outputs import HelmRun
 from helm_audit.helm.diff import HelmRunDiff
+from helm_audit.normalized import SourceKind
+from helm_audit.normalized.helm_compat import helm_view_from_path
 
 
 def load_yaml_or_default(text: str | None, default: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -142,8 +143,8 @@ def build_pair_report(
     validate_run_dir(run_b_dpath)
 
     diff = HelmRunDiff(
-        run_a=HelmRun.coerce(run_a_dpath),
-        run_b=HelmRun.coerce(run_b_dpath),
+        run_a=helm_view_from_path(run_a_dpath, source_kind=SourceKind.OFFICIAL),
+        run_b=helm_view_from_path(run_b_dpath, source_kind=SourceKind.LOCAL),
         a_name=label_a,
         b_name=label_b,
     )

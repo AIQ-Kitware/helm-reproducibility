@@ -18,15 +18,27 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-from helm_audit.compat.helm_outputs import HelmRun
 from helm_audit.helm.analysis import HelmRunAnalysis
 from helm_audit.helm.diff import HelmRunDiff
 from helm_audit.helm import metrics as helm_metrics
 from helm_audit.indexing.schema import extract_run_spec_fields
 from helm_audit.infra.fs_publish import safe_unlink
+from helm_audit.normalized import SourceKind
+from helm_audit.normalized.helm_compat import helm_view_from_path
 from helm_audit.reports.paper_labels import load_paper_label_manager
 from helm_audit.reports.core_packet import load_packet_manifests
 from helm_audit.utils.numeric import safe_float as _safe_float, quantile as _quantile
+
+
+def _normalized_helm_view(run_path: str | Path, *, source_kind: SourceKind | str = SourceKind.OFFICIAL):
+    """Stage-3 seam: HELM run dir → HELM-shape view via the normalized layer.
+
+    All Stage-5 comparison inputs flow through :mod:`helm_audit.normalized`
+    so Origin/SourceKind/ArtifactFormat are populated identically for both
+    the old comparison core and the new EEE-centered one. Stage 4 replaces
+    the comparison core itself, at which point this helper goes away.
+    """
+    return helm_view_from_path(run_path, source_kind=source_kind)
 
 
 def _run_level_core_rows(diff: HelmRunDiff) -> list[dict[str, Any]]:
@@ -377,7 +389,12 @@ def _infer_run_spec_name(*run_paths: str) -> str:
 
 
 def _build_pair(run_a: str, run_b: str, label: str, thresholds: list[float]) -> dict[str, Any]:
-    diff = HelmRunDiff(HelmRun.coerce(run_a), HelmRun.coerce(run_b), a_name=f'{label}:A', b_name=f'{label}:B')
+    diff = HelmRunDiff(
+        _normalized_helm_view(run_a),
+        _normalized_helm_view(run_b),
+        a_name=f'{label}:A',
+        b_name=f'{label}:B',
+    )
     run_rows = _run_level_core_rows(diff)
     inst_rows = _instance_level_core_rows(diff)
 
@@ -734,7 +751,7 @@ def _plot_run_metric_distributions(
 
 
 def _single_run_instance_core_rows(run_path: str, label: str) -> pd.DataFrame:
-    ana = HelmRunAnalysis(HelmRun.coerce(run_path), name=label)
+    ana = HelmRunAnalysis(_normalized_helm_view(run_path), name=label)
     joined = ana.joined_instance_stat_table(assert_assumptions=False)
     row_by_key = getattr(joined, 'row_by_key', None) or {}
     rows = []
@@ -867,7 +884,7 @@ def _plot_overlay_metric_ecdfs(
 
 
 def _single_run_core_stat_index(run_path: str) -> dict[str, Any]:
-    ana = HelmRunAnalysis(HelmRun.coerce(run_path))
+    ana = HelmRunAnalysis(_normalized_helm_view(run_path))
     idx = ana.stat_index(drop_zero_count=True, require_mean=True)
     return {k: v for k, v in idx.items() if v.metric_class == 'core'}
 

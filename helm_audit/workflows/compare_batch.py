@@ -11,7 +11,9 @@ from typing import Any
 import kwutil
 import ubelt as ub
 
-from helm_audit.compat.helm_outputs import HelmOutputs, HelmRun
+from helm_audit.compat.helm_outputs import HelmOutputs
+from helm_audit.normalized import SourceKind
+from helm_audit.normalized.helm_compat import helm_view_from_path
 from helm_audit.infra.api import (
     env_defaults,
     experiment_report_dpath,
@@ -193,12 +195,16 @@ def load_kwdg_rows(results_dpath: Path) -> tuple[list[dict[str, Any]], dict[str,
                 runs.extend(list(suite.runs()))
             if len(runs) != 1:
                 continue
-            run = HelmRun.coerce(runs[0])
+            run_path = Path(runs[0].path)
             rows.append(
                 {
                     "dpath": str(dpath),
                     "run_spec_name": run_spec_name,
-                    "run": run,
+                    "run_path": run_path,
+                    # Stage-3 seam: comparison loads the run through the
+                    # normalized boundary on demand. The legacy HelmRun
+                    # reader is no longer cached here.
+                    "run": helm_view_from_path(run_path, source_kind=SourceKind.LOCAL),
                 }
             )
         except Exception:
@@ -647,7 +653,9 @@ def main(argv: list[str] | None = None) -> None:
                 )
             else:
                 try:
-                    helm_run = HelmRun.coerce(helm_row["run_dir"])
+                    helm_run = helm_view_from_path(
+                        helm_row["run_dir"], source_kind=SourceKind.OFFICIAL
+                    )
                     kwdg_run = kwrow["run"]
                     kwdg_run_spec = load_run_spec_json(kwdg_run.path)
                     case_row["kwdg_requested_max_eval_instances"] = (
