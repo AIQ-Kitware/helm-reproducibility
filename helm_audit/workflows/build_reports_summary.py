@@ -918,6 +918,15 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
         agree_005 = _find_curve_value(official_agree_curve, CANONICAL_AGREEMENT_TOL)
         local_reference = packet_local_reference_component(packet)
         official_component = packet_component_by_source_kind(packet, "official_vs_local", "official")
+        # Stage-5: surface the artifact_format provenance on every aggregate
+        # row so the breakdowns can show whether a given comparison ran
+        # against canonical EEE artifacts or in-memory HELM->EEE conversion.
+        artifact_formats = sorted({
+            (component.get("artifact_format") or "helm")
+            for component in packet.get("components", [])
+            if component.get("artifact_format") is not None
+            or component.get("run_path")
+        })
         row = {
             "experiment_name": experiment_name,
             "run_entry": run_entry,
@@ -947,6 +956,8 @@ def _load_all_repro_rows() -> list[dict[str, Any]]:
             "official_runlevel_abs_p90": nested_get(official, "run_level", "overall_quantiles", "abs_delta", "p90"),
             "official_instance_agree_001": _find_curve_value(official_agree_curve, 0.001),
             "core_metrics": official.get("core_metrics") or [],
+            "artifact_formats": artifact_formats,
+            "artifact_format": ",".join(artifact_formats) if artifact_formats else "helm",
             "official_runlevel_metric_max_deltas": {
                 m["metric"]: nested_get(m, "abs_delta", "max")
                 for m in (nested_get(official, "run_level", "by_metric") or [])

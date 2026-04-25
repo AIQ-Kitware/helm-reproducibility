@@ -123,11 +123,21 @@ class NormalizedPlannerComponent:
     manifest_timestamp: str | None
     provenance: dict[str, Any]
     extra_metadata: dict[str, Any]
+    # Stage-5 normalized-format fields. ``artifact_format`` is one of
+    # ``helm`` (raw HELM JSON tree), ``eee`` (converted EEE artifact tree),
+    # or any future format registered with helm_audit.normalized.loaders.
+    # ``eee_artifact_path`` points at the converted EEE artifact directory
+    # when one has been pre-built; reports prefer it when present and fall
+    # back to in-memory HELM->EEE conversion via ``run_path`` otherwise.
+    artifact_format: str = "helm"
+    eee_artifact_path: str | None = None
 
     def to_manifest_component(self) -> dict[str, Any]:
         return {
             "component_id": self.component_id,
             "source_kind": self.source_kind,
+            "artifact_format": self.artifact_format,
+            "eee_artifact_path": self.eee_artifact_path,
             "run_path": self.run_path,
             "job_path": self.job_path,
             "attempt_uuid": self.attempt_uuid,
@@ -156,6 +166,23 @@ def load_index_rows(index_fpath: str | Path) -> list[dict[str, Any]]:
         return [{k: ("" if v is None else v) for k, v in row.items()} for row in csv.DictReader(file)]
 
 
+def _resolve_artifact_format(row: dict[str, Any]) -> tuple[str, str | None]:
+    """Determine ``(artifact_format, eee_artifact_path)`` for an index row.
+
+    Index rows that explicitly set ``artifact_format`` win. Otherwise, we
+    look for an ``eee_artifact_path`` (or ``eee_path``) column to mark the
+    row as ``eee``-shape. The fallback is the historical ``helm`` format
+    backed by raw HELM JSON files at ``run_path``.
+    """
+    explicit = _clean_optional_text(row.get("artifact_format"))
+    eee_path = _clean_optional_text(row.get("eee_artifact_path") or row.get("eee_path"))
+    if explicit:
+        return explicit, eee_path
+    if eee_path:
+        return "eee", eee_path
+    return "helm", None
+
+
 def normalize_local_index_rows(rows: list[dict[str, Any]], *, index_fpath: str | Path) -> list[NormalizedPlannerComponent]:
     index_fpath = str(Path(index_fpath).expanduser().resolve())
     components: list[NormalizedPlannerComponent] = []
@@ -178,6 +205,9 @@ def normalize_local_index_rows(rows: list[dict[str, Any]], *, index_fpath: str |
             tags.append("has_attempt_uuid")
         else:
             tags.append("fallback_attempt_identity")
+        artifact_format, eee_artifact_path = _resolve_artifact_format(row)
+        if artifact_format == "eee":
+            tags.append("eee_artifact_present")
         components.append(
             NormalizedPlannerComponent(
                 component_id=component_id,
@@ -215,6 +245,8 @@ def normalize_local_index_rows(rows: list[dict[str, Any]], *, index_fpath: str |
                     "attempt_fallback_key": _clean_optional_text(row.get("attempt_fallback_key")) or (_build_attempt_fallback_key(row) if not attempt_uuid else None),
                     "status": _clean_optional_text(row.get("status")),
                 },
+                artifact_format=artifact_format,
+                eee_artifact_path=eee_artifact_path,
             )
         )
     return components
@@ -232,6 +264,10 @@ def normalize_official_index_rows(rows: list[dict[str, Any]], *, index_fpath: st
             run_name=_clean_optional_text(row.get("run_name")),
         )
         component_id = _clean_optional_text(row.get("component_id")) or _official_fallback_component_id(row, logical_run_key)
+        artifact_format, eee_artifact_path = _resolve_artifact_format(row)
+        official_tags = ["official", "public_reference_candidate"]
+        if artifact_format == "eee":
+            official_tags.append("eee_artifact_present")
         components.append(
             NormalizedPlannerComponent(
                 component_id=component_id,
@@ -255,7 +291,7 @@ def normalize_official_index_rows(rows: list[dict[str, Any]], *, index_fpath: st
                 attempt_uuid=None,
                 attempt_identity=component_id,
                 display_name=f"official: {Path(run_path).name if run_path else logical_run_key or row_index}",
-                tags=["official", "public_reference_candidate"],
+                tags=official_tags,
                 manifest_timestamp=None,
                 provenance={
                     "source_index_kind": "official",
@@ -268,6 +304,8 @@ def normalize_official_index_rows(rows: list[dict[str, Any]], *, index_fpath: st
                 extra_metadata={
                     "run_name": _clean_optional_text(row.get("run_name")),
                 },
+                artifact_format=artifact_format,
+                eee_artifact_path=eee_artifact_path,
             )
         )
     return components

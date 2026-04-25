@@ -394,19 +394,82 @@ def _infer_run_spec_name(*run_paths: str) -> str:
     return unique[0]
 
 
-def _load_normalized(run_path: str, source_kind: SourceKind = SourceKind.OFFICIAL) -> NormalizedRun:
-    """Load a HELM run as a :class:`NormalizedRun` for the EEE-shape compare core."""
-    ref = NormalizedRunRef.from_helm_run(run_path, source_kind=source_kind)
+def _load_normalized(
+    run_path: str | Path,
+    source_kind: SourceKind = SourceKind.OFFICIAL,
+    *,
+    artifact_format: str = "helm",
+    eee_artifact_path: str | Path | None = None,
+    component_id: str | None = None,
+    logical_run_key: str | None = None,
+) -> NormalizedRun:
+    """Load a run as a :class:`NormalizedRun` honoring the manifest format.
+
+    When the planner has tagged a component as ``artifact_format='eee'`` and
+    pointed ``eee_artifact_path`` at a converted EEE artifact directory, the
+    EEE loader is used and the raw HELM run becomes evidence-only. Otherwise
+    we fall back to the in-memory HELM->EEE conversion against ``run_path``.
+    """
+    if artifact_format == "eee" and eee_artifact_path:
+        ref = NormalizedRunRef.from_eee_artifact(
+            eee_artifact_path,
+            source_kind=source_kind,
+            helm_run_path=run_path,
+            component_id=component_id,
+            logical_run_key=logical_run_key,
+        )
+    else:
+        ref = NormalizedRunRef.from_helm_run(
+            run_path,
+            source_kind=source_kind,
+            component_id=component_id,
+            logical_run_key=logical_run_key,
+        )
     return load_run(ref)
 
 
-def _build_pair(run_a: str, run_b: str, label: str, thresholds: list[float]) -> dict[str, Any]:
-    # Stage-4: the per-metric measurement core operates on the EEE-normalized
-    # representation. The legacy HelmRunDiff is still used for the run-spec
-    # semantic diagnosis ("same scenario class? same model? caveats?")
-    # because it reads run_spec.json directly via the cached raw HELM JSONs.
-    nrun_a = _load_normalized(run_a, source_kind=SourceKind.OFFICIAL)
-    nrun_b = _load_normalized(run_b, source_kind=SourceKind.LOCAL)
+def _component_source_kind(component: dict[str, Any] | None) -> SourceKind:
+    raw = (component or {}).get("source_kind") or "official"
+    try:
+        return SourceKind(str(raw))
+    except ValueError:
+        return SourceKind.OFFICIAL
+
+
+def _load_component_run(component: dict[str, Any]) -> NormalizedRun:
+    return _load_normalized(
+        component["run_path"],
+        source_kind=_component_source_kind(component),
+        artifact_format=str(component.get("artifact_format") or "helm"),
+        eee_artifact_path=component.get("eee_artifact_path"),
+        component_id=component.get("component_id"),
+        logical_run_key=component.get("logical_run_key"),
+    )
+
+
+def _build_pair(
+    run_a: str,
+    run_b: str,
+    label: str,
+    thresholds: list[float],
+    *,
+    component_a: dict[str, Any] | None = None,
+    component_b: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    # Stage-4 + Stage-5: the per-metric measurement core operates on the
+    # EEE-normalized representation. When the planner has tagged a
+    # component as artifact_format='eee', the EEE loader is used directly;
+    # otherwise we fall back to in-memory HELM->EEE conversion. The legacy
+    # HelmRunDiff is still used for the run-spec-semantic diagnosis (which
+    # reads run_spec.json from the raw HELM JSONs cached on the run).
+    if component_a is not None:
+        nrun_a = _load_component_run(component_a)
+    else:
+        nrun_a = _load_normalized(run_a, source_kind=SourceKind.OFFICIAL)
+    if component_b is not None:
+        nrun_b = _load_component_run(component_b)
+    else:
+        nrun_b = _load_normalized(run_b, source_kind=SourceKind.LOCAL)
     diff = HelmRunDiff(
         helm_view(nrun_a),
         helm_view(nrun_b),
@@ -1464,9 +1527,22 @@ def main(argv: list[str] | None = None) -> None:
         component_ids = comparison.get('component_ids') or []
         if len(component_ids) != 2:
             continue
-        run_a = component_lookup[component_ids[0]]['run_path']
-        run_b = component_lookup[component_ids[1]]['run_path']
-        pair = _build_pair(run_a, run_b, str(comparison['comparison_id']), thresholds)
+        component_a = component_lookup[component_ids[0]]
+        component_b = component_lookup[component_ids[1]]
+        run_a = component_a['run_path']
+        run_b = component_b['run_path']
+        pair = _build_pair(
+            run_a,
+            run_b,
+            str(comparison['comparison_id']),
+            thresholds,
+            component_a=component_a,
+            component_b=component_b,
+        )
+        pair['artifact_formats'] = {
+            component_ids[0]: component_a.get('artifact_format') or 'helm',
+            component_ids[1]: component_b.get('artifact_format') or 'helm',
+        }
         pair['comparison_id'] = comparison['comparison_id']
         pair['comparison_kind'] = comparison.get('comparison_kind')
         pair['component_ids'] = component_ids

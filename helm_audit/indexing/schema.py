@@ -31,6 +31,8 @@ KNOWN_STRUCTURAL_JUNK_NAMES: frozenset[str] = frozenset({
 #: a future combined index can be a simple normalized union.
 COMMON_COMPONENT_COLUMNS: list[str] = [
     'source_kind',
+    'artifact_format',
+    'eee_artifact_path',
     'component_id',
     'logical_run_key',
     'run_path',
@@ -49,6 +51,8 @@ COMMON_COMPONENT_COLUMNS: list[str] = [
 #: Canonical column order for the official/public index CSV.
 OFFICIAL_COMPONENT_COLUMNS: list[str] = [
     'source_kind',
+    'artifact_format',
+    'eee_artifact_path',
     'component_id',
     'logical_run_key',
     'public_root',
@@ -78,6 +82,8 @@ OFFICIAL_COMPONENT_COLUMNS: list[str] = [
 LOCAL_COMPONENT_COLUMNS: list[str] = [
     # --- component-row fields (schema aligned with OFFICIAL_COMPONENT_COLUMNS) ---
     'source_kind',
+    'artifact_format',
+    'eee_artifact_path',
     'component_id',
     'logical_run_key',
     'experiment_name',
