@@ -23,8 +23,14 @@ from helm_audit.helm.diff import HelmRunDiff
 from helm_audit.helm import metrics as helm_metrics
 from helm_audit.indexing.schema import extract_run_spec_fields
 from helm_audit.infra.fs_publish import safe_unlink
-from helm_audit.normalized import SourceKind
-from helm_audit.normalized.helm_compat import helm_view_from_path
+from helm_audit.normalized import (
+    NormalizedRun,
+    NormalizedRunRef,
+    SourceKind,
+    load_run,
+)
+from helm_audit.normalized import compare as ncompare
+from helm_audit.normalized.helm_compat import helm_view, helm_view_from_path
 from helm_audit.reports.paper_labels import load_paper_label_manager
 from helm_audit.reports.core_packet import load_packet_manifests
 from helm_audit.utils.numeric import safe_float as _safe_float, quantile as _quantile
@@ -388,15 +394,27 @@ def _infer_run_spec_name(*run_paths: str) -> str:
     return unique[0]
 
 
+def _load_normalized(run_path: str, source_kind: SourceKind = SourceKind.OFFICIAL) -> NormalizedRun:
+    """Load a HELM run as a :class:`NormalizedRun` for the EEE-shape compare core."""
+    ref = NormalizedRunRef.from_helm_run(run_path, source_kind=source_kind)
+    return load_run(ref)
+
+
 def _build_pair(run_a: str, run_b: str, label: str, thresholds: list[float]) -> dict[str, Any]:
+    # Stage-4: the per-metric measurement core operates on the EEE-normalized
+    # representation. The legacy HelmRunDiff is still used for the run-spec
+    # semantic diagnosis ("same scenario class? same model? caveats?")
+    # because it reads run_spec.json directly via the cached raw HELM JSONs.
+    nrun_a = _load_normalized(run_a, source_kind=SourceKind.OFFICIAL)
+    nrun_b = _load_normalized(run_b, source_kind=SourceKind.LOCAL)
     diff = HelmRunDiff(
-        _normalized_helm_view(run_a),
-        _normalized_helm_view(run_b),
+        helm_view(nrun_a),
+        helm_view(nrun_b),
         a_name=f'{label}:A',
         b_name=f'{label}:B',
     )
-    run_rows = _run_level_core_rows(diff)
-    inst_rows = _instance_level_core_rows(diff)
+    run_rows = ncompare.run_level_core_rows(nrun_a, nrun_b)
+    inst_rows = ncompare.instance_level_core_rows(nrun_a, nrun_b)
 
     # Calculate per-metric agreement curves for instance level
     per_metric_curves = {}
@@ -751,26 +769,16 @@ def _plot_run_metric_distributions(
 
 
 def _single_run_instance_core_rows(run_path: str, label: str) -> pd.DataFrame:
-    ana = HelmRunAnalysis(_normalized_helm_view(run_path), name=label)
-    joined = ana.joined_instance_stat_table(assert_assumptions=False)
-    row_by_key = getattr(joined, 'row_by_key', None) or {}
-    rows = []
-    for row in row_by_key.values():
-        stat = row.stat
-        mean = _safe_float(stat.get('mean'))
-        count = int(stat.get('count', 0) or 0)
-        if mean is None or count == 0:
-            continue
-        name_obj = stat.get('name', {})
-        metric = name_obj.get('name')
-        metric_class, _ = helm_metrics.classify_metric(metric)
-        if metric_class != 'core':
-            continue
-        rows.append({
-            'run': label,
-            'metric': metric,
-            'value': float(mean),
-        })
+    """Per-(sample, core-metric) score rows for a single run.
+
+    Stage-4: reads from the normalized layer's :class:`InstanceRecord`
+    instead of HELM's joined per-instance stats table.
+    """
+    nrun = _load_normalized(run_path)
+    rows = [
+        {"run": label, **rec}
+        for rec in ncompare.instance_core_score_records(nrun)
+    ]
     return pd.DataFrame(rows)
 
 
@@ -883,10 +891,37 @@ def _plot_overlay_metric_ecdfs(
     )
 
 
-def _single_run_core_stat_index(run_path: str) -> dict[str, Any]:
-    ana = HelmRunAnalysis(_normalized_helm_view(run_path))
-    idx = ana.stat_index(drop_zero_count=True, require_mean=True)
-    return {k: v for k, v in idx.items() if v.metric_class == 'core'}
+class _SimpleStatRow:
+    """Minimal row used by run-level table writers.
+
+    Replaces the ``StatMeta`` records the legacy
+    :class:`HelmRunAnalysis.stat_index` produced. Only the fields actually
+    consumed by the table writers (``metric`` and ``mean``) are exposed.
+    """
+
+    __slots__ = ("metric", "mean")
+
+    def __init__(self, metric: str, mean: float) -> None:
+        self.metric = metric
+        self.mean = mean
+
+
+def _single_run_core_stat_index(run_path: str) -> dict[str, _SimpleStatRow]:
+    """Run-level core metric means keyed by stable metric handle.
+
+    Stage-4: backed by ``ncompare.joined_metric_means`` over a normalized
+    run instead of ``HelmRunAnalysis.stat_index``.
+    """
+    nrun = _load_normalized(run_path)
+    out: dict[str, _SimpleStatRow] = {}
+    for key in ncompare.core_metric_keys(nrun):
+        means = {
+            (er.metric_config.metric_id or er.metric_config.metric_name or er.evaluation_name): er.score_details.score
+            for er in nrun.evaluation_log.evaluation_results or []
+        }
+        if key in means:
+            out[key] = _SimpleStatRow(metric=key, mean=float(means[key]))
+    return out
 
 
 def _write_three_run_runlevel_table(
