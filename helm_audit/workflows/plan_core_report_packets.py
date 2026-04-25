@@ -87,6 +87,24 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--official-index-fpath", required=True)
     parser.add_argument("--experiment-name", default=None)
     parser.add_argument("--run-entry", default=None)
+    parser.add_argument(
+        "--official-eee-root",
+        default=None,
+        help=(
+            "Root of prebuilt official HELM->EEE artifacts. Defaults to "
+            "$AUDIT_STORE_ROOT/crfm-helm-public-eee-test when present."
+        ),
+    )
+    parser.add_argument(
+        "--local-eee-root",
+        default=None,
+        help="Root for canonical local HELM->EEE artifacts. Defaults to $AUDIT_STORE_ROOT/eee/local.",
+    )
+    parser.add_argument(
+        "--ensure-local-eee",
+        action="store_true",
+        help="Convert selected local HELM runs to EEE when canonical local artifacts are missing.",
+    )
     parser.add_argument("--out-dpath", required=True)
     args = parser.parse_args(argv)
 
@@ -95,6 +113,9 @@ def main(argv: list[str] | None = None) -> None:
         official_index_fpath=args.official_index_fpath,
         experiment_name=args.experiment_name,
         run_entry=args.run_entry,
+        official_eee_root=args.official_eee_root,
+        local_eee_root=args.local_eee_root,
+        ensure_local_eee=args.ensure_local_eee,
     )
     paths = write_planning_outputs(
         artifact=artifact,

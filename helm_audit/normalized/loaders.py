@@ -165,6 +165,17 @@ class EeeArtifactLoader(Loader):
                     continue
                 instances.append(_instance_record_from_eee(rec))
 
+        # Older HELM->EEE conversions emitted one instance row per sample with
+        # no metric id, which leaves the report path unable to compute
+        # per-(sample, metric) agreement. When the converted artifact carries
+        # raw HELM provenance, backfill the normalized instance records from the
+        # raw per_instance_stats.json evidence while still using the EEE
+        # aggregate as the canonical run-level artifact.
+        if ref.origin.helm_run_path is not None and not _has_metric_instance_records(instances):
+            raw_instances = _instances_from_raw_helm(ref.origin.helm_run_path, chosen_log)
+            if raw_instances:
+                instances = raw_instances
+
         # Augment ref.origin with the actual chosen artifact path.
         new_origin = Origin(
             helm_run_path=ref.origin.helm_run_path,
@@ -205,6 +216,13 @@ def _instance_record_from_eee(rec) -> InstanceRecord:
         is_correct=rec.evaluation.is_correct,
         record=rec,
     )
+
+
+def _has_metric_instance_records(instances: list[InstanceRecord]) -> bool:
+    for rec in instances:
+        if rec.metric_id and rec.metric_id != rec.record.evaluation_name:
+            return True
+    return False
 
 
 # ---------------------------------------------------------------------------

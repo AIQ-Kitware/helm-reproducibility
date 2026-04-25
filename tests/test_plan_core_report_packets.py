@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from helm_audit.planning import core_report_planner
+from helm_audit.normalized.eee_artifacts import local_eee_parent_for_row
 from helm_audit.workflows import plan_core_report_packets
 
 
@@ -218,6 +219,62 @@ def test_planner_emits_packet_intent_for_one_official_one_local_case(tmp_path):
     assert {component["source_kind"] for component in packet["components"]} == {"local", "official"}
     assert any(comparison["comparison_kind"] == "official_vs_local" for comparison in packet["comparisons"])
     assert not any("kwdagger" in component["component_id"] for component in packet["components"])
+
+
+def test_planner_discovers_prebuilt_official_eee_artifacts(tmp_path):
+    local_index, official_index = _setup_index_inputs(tmp_path)
+    official_eee_root = tmp_path / "official-eee"
+    run_name = "boolq:model=meta/llama-3-8b"
+    eee_output = official_eee_root / "main" / "v1" / run_name / "eee_output"
+    eee_output.mkdir(parents=True)
+    (eee_output / "eval.json").write_text("{}")
+    _write_json(
+        official_eee_root / "main" / "v1" / run_name / "status.json",
+        {"status": "ok"},
+    )
+
+    artifact = core_report_planner.build_planning_artifact(
+        local_index_fpath=local_index,
+        official_index_fpath=official_index,
+        experiment_name="exp-a",
+        run_entry=run_name,
+        official_eee_root=official_eee_root,
+    )
+
+    official_component = next(
+        component
+        for component in artifact["packets"][0]["components"]
+        if component["source_kind"] == "official"
+    )
+    assert official_component["artifact_format"] == "eee"
+    assert official_component["eee_artifact_path"] == str(eee_output.resolve())
+    assert "eee_artifact_present" in official_component["tags"]
+
+
+def test_planner_discovers_existing_local_eee_artifacts_without_conversion(tmp_path):
+    local_index, official_index = _setup_index_inputs(tmp_path)
+    rows = core_report_planner.load_index_rows(local_index)
+    local_eee_root = tmp_path / "local-eee"
+    parent = local_eee_parent_for_row(rows[0], local_eee_root=local_eee_root)
+    eee_output = parent / "eee_output"
+    eee_output.mkdir(parents=True)
+    (eee_output / "eval.json").write_text("{}")
+
+    artifact = core_report_planner.build_planning_artifact(
+        local_index_fpath=local_index,
+        official_index_fpath=official_index,
+        experiment_name="exp-a",
+        run_entry="boolq:model=meta/llama-3-8b",
+        local_eee_root=local_eee_root,
+    )
+
+    local_component = next(
+        component
+        for component in artifact["packets"][0]["components"]
+        if component["component_id"] == "local::exp-a::job-a::uuid-a"
+    )
+    assert local_component["artifact_format"] == "eee"
+    assert local_component["eee_artifact_path"] == str(eee_output.resolve())
 
 
 def test_planner_emits_local_repeat_when_multiple_local_components_exist(tmp_path):

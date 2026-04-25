@@ -210,6 +210,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--index-dpath', default=str(default_index_root()))
     parser.add_argument('--official-index-fpath', default=None)
     parser.add_argument('--official-index-dpath', default=str(official_public_index_dpath()))
+    parser.add_argument('--official-eee-root', default=None)
+    parser.add_argument('--local-eee-root', default=None)
+    parser.add_argument('--ensure-local-eee', action='store_true')
     parser.add_argument('--allow-single-repeat', action='store_true')
     args = parser.parse_args(argv)
 
@@ -249,6 +252,9 @@ def main(argv: list[str] | None = None) -> None:
         local_index_fpath=index_fpath,
         official_index_fpath=official_index_fpath,
         experiment_name=args.experiment_name,
+        official_eee_root=args.official_eee_root,
+        local_eee_root=args.local_eee_root,
+        ensure_local_eee=args.ensure_local_eee,
     )
     planning_paths = write_planning_outputs(
         artifact=planning_artifact,
@@ -272,6 +278,12 @@ def main(argv: list[str] | None = None) -> None:
                 '--experiment-name', str(args.experiment_name),
                 '--report-dpath', str(report_dpath),
             ]
+            if args.official_eee_root:
+                argv.extend(['--official-eee-root', str(args.official_eee_root)])
+            if args.local_eee_root:
+                argv.extend(['--local-eee-root', str(args.local_eee_root)])
+            if args.ensure_local_eee:
+                argv.append('--ensure-local-eee')
             if args.allow_single_repeat:
                 argv.append('--allow-single-repeat')
             rebuild_core_report_main(argv)
@@ -381,6 +393,9 @@ def main(argv: list[str] | None = None) -> None:
         'experiment_name': args.experiment_name,
         'index_fpath': str(index_fpath),
         'official_index_fpath': str(official_index_fpath),
+        'official_eee_root': planning_artifact.get('official_eee_root'),
+        'local_eee_root': planning_artifact.get('local_eee_root'),
+        'ensure_local_eee': planning_artifact.get('ensure_local_eee'),
         'planning_dir': str(planning_dpath),
         'comparison_intents': str(planning_paths['comparison_intents_json']),
         'planner_warnings': str(planning_paths['warnings_txt']),
@@ -406,6 +421,9 @@ def main(argv: list[str] | None = None) -> None:
     lines.append(f'experiment_name: {args.experiment_name}')
     lines.append(f'index_fpath: {render_path_link(index_fpath)}')
     lines.append(f'official_index_fpath: {render_path_link(official_index_fpath)}')
+    lines.append(f"official_eee_root: {render_path_link(planning_artifact.get('official_eee_root'))}")
+    lines.append(f"local_eee_root: {render_path_link(planning_artifact.get('local_eee_root'))}")
+    lines.append(f"ensure_local_eee: {planning_artifact.get('ensure_local_eee')}")
     lines.append(f'planning_dir: {render_path_link(planning_dpath)}')
     lines.append(f'comparison_intents: {render_path_link(planning_paths["comparison_intents_json"])}')
     lines.append(f'planner_warnings: {render_path_link(planning_paths["warnings_txt"])}')
@@ -494,6 +512,9 @@ def main(argv: list[str] | None = None) -> None:
         str(index_fpath),
         '--official-index-fpath',
         str(official_index_fpath),
+        *( ['--official-eee-root', str(planning_artifact.get('official_eee_root'))] if planning_artifact.get('official_eee_root') else [] ),
+        *( ['--local-eee-root', str(planning_artifact.get('local_eee_root'))] if planning_artifact.get('local_eee_root') else [] ),
+        *( ['--ensure-local-eee'] if planning_artifact.get('ensure_local_eee') else [] ),
         *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
     ]
     reproduce_fpath = write_reproduce_script(out_dpath / 'reproduce.latest.sh', [
@@ -513,6 +534,9 @@ def main(argv: list[str] | None = None) -> None:
         'experiment_name': args.experiment_name,
         'index_fpath': str(index_fpath),
         'official_index_fpath': str(official_index_fpath),
+        'official_eee_root': planning_artifact.get('official_eee_root'),
+        'local_eee_root': planning_artifact.get('local_eee_root'),
+        'ensure_local_eee': planning_artifact.get('ensure_local_eee'),
         'analysis_root': str(out_dpath),
         'n_run_entries': len(run_entries),
         'n_planned_packets': len(packets),

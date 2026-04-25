@@ -222,6 +222,8 @@ def _row_for_job(
     row = {
         # --- normalized component-row fields (aligned with official index) ---
         'source_kind': 'local',
+        'artifact_format': 'helm',
+        'eee_artifact_path': None,
         'component_id': component_id,
         'logical_run_key': logical_run_key,
         'experiment_name': experiment_name,
@@ -385,7 +387,8 @@ def main(argv: list[str] | None = None) -> None:
         # Component-style fields first (aligned with the official index), then
         # legacy operational columns, then any remaining fields.
         preferred = [
-            'source_kind', 'component_id', 'logical_run_key',
+            'source_kind', 'artifact_format', 'eee_artifact_path',
+            'component_id', 'logical_run_key',
             'experiment_name', 'job_id', 'status',
             'run_spec_name', 'run_spec_hash', 'benchmark_group',
             'benchmark', 'model', 'model_deployment', 'method',

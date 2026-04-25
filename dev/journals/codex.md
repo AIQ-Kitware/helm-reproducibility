@@ -1155,3 +1155,24 @@ Design takeaways:
 1. If a sort key can ever fall through to a dict, it is better to move to an explicit ranking function than to hope the tuple shape stays safe.
 2. Keep the primary semantic ordering signal first and let path/identity strings only break ties.
 3. Regression tests for deterministic selection should include both the crash-shaped tie and a counterexample that would win if the ranking were wrong.
+
+## 2026-04-25 16:13:09 +0000
+
+Summary of user intent: continue the EEE migration in `helm_audit` by using existing on-disk EEE conversions as the backend for real reproducibility report generation, preferring prebuilt official conversions under `/data/crfm-helm-audit-store/crfm-helm-public-eee-test/`, converting only needed local HELM runs when missing, driving the planner/packet/comparison/report flow end to end, fixing tractable integration bugs, and committing between coherent stages without launching new HELM benchmarks.
+
+Model and configuration: Codex GPT-5, collaboration mode `Default`, danger-full-access filesystem, approval policy `never`, network enabled, local machine `agent@aivm-2404`.
+
+I am treating this as a backend integration test rather than a data-production exercise. The architecture already says raw public and local HELM evidence must remain separated from derived analysis, and the recent packet refactor created a clean place for normalized comparison intent to flow into reports. The open question is whether the EEE-converted artifacts can occupy that normalized backend role without collapsing provenance or losing drilldown to raw HELM run directories.
+
+The first risks I see are mostly identity and cost risks. Official EEE artifacts must map back to public HELM run identities in a deterministic way; local EEE conversion should not become an accidental sweep over `/data`; and report generation must continue to expose raw HELM paths even when the comparison loader reads EEE. I will start by reading the planner/index/report path contracts and sampling the official converted tree, then make the smallest architectural insertion point that lets planner manifests point at canonical EEE artifacts. If local conversion is needed, it should be on-demand, browseable, and traceable rather than hidden inside the renderer.
+
+Design takeaways I expect to validate or revise:
+1. The normalized boundary should be explicit in manifests; discovery can enrich rows, but renderers should not rediscover source artifacts.
+2. EEE paths are derived artifacts, not replacement evidence; every converted artifact needs a visible route back to raw HELM input.
+3. Real end-to-end report generation is the right test for backend migrations because loader-only tests miss identity, naming, and provenance failures.
+
+Stage 1/2 progress: I found that the packet/planner/report surfaces already knew about `artifact_format` and `eee_artifact_path`, but existing indexes on disk predated those columns. I added a resolver that maps official public rows to the prebuilt sweep tree by `(public_track, suite_version, run_name)` and by `results.jsonl` run path fallback, plus a deterministic local EEE location under `$AUDIT_STORE_ROOT/eee/local`. This keeps the planner as the manifest boundary: it now emits explicit EEE artifact paths when discovery succeeds, and it can optionally ensure local EEE artifacts for selected rows.
+
+The first concrete bug was in the EEE converter/output contract rather than the planner. Existing official conversions often have one sample row with no `evaluation_result_id`, which means the report path cannot compute per-metric instance agreement from the EEE sample file alone. I made the `EeeArtifactLoader` tolerate those legacy artifacts by backfilling instance-level metric records from the raw HELM provenance path while still loading the run-level aggregate from EEE. I also patched `submodules/every_eval_ever` so new conversions emit one instance-level row per HELM metric, filter `None` reasoning traces, and avoid divide-by-zero when no completions exist. The tradeoff is pragmatic: old official EEE artifacts remain usable without a large regeneration sweep, while new local conversions are better-shaped going forward.
+
+Validation so far: Python compile checks passed for the touched modules. Focused tests passed with `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 /home/agent/.local/uv/envs/uvpy3.13.2/bin/python -m pytest -q tests/test_plan_core_report_packets.py tests/test_normalized_smoke.py` (12 passed, 4 skipped). I also directly converted the EEE HELM fixture with the patched converter and confirmed it wrote 250 instance rows with metric IDs such as `exact_match`, `exact_match@5`, and token/bookkeeping metrics.

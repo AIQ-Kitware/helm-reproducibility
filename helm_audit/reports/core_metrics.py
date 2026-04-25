@@ -870,13 +870,17 @@ class _SimpleStatRow:
         self.mean = mean
 
 
-def _single_run_core_stat_index(run_path: str) -> dict[str, _SimpleStatRow]:
+def _single_run_core_stat_index(
+    run_path: str,
+    *,
+    component: dict[str, Any] | None = None,
+) -> dict[str, _SimpleStatRow]:
     """Run-level core metric means keyed by stable metric handle.
 
     Stage-4: backed by ``ncompare.joined_metric_means`` over a normalized
     run instead of ``HelmRunAnalysis.stat_index``.
     """
-    nrun = _load_normalized(run_path)
+    nrun = _load_component_run(component) if component is not None else _load_normalized(run_path)
     out: dict[str, _SimpleStatRow] = {}
     for key in ncompare.core_metric_keys(nrun):
         means = {
@@ -1150,8 +1154,8 @@ def _write_comparison_runlevel_table(
             continue
         left_component = component_lookup[component_ids[0]]
         right_component = component_lookup[component_ids[1]]
-        idx_left = _single_run_core_stat_index(left_component['run_path'])
-        idx_right = _single_run_core_stat_index(right_component['run_path'])
+        idx_left = _single_run_core_stat_index(left_component['run_path'], component=left_component)
+        idx_right = _single_run_core_stat_index(right_component['run_path'], component=right_component)
         for key in sorted(set(idx_left) & set(idx_right)):
             left = idx_left[key]
             right = idx_right[key]
@@ -1203,6 +1207,8 @@ def _write_text(report: dict[str, Any], out_fpath: Path) -> None:
     for component in report.get('components', []):
         lines.append(
             f"  - {component['component_id']}: tags={component.get('tags', [])} "
+            f"artifact_format={component.get('artifact_format')} "
+            f"eee_artifact_path={component.get('eee_artifact_path')} "
             f"run_path={component.get('run_path')}"
         )
     lines.append('')
@@ -1294,6 +1300,8 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
     for component in report.get('components', []):
         lines.append(
             f"  - {component['component_id']}: tags={component.get('tags', [])} "
+            f"artifact_format={component.get('artifact_format')} "
+            f"eee_artifact_path={component.get('eee_artifact_path')} "
             f"run_path={component.get('run_path')}"
         )
     lines.append('')

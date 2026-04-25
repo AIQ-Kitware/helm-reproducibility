@@ -15,6 +15,13 @@ from helm_audit.indexing.schema import (
     logical_run_key_for_official,
     now_utc_iso,
 )
+from helm_audit.normalized.eee_artifacts import (
+    EeeArtifactResolution,
+    default_local_eee_root,
+    default_official_eee_root,
+    resolve_local_eee_artifact,
+    resolve_official_eee_artifact,
+)
 from helm_audit.reports.core_packet import slugify_identifier
 
 
@@ -166,7 +173,7 @@ def load_index_rows(index_fpath: str | Path) -> list[dict[str, Any]]:
         return [{k: ("" if v is None else v) for k, v in row.items()} for row in csv.DictReader(file)]
 
 
-def _resolve_artifact_format(row: dict[str, Any]) -> tuple[str, str | None]:
+def _resolve_artifact_format(row: dict[str, Any]) -> tuple[str, str | None, bool]:
     """Determine ``(artifact_format, eee_artifact_path)`` for an index row.
 
     Index rows that explicitly set ``artifact_format`` win. Otherwise, we
@@ -177,14 +184,64 @@ def _resolve_artifact_format(row: dict[str, Any]) -> tuple[str, str | None]:
     explicit = _clean_optional_text(row.get("artifact_format"))
     eee_path = _clean_optional_text(row.get("eee_artifact_path") or row.get("eee_path"))
     if explicit:
-        return explicit, eee_path
+        return explicit, eee_path, True
     if eee_path:
-        return "eee", eee_path
-    return "helm", None
+        return "eee", eee_path, False
+    return "helm", None, False
 
 
-def normalize_local_index_rows(rows: list[dict[str, Any]], *, index_fpath: str | Path) -> list[NormalizedPlannerComponent]:
+def _artifact_resolution_metadata(
+    resolution: EeeArtifactResolution | None,
+) -> dict[str, Any]:
+    return resolution.to_dict() if resolution is not None else {}
+
+
+def _apply_eee_resolution(
+    *,
+    row: dict[str, Any],
+    source_kind: str,
+    artifact_format: str,
+    eee_artifact_path: str | None,
+    explicit_artifact_format: bool,
+    official_eee_root: str | Path | None,
+    local_eee_root: str | Path | None,
+    ensure_local_eee: bool,
+) -> tuple[str, str | None, EeeArtifactResolution | None]:
+    """Prefer converted EEE artifacts when discovery finds one.
+
+    An explicit non-EEE artifact format in the index row is respected. Older
+    indexes commonly lack these columns, so discovery fills the gap using the
+    canonical official sweep root or the local canonical EEE root.
+    """
+    if artifact_format == "eee" and eee_artifact_path:
+        return artifact_format, eee_artifact_path, None
+    if explicit_artifact_format and artifact_format != "eee":
+        return artifact_format, eee_artifact_path, None
+    if source_kind == "official":
+        resolution = resolve_official_eee_artifact(
+            row,
+            official_eee_root=official_eee_root,
+        )
+    else:
+        resolution = resolve_local_eee_artifact(
+            row,
+            local_eee_root=local_eee_root,
+            ensure=ensure_local_eee,
+        )
+    if resolution.artifact_path is not None:
+        return "eee", str(resolution.artifact_path), resolution
+    return artifact_format, eee_artifact_path, resolution
+
+
+def normalize_local_index_rows(
+    rows: list[dict[str, Any]],
+    *,
+    index_fpath: str | Path,
+    local_eee_root: str | Path | None = None,
+    ensure_local_eee: bool = False,
+) -> list[NormalizedPlannerComponent]:
     index_fpath = str(Path(index_fpath).expanduser().resolve())
+    local_eee_root = local_eee_root or default_local_eee_root()
     components: list[NormalizedPlannerComponent] = []
     for row_index, row in enumerate(rows):
         run_path = _clean_optional_text(row.get("run_path") or row.get("run_dir"))
@@ -205,9 +262,21 @@ def normalize_local_index_rows(rows: list[dict[str, Any]], *, index_fpath: str |
             tags.append("has_attempt_uuid")
         else:
             tags.append("fallback_attempt_identity")
-        artifact_format, eee_artifact_path = _resolve_artifact_format(row)
+        artifact_format, eee_artifact_path, explicit_artifact_format = _resolve_artifact_format(row)
+        artifact_format, eee_artifact_path, eee_resolution = _apply_eee_resolution(
+            row=row,
+            source_kind="local",
+            artifact_format=artifact_format,
+            eee_artifact_path=eee_artifact_path,
+            explicit_artifact_format=explicit_artifact_format,
+            official_eee_root=None,
+            local_eee_root=local_eee_root,
+            ensure_local_eee=ensure_local_eee,
+        )
         if artifact_format == "eee":
             tags.append("eee_artifact_present")
+        elif eee_resolution is not None and eee_resolution.status not in {"root_missing"}:
+            tags.append(f"eee_artifact_{eee_resolution.status}")
         components.append(
             NormalizedPlannerComponent(
                 component_id=component_id,
@@ -244,6 +313,7 @@ def normalize_local_index_rows(rows: list[dict[str, Any]], *, index_fpath: str |
                     "attempt_identity_kind": _clean_optional_text(row.get("attempt_identity_kind")) or ("attempt_uuid" if attempt_uuid else "fallback"),
                     "attempt_fallback_key": _clean_optional_text(row.get("attempt_fallback_key")) or (_build_attempt_fallback_key(row) if not attempt_uuid else None),
                     "status": _clean_optional_text(row.get("status")),
+                    "eee_artifact_resolution": _artifact_resolution_metadata(eee_resolution),
                 },
                 artifact_format=artifact_format,
                 eee_artifact_path=eee_artifact_path,
@@ -252,8 +322,14 @@ def normalize_local_index_rows(rows: list[dict[str, Any]], *, index_fpath: str |
     return components
 
 
-def normalize_official_index_rows(rows: list[dict[str, Any]], *, index_fpath: str | Path) -> list[NormalizedPlannerComponent]:
+def normalize_official_index_rows(
+    rows: list[dict[str, Any]],
+    *,
+    index_fpath: str | Path,
+    official_eee_root: str | Path | None = None,
+) -> list[NormalizedPlannerComponent]:
     index_fpath = str(Path(index_fpath).expanduser().resolve())
+    official_eee_root = official_eee_root or default_official_eee_root()
     components: list[NormalizedPlannerComponent] = []
     for row_index, row in enumerate(rows):
         run_path = _clean_optional_text(row.get("run_path") or row.get("public_run_dir"))
@@ -264,10 +340,22 @@ def normalize_official_index_rows(rows: list[dict[str, Any]], *, index_fpath: st
             run_name=_clean_optional_text(row.get("run_name")),
         )
         component_id = _clean_optional_text(row.get("component_id")) or _official_fallback_component_id(row, logical_run_key)
-        artifact_format, eee_artifact_path = _resolve_artifact_format(row)
+        artifact_format, eee_artifact_path, explicit_artifact_format = _resolve_artifact_format(row)
+        artifact_format, eee_artifact_path, eee_resolution = _apply_eee_resolution(
+            row=row,
+            source_kind="official",
+            artifact_format=artifact_format,
+            eee_artifact_path=eee_artifact_path,
+            explicit_artifact_format=explicit_artifact_format,
+            official_eee_root=official_eee_root,
+            local_eee_root=None,
+            ensure_local_eee=False,
+        )
         official_tags = ["official", "public_reference_candidate"]
         if artifact_format == "eee":
             official_tags.append("eee_artifact_present")
+        elif eee_resolution is not None and eee_resolution.status not in {"root_missing"}:
+            official_tags.append(f"eee_artifact_{eee_resolution.status}")
         components.append(
             NormalizedPlannerComponent(
                 component_id=component_id,
@@ -303,6 +391,7 @@ def normalize_official_index_rows(rows: list[dict[str, Any]], *, index_fpath: st
                 },
                 extra_metadata={
                     "run_name": _clean_optional_text(row.get("run_name")),
+                    "eee_artifact_resolution": _artifact_resolution_metadata(eee_resolution),
                 },
                 artifact_format=artifact_format,
                 eee_artifact_path=eee_artifact_path,
@@ -317,10 +406,22 @@ def normalize_index_rows(
     official_rows: list[dict[str, Any]],
     local_index_fpath: str | Path,
     official_index_fpath: str | Path,
+    official_eee_root: str | Path | None = None,
+    local_eee_root: str | Path | None = None,
+    ensure_local_eee: bool = False,
 ) -> list[NormalizedPlannerComponent]:
     return [
-        *normalize_local_index_rows(local_rows, index_fpath=local_index_fpath),
-        *normalize_official_index_rows(official_rows, index_fpath=official_index_fpath),
+        *normalize_local_index_rows(
+            local_rows,
+            index_fpath=local_index_fpath,
+            local_eee_root=local_eee_root,
+            ensure_local_eee=ensure_local_eee,
+        ),
+        *normalize_official_index_rows(
+            official_rows,
+            index_fpath=official_index_fpath,
+            official_eee_root=official_eee_root,
+        ),
     ]
 
 
@@ -720,14 +821,22 @@ def build_planning_artifact(
     official_index_fpath: str | Path,
     experiment_name: str | None = None,
     run_entry: str | None = None,
+    official_eee_root: str | Path | None = None,
+    local_eee_root: str | Path | None = None,
+    ensure_local_eee: bool = False,
 ) -> dict[str, Any]:
     local_rows = load_index_rows(local_index_fpath)
     official_rows = load_index_rows(official_index_fpath)
+    official_eee_root = official_eee_root or default_official_eee_root()
+    local_eee_root = local_eee_root or default_local_eee_root()
     normalized_components = normalize_index_rows(
         local_rows=local_rows,
         official_rows=official_rows,
         local_index_fpath=local_index_fpath,
         official_index_fpath=official_index_fpath,
+        official_eee_root=official_eee_root,
+        local_eee_root=local_eee_root,
+        ensure_local_eee=ensure_local_eee,
     )
     packets = build_packet_intents(
         normalized_components,
@@ -739,6 +848,9 @@ def build_planning_artifact(
         "planner_version": PLANNER_VERSION,
         "local_index_fpath": str(Path(local_index_fpath).expanduser().resolve()),
         "official_index_fpath": str(Path(official_index_fpath).expanduser().resolve()),
+        "official_eee_root": str(Path(official_eee_root).expanduser().resolve()) if official_eee_root else None,
+        "local_eee_root": str(Path(local_eee_root).expanduser().resolve()) if local_eee_root else None,
+        "ensure_local_eee": ensure_local_eee,
         "experiment_name": experiment_name,
         "run_entry": run_entry,
         "packet_count": len(packets),
@@ -908,6 +1020,9 @@ def planning_summary_lines(artifact: dict[str, Any]) -> list[str]:
         f"planner_version: {artifact.get('planner_version')}",
         f"local_index_fpath: {artifact.get('local_index_fpath')}",
         f"official_index_fpath: {artifact.get('official_index_fpath')}",
+        f"official_eee_root: {artifact.get('official_eee_root')}",
+        f"local_eee_root: {artifact.get('local_eee_root')}",
+        f"ensure_local_eee: {artifact.get('ensure_local_eee')}",
         f"experiment_name: {artifact.get('experiment_name')}",
         f"run_entry: {artifact.get('run_entry')}",
         f"packet_count: {artifact.get('packet_count')}",
@@ -925,6 +1040,8 @@ def planning_summary_lines(artifact: dict[str, Any]) -> list[str]:
         for component in packet.get("components", []):
             lines.append(
                 f"    - {component['component_id']} source_kind={component.get('source_kind')} "
+                f"artifact_format={component.get('artifact_format')} "
+                f"eee_artifact_path={component.get('eee_artifact_path')} "
                 f"tags={component.get('tags')} run_path={component.get('run_path')}"
             )
         lines.append("  comparisons:")

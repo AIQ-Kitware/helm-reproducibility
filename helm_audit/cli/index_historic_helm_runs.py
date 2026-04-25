@@ -859,6 +859,8 @@ def _scan_benchmark_output_dir(
 
             rows.append({
                 'source_kind': 'official',
+                'artifact_format': 'helm',
+                'eee_artifact_path': None,
                 'component_id': component_id_for_official(
                     public_track=public_track,
                     suite_version=suite_version,

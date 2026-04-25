@@ -54,6 +54,7 @@ helm-audit-analyze-many = "helm_audit.cli.analyze_many:main"
 helm-audit-build-summary = "helm_audit.workflows.build_reports_summary:main"
 helm-audit-portfolio-status = "helm_audit.cli.portfolio_status:main"
 helm-audit-analyze-index-snapshot = "helm_audit.workflows.analyze_index_snapshot:main"
+helm-audit-prepare-eee = "helm_audit.workflows.prepare_eee_artifacts:main"
 
 [tool.setuptools.packages.find]
 include = ["helm_audit*"]

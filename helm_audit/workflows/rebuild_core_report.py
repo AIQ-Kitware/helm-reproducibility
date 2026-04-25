@@ -178,6 +178,9 @@ def _load_selected_packet(
     planner_artifact_fpath: str | None,
     local_index_fpath: str | None,
     official_index_fpath: str | None,
+    official_eee_root: str | None,
+    local_eee_root: str | None,
+    ensure_local_eee: bool,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     existing_packet = _existing_report_packet(
         report_dpath,
@@ -203,6 +206,9 @@ def _load_selected_packet(
             official_index_fpath=official_index_fpath,
             experiment_name=experiment_name,
             run_entry=run_entry,
+            official_eee_root=official_eee_root,
+            local_eee_root=local_eee_root,
+            ensure_local_eee=ensure_local_eee,
         )
     packet = select_packet_from_artifact(
         artifact,
@@ -214,6 +220,9 @@ def _load_selected_packet(
         "planner_artifact_fpath": str(Path(planner_artifact_fpath).expanduser().resolve()) if planner_artifact_fpath else None,
         "local_index_fpath": artifact.get("local_index_fpath") or local_index_fpath,
         "official_index_fpath": artifact.get("official_index_fpath") or official_index_fpath,
+        "official_eee_root": artifact.get("official_eee_root") or official_eee_root,
+        "local_eee_root": artifact.get("local_eee_root") or local_eee_root,
+        "ensure_local_eee": artifact.get("ensure_local_eee", ensure_local_eee),
     }
     return packet, planner_meta
 
@@ -321,6 +330,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--index-dpath", default=str(default_index_root()))
     parser.add_argument("--official-index-fpath", default=None)
     parser.add_argument("--official-index-dpath", default=str(official_public_index_dpath()))
+    parser.add_argument("--official-eee-root", default=None)
+    parser.add_argument("--local-eee-root", default=None)
+    parser.add_argument("--ensure-local-eee", action="store_true")
     parser.add_argument("--planner-artifact-fpath", default=None)
     parser.add_argument("--report-dpath", default=None)
     parser.add_argument("--allow-single-repeat", action="store_true")
@@ -354,6 +366,9 @@ def main(argv: list[str] | None = None) -> None:
             if args.official_index_fpath else
             _maybe_latest_official_index_csv(Path(args.official_index_dpath).expanduser().resolve())
         ),
+        official_eee_root=args.official_eee_root,
+        local_eee_root=args.local_eee_root,
+        ensure_local_eee=args.ensure_local_eee,
     )
     local_index_fpath = planner_meta.get("local_index_fpath")
     official_index_fpath = planner_meta.get("official_index_fpath")
@@ -483,6 +498,9 @@ def main(argv: list[str] | None = None) -> None:
         str(planner_meta.get("local_index_fpath") or local_index_fpath),
         "--official-index-fpath",
         str(planner_meta.get("official_index_fpath") or official_index_fpath),
+        *(["--official-eee-root", str(planner_meta["official_eee_root"])] if planner_meta.get("official_eee_root") else []),
+        *(["--local-eee-root", str(planner_meta["local_eee_root"])] if planner_meta.get("local_eee_root") else []),
+        *(["--ensure-local-eee"] if planner_meta.get("ensure_local_eee") else []),
         *(["--planner-artifact-fpath", str(planner_meta["planner_artifact_fpath"])] if planner_meta.get("planner_artifact_fpath") else []),
         *(["--experiment-name", str(packet.get("experiment_name"))] if packet.get("experiment_name") else []),
         *(["--allow-single-repeat"] if args.allow_single_repeat else []),
