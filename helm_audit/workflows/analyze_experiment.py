@@ -214,6 +214,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument('--local-eee-root', default=None)
     parser.add_argument('--ensure-local-eee', action='store_true')
     parser.add_argument('--allow-single-repeat', action='store_true')
+    parser.add_argument(
+        '--analysis-dpath',
+        default=None,
+        help=(
+            'Override the canonical analysis output root '
+            '(experiment_analysis_dpath(experiment_name)) with an explicit '
+            'directory. Used by virtual-experiment composition so the '
+            'derived results land outside the repo without colliding with '
+            'execution-driven experiments.'
+        ),
+    )
     args = parser.parse_args(argv)
 
     index_fpath = (
@@ -233,17 +244,23 @@ def main(argv: list[str] | None = None) -> None:
     run_entries = sorted({r.get('run_entry') for r in experiment_rows if r.get('run_entry')})
     benchmark_completion = _benchmark_completion_summary(experiment_rows)
 
-    out_dpath = experiment_analysis_dpath(args.experiment_name)
-    # Migrate existing real dir from legacy compat location to canonical store location.
-    compat_dpath = compat_core_run_reports_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
-    if compat_dpath.is_dir() and not compat_dpath.is_symlink() and not out_dpath.exists():
-        import shutil
-        logger.info(
-            "Migrating legacy report dir: "
-            f"{rich_link(compat_dpath)} -> {rich_link(out_dpath)}"
-        )
-        out_dpath.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(compat_dpath), str(out_dpath))
+    if args.analysis_dpath:
+        # Caller (e.g. virtual-experiment composer) supplied an explicit
+        # output root. Skip the legacy-path migration since it only applies
+        # to the canonical experiment_analysis_dpath() location.
+        out_dpath = Path(args.analysis_dpath).expanduser().resolve()
+    else:
+        out_dpath = experiment_analysis_dpath(args.experiment_name)
+        # Migrate existing real dir from legacy compat location to canonical store location.
+        compat_dpath = compat_core_run_reports_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
+        if compat_dpath.is_dir() and not compat_dpath.is_symlink() and not out_dpath.exists():
+            import shutil
+            logger.info(
+                "Migrating legacy report dir: "
+                f"{rich_link(compat_dpath)} -> {rich_link(out_dpath)}"
+            )
+            out_dpath.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(compat_dpath), str(out_dpath))
     out_dpath.mkdir(parents=True, exist_ok=True)
     reports_dpath = out_dpath / 'core-reports'
     reports_dpath.mkdir(parents=True, exist_ok=True)
@@ -559,12 +576,16 @@ def main(argv: list[str] | None = None) -> None:
     logger.debug(f'Write to: {rich_link(provenance_fpath)}')
 
     # Publish backward-compat symlink at the legacy repo/reports location.
-    compat_link = compat_core_run_reports_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
-    if not compat_link.is_symlink():
-        try:
-            symlink_to(out_dpath, compat_link)
-        except Exception as ex:
-            logger.warning(f'Could not create compat symlink {rich_link(compat_link)}: {ex}')
+    # Skip when an explicit --analysis-dpath was supplied: callers (e.g. the
+    # virtual-experiment composer) want their derived results to live entirely
+    # outside the repo, not aliased back into reports/core-run-analysis/.
+    if not args.analysis_dpath:
+        compat_link = compat_core_run_reports_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
+        if not compat_link.is_symlink():
+            try:
+                symlink_to(out_dpath, compat_link)
+            except Exception as ex:
+                logger.warning(f'Could not create compat symlink {rich_link(compat_link)}: {ex}')
 
     logger.info(f'Canonical analysis root: {rich_link(out_dpath)}')
     logger.info(f'Wrote experiment summary json: {rich_link(json_fpath)}')

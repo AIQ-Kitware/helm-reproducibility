@@ -1,0 +1,30 @@
+schema_version: 1
+name: pythia-mmlu-stress
+description: >
+  Pythia models on MMLU subjects, composed from existing local audit runs
+  (audit-mmlu-usfp-pythia-r{1,2}, audit-historic-grid filtered to scope) and
+  matching public HELM rows. external_eee components left empty for now;
+  drop in inspect-AI EEE artifacts later under sources[].kind=external_eee.
+
+scope:
+  models:
+    - "regex:eleutherai/pythia-.*"
+  benchmarks:
+    - "mmlu"
+
+sources:
+  - kind: audit_index
+    fpath: /data/crfm-helm-audit-store/indexes/audit_results_index.latest.csv
+    include_experiments:
+      - audit-mmlu-usfp-pythia-r1
+      - audit-mmlu-usfp-pythia-r2
+      - audit-historic-grid
+
+  - kind: official_public_index
+    fpath: /data/crfm-helm-audit-store/indexes/official_public_index.latest.csv
+
+  - kind: external_eee
+    components: []
+
+output:
+  root: /data/crfm-helm-audit-store/virtual-experiments/pythia-mmlu-stress
