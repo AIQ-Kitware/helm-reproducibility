@@ -883,17 +883,29 @@ def _fd_count() -> int | None:
         return None
 
 
-def _load_all_repro_rows() -> list[dict[str, Any]]:
+def _load_all_repro_rows(extra_analysis_roots: list[Path] | None = None) -> list[dict[str, Any]]:
     # Scan the canonical store location plus the publication-side and
     # legacy-repo symlink trees so experiments that haven't been re-run
     # since either layout migration are still found.
+    #
+    # ``extra_analysis_roots`` lets callers point the scan at additional
+    # locations that hold the same ``<X>/<something>/core-reports/<packet>/...``
+    # shape — virtual experiments, in particular, hold their per-packet
+    # reports under their own ``output.root`` and would otherwise be
+    # invisible to the aggregate summary.
     canonical_root = experiments_analysis_root()
     publication_root_link_dir = publication_experiments_root()
     legacy_repo_root = legacy_repo_publication_root()
+    extra_roots = [Path(p).expanduser().resolve() for p in (extra_analysis_roots or [])]
     report_jsons = sorted(
         list(canonical_root.glob("*/core-reports/*/core_metric_report.latest.json"))
         + list(publication_root_link_dir.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
         + list(legacy_repo_root.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
+        + [
+            p
+            for root in extra_roots
+            for p in root.glob("*/core-reports/*/core_metric_report.latest.json")
+        ]
     )
     deduped: dict[tuple[str | None, str | None], dict[str, Any]] = {}
     for report_json in report_jsons:
@@ -4629,6 +4641,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--filter-inventory-json", default=None)
     parser.add_argument("--summary-root", default=str(aggregate_summary_reports_root()))
     parser.add_argument(
+        "--analysis-root",
+        action="append",
+        default=[],
+        help=(
+            "Extra directory to scan for per-packet core-report JSONs. "
+            "Repeatable. Used for virtual experiments whose analysis lives "
+            "under a custom output.root and would otherwise be invisible "
+            "to the canonical/publication/legacy scan. Each root is globbed "
+            "as <root>/*/core-reports/*/core_metric_report.latest.json."
+        ),
+    )
+    parser.add_argument(
         "--breakdown-dims",
         nargs="*",
         default=DEFAULT_BREAKDOWN_DIMS,
@@ -4650,7 +4674,7 @@ def main(argv: list[str] | None = None) -> None:
     filter_inventory_rows = _load_filter_inventory_rows(filter_inventory_json)
     _raise_fd_limit()  # Note: this probably is not necessary, as fd limits are usually due to a VM issue.
     configure_plotly_chrome()
-    all_repro_rows = _load_all_repro_rows()
+    all_repro_rows = _load_all_repro_rows(extra_analysis_roots=args.analysis_root)
 
     if args.experiment_name:
         scope_kind = "experiment_name"

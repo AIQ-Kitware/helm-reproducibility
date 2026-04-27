@@ -28,10 +28,15 @@ if [[ ! -f "$INDEX_FPATH" ]]; then
     exit 1
 fi
 
+# --analysis-root points the per-packet scan at the virtual experiment's
+# own analysis tree. Without it, _load_all_repro_rows scans only the
+# canonical/publication/legacy locations and finds zero rows here, so
+# prioritized examples and breakdowns come up empty.
 PYTHONPATH="$ROOT" "$PYTHON_BIN" -m helm_audit.workflows.build_reports_summary \
     --experiment-name "$EXPERIMENT_NAME" \
     --index-fpath "$INDEX_FPATH" \
     --summary-root "$SUMMARY_ROOT" \
+    --analysis-root "$OUTPUT_ROOT" \
     "$@"
 
 echo
