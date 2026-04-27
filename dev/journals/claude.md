@@ -505,3 +505,159 @@ Model and configuration: claude-sonnet-4-6, Claude Code CLI.
 - The fixed bugs (1 and 2) were verified: 13/13 previously failing pilot runs now pass after fix.
 
 Design insight: when testing against a large real-world corpus, always separate "converter can't handle this data" from "this data requires local assets that aren't present." Both show up as failures, but only the former needs fixing. Sweeping all suites rather than just a few exposes both categories and lets you quantify the boundary precisely.
+
+## 2026-04-27 17:09:00 +0000
+
+User intent: overnight autonomous push toward a completed set of EEE-backed
+reproducibility reports. Drive packet planning + report generation broadly
+across all 25 local experiments, convert local HELM runs to EEE on demand,
+fix small/local bugs that block coverage, leave artifacts and a summary for
+review.
+
+Claude Opus 4.7, Claude Code CLI (VSCode extension), aivm-2404 with NOPASSWD
+sudo. `.venv313` at /home/joncrall/code/helm_audit/.venv313 (uvpy3.13.2).
+
+**Initial blocker.** Mounts at /data/crfm-helm-{audit,audit-store,public}
+were attached but empty when I started. After surfacing this clearly, user
+remounted; data appeared (~36K official runs, sweep DB with
+discovered=36046, succeeded=34683, failed=1126, skipped_too_large=237).
+
+**Stage-2 sanity.** First `pytest` invocation returned EMFILE on every
+collection. Diagnosed as virtiofs page-cache pressure (1M FD limit but
+opening any directory in `/home/joncrall/code/helm_audit/helm_audit` failed
+in bare bash). Cleared with `echo 3 | sudo tee /proc/sys/vm/drop_caches`.
+Tests then green: 139/139 passed in 207s. Worth remembering for next
+session: virtiofs in this VM can wedge after long idle periods, drop_caches
+fixes it without remount.
+
+**Smoke pass.** Re-ran `analyze_experiment` for `audit-boolq-pythia-r1`
+with `--ensure-local-eee`. n_planned=1, n_built=1, n_skipped=0. The
+`Harden EEE report generation on real artifacts` commit (21150e9) on Apr 25
+fixed the prior "File name too long" crash in `component_link_basename`,
+so the boolq smoke now succeeds where the Apr 22 run had n_built=0.
+
+**Threading EEE flags through analyze_many.** `helm_audit.cli.analyze_many`
+didn't pipe `--official-eee-root`, `--local-eee-root`, `--ensure-local-eee`,
+or `--official-index-fpath` through to per-experiment analyses. Added all
+four; without `--ensure-local-eee` the broad pass would skip every local
+component because no local EEE artifact existed yet.
+
+**Run 1 (broad pass).** `analyze_many --all-from-index --ensure-local-eee
+--allow-single-repeat` over 25 experiments / 498 index rows. Total 1.7h
+wallclock, 0 experiment-level failures. But: 517 packets planned, only 159
+built. 358 skipped, of which:
+- 213 ≈ "no enabled comparisons" (legitimate: no public counterpart for
+  this model+benchmark combo, e.g. openai/gpt2 was never publicly run on
+  boolq).
+- 145 ≈ TypeError: "argument should be a str or an os.PathLike object…
+  not 'NoneType'" — concentrated in `audit-historic-grid` (145) and
+  `audit-historic-grid-gpt-oss-20b-vllm-trimmed` (4).
+
+**Root cause for the 145 NoneType crashes.** Local index rows for
+scheduled-but-never-executed attempts have empty `run_path`/`run_dir`
+(`status=`, `has_run_spec=False`). The planner still emitted these as
+local components with `run_path=None`; `_write_component_symlinks` then
+crashed on `Path(None).resolve()`.
+
+Fix in two places (both shipped in this session):
+1. `helm_audit/planning/core_report_planner.py:_prefilter_index_rows` —
+   drop local rows with no run_path before normalization. This is the
+   correctness fix; these rows have no instances to compare so the packet
+   should never have existed.
+2. `helm_audit/workflows/rebuild_core_report.py:_write_component_symlinks` —
+   defensively skip `component["run_path"] is None` entries instead of
+   crashing. Belt-and-braces in case any slip past the prefilter.
+
+26 targeted tests still pass.
+
+**Run 2 (broad pass after fix).** Same command, ~1.5h wallclock.
+- experiments_ok:        25/25
+- planned_packets:       274  (down from 517 — the 243 dead rows are
+                                now correctly filtered)
+- built_reports:         159  (58.0% of planned)
+- skipped:               115  — *all* `no_official_match`, none NoneType.
+                                Every remaining skip is a domain-level
+                                "this model+benchmark combo doesn't exist
+                                in public HELM" case, not a code bug.
+
+**Aggregate summary built.** `build_reports_summary --index-fpath …
+--filter-inventory-json …` rebuilt
+`reports/aggregate-summary/all-results/` with the canonical 5-step sankey
+narrative, agreement curves, coverage matrix, failure taxonomy, and
+prioritized examples. Cardinality summary now shows: discovered=13579,
+selected=270, attempted=498, completed=255, analyzed=148. The 148 analyzed
+is the new denominator for downstream reproducibility narrative; agreement
+buckets are 22 exact_or_near_exact / 42 high_0.95+ / 54 moderate_0.80+ /
+37 low.
+
+**Side fixes shipped while waiting for the broad pass:**
+
+A. `dev/poc/eee-audit/sweep.py`:
+   - `--show-failure-paths [CLASS]`: emits one run_path per line, headerless,
+     suitable for `xargs`/`rsync --files-from=-`. Cleanly redownloads the
+     three malformed `msmarco:cohere_small-20220720` paths the user has been
+     trying to triage.
+   - The existing `--report`, `--show-failures`, and the new
+     `--show-failure-paths` can now be combined in a single invocation. When
+     paths are emitted alongside another section a labeled
+     `FAILURE RUN PATHS (CLASS)` header demarcates them; standalone form
+     stays plain so it pipes.
+
+B. `submodules/aiq-magnet/magnet/backends/helm/cli/download_helm_results.py`:
+   - Removed the stale `_runs_root` "classic quirk". HELM's public bucket
+     reorganized: classic now lives at
+     `gs://crfm-helm-public/classic/benchmark_output/runs/<ver>` like every
+     other benchmark. The legacy `gs://crfm-helm-public/benchmark_output/runs/`
+     path is empty (verified via the GCS JSON API). Every recent classic
+     `--list-versions` call returned empty because of this. After the fix
+     classic resolves identically to lite/mmlu/etc.
+   - Cleaned up `list_benchmarks` to drop the now-redundant
+     `names.add('classic')` and the `'benchmark_output'` blocklist entry.
+   - Pre-existing bug noted but not fixed: `--version='v0.2.2|v0.2.3|v0.2.4'`
+     does NOT alternate; `kwutil.MultiPattern.coerce` treats the whole
+     string as one strict literal. The script's docstring example
+     `--benchmark="lite|ewok"` is therefore wrong. Workaround: use
+     `regex:` prefix (`--version 'regex:v0\.2\.[234]'`). Fixing this needs
+     YAML-coercing `--version` and `--benchmark` like `--runs` already is;
+     deferred to user decision.
+
+**Design insight.** The most leverage in tonight's pass came from
+distinguishing "scheduled-but-never-ran index rows" from "ran but no public
+counterpart" at the planner. Same observable failure ("packet skipped")
+but different fixes: the first is a planner prefilter (cheap), the second
+is research design (no fix, document it). Without the categorization the
+145 + 213 looked like a single mass of skips and would have been hard to
+prioritize. Once split, the planner fix is a 4-line change that turns
+"58% of 517" into "58% of 274 with no spurious failures."
+
+**Outstanding items for the user tomorrow.**
+- Decide if `download_helm_results.py` `--version 'a|b|c'` alternation
+  bug is worth fixing (3 lines).
+- The 3 `msmarco:cohere_small-20220720` JSONDecodeError paths are now
+  redownloadable via the unblocked `download_helm_results.py` once the
+  user runs the regex command on a host with rw on /data/crfm-helm-public.
+- 115 legitimate "no_official_match" skips in run2 are *not* code bugs;
+  they document the boundary of what's reproducible against public HELM.
+  Worth surfacing in the paper as a denominator caveat.
+- analyze_many run-rate after EEE-cache-warm: small experiments ~1s,
+  audit-historic-grid ~43m, audit-qwen25-7b-aiq ~10m. The two big ones
+  dominate; subsequent re-renders of small experiments are essentially
+  free.
+
+**Files changed this session (uncommitted as of this entry):**
+- `helm_audit/planning/core_report_planner.py` — no-run-path prefilter
+- `helm_audit/workflows/rebuild_core_report.py` — None-guard symlink writer
+- `helm_audit/cli/analyze_many.py` — thread EEE flags + official-index-fpath
+- `dev/poc/eee-audit/sweep.py` — `--show-failure-paths`, combinable read-only modes
+- `submodules/aiq-magnet/...download_helm_results.py` — drop classic quirk
+
+**Artifacts on disk for review tomorrow:**
+- `/data/crfm-helm-audit-store/analysis/experiments/<exp>/experiment_summary.latest.{json,csv,txt}`
+- `/data/crfm-helm-audit-store/analysis/experiments/<exp>/core-reports/core-metrics-<packet>/...`
+- `/home/joncrall/code/helm_audit/reports/aggregate-summary/all-results/` — story sankeys + agreement curves
+- `/home/joncrall/code/helm_audit/.cache/overnight/analyze_many_run{1,2}.log` — full per-experiment log
+
+Next step (for whoever picks this up): commit the staged changes, then
+either (a) attack the `|`-alternation parsing bug if reproducible-set
+should grow to include older bucket layouts, or (b) move on to verifying
+specific reproducibility findings against the 159 built reports.
