@@ -2,12 +2,16 @@
 
 This directory is the operator runbook layer for `helm_audit`.
 
-Each scenario folder is a short numbered sequence:
+Most scenario folders are short numbered sequences (the original convention):
 
 - `00_*`: environment checks or indexing setup
 - `10_*`: manifest generation or analysis selection
 - `20_*`: execution or rebuild step
 - `30_*`: comparison or follow-on reporting
+
+A scenario should match this layout when it actually has those phases. When
+it doesn't (e.g. an analysis-only runbook over pre-existing artifacts),
+prefer descriptive script names. The convention is a guideline, not a rule.
 
 Current scenarios:
 
@@ -19,6 +23,7 @@ Current scenarios:
 - `qwen2_72b_vllm/`: local vLLM smoke plus full EWOK historic-grid batch for `qwen/qwen2-72b-instruct` using the `helm-qwen2-72b-instruct` server profile
 - `gpt_oss_20b_vllm/`: local LiteLLM-backed vLLM smoke plus targeted overnight batch for the `openai/gpt-oss-20b` runs that were filtered out only because they had no local deployment path
 - `small_models_kubeai/`: KubeAI-backed overnight batch that keeps both `qwen/qwen2.5-7b-instruct-turbo` and `lmsys/vicuna-7b-v1.3` live together on the cluster and emits one combined benchmark bundle
+- `pythia_mmlu_stress/`: virtual-experiment slice (Pythia × MMLU) over already-executed audit data; analysis + publication only, no execution step yet
 
 The shell files here are intentionally thin. They are runbook steps, not the
 implementation. Each one should delegate to a `helm_audit` Python CLI such as
