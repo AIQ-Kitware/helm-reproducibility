@@ -1518,6 +1518,16 @@ def main(argv: list[str] | None = None) -> None:
             'Off by default; run render_heavy_pairwise_plots.sh in the report directory instead.'
         ),
     )
+    parser.add_argument(
+        '--plots-only',
+        action='store_true',
+        default=False,
+        help=(
+            'Skip rewriting the JSON/text/management/warnings/runlevel-table report artifacts; '
+            'only redraw figures and update plot latest aliases. Intended for fast iteration on '
+            'plot styling: edit core_metrics.py and rerun redraw_plots.sh in the report directory.'
+        ),
+    )
     args = parser.parse_args(argv)
 
     thresholds = [0.0, 1e-12, 1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 2e-2, 5e-2, 1e-1, 2.5e-1, 5e-1, 1.0]
@@ -1704,76 +1714,91 @@ def main(argv: list[str] | None = None) -> None:
     ecdf_fig_fpath = (ecdf_artifacts or {}).get('plot') if ecdf_artifacts else None
     ecdf_legend_png = (ecdf_artifacts or {}).get('legend_png') if ecdf_artifacts else None
     ecdf_legend_txt = (ecdf_artifacts or {}).get('legend_txt') if ecdf_artifacts else None
-    runlevel_csv_fpath, runlevel_md_fpath = _write_comparison_runlevel_table(
-        history_dpath,
-        stamp,
-        comparisons,
-        component_lookup,
-    )
+    plots_only = args.plots_only
+    if not plots_only:
+        runlevel_csv_fpath, runlevel_md_fpath = _write_comparison_runlevel_table(
+            history_dpath,
+            stamp,
+            comparisons,
+            component_lookup,
+        )
+        report = kwutil.Json.ensure_serializable(_strip_private(report))
+        json_fpath.write_text(json.dumps(report, indent=2))
+        _write_text(report, txt_fpath)
+        _write_management_summary(report, mgmt_fpath)
+        warnings_json_fpath.write_text(json.dumps(_warnings_payload(report), indent=2) + '\n')
+        warnings_txt_fpath.write_text('\n'.join(_warning_summary_lines(report)) + '\n')
 
-    report = kwutil.Json.ensure_serializable(_strip_private(report))
-    json_fpath.write_text(json.dumps(report, indent=2))
-    _write_text(report, txt_fpath)
-    _write_management_summary(report, mgmt_fpath)
-    warnings_json_fpath.write_text(json.dumps(_warnings_payload(report), indent=2) + '\n')
-    warnings_txt_fpath.write_text('\n'.join(_warning_summary_lines(report)) + '\n')
-
-    latest_map = {
-        json_fpath: 'core_metric_report.latest.json',
-        txt_fpath: 'core_metric_report.latest.txt',
-        mgmt_fpath: 'core_metric_management_summary.latest.txt',
-        warnings_json_fpath: 'warnings.latest.json',
-        warnings_txt_fpath: 'warnings.latest.txt',
-        fig_fpath: 'core_metric_report.latest.png',
-        runlevel_csv_fpath: 'core_runlevel_table.latest.csv',
-    }
+    # Build the latest alias map. In plots_only mode we only refresh plot
+    # aliases — the JSON/text/management/warnings/runlevel artifacts and their
+    # latest aliases are intentionally left untouched so the existing canonical
+    # report stays consistent while we iterate on plot styling.
+    plot_latest_map: dict[Path, str] = {fig_fpath: 'core_metric_report.latest.png'}
     if dist_fig_fpath is not None:
-        latest_map[dist_fig_fpath] = 'core_metric_distributions.latest.png'
+        plot_latest_map[dist_fig_fpath] = 'core_metric_distributions.latest.png'
     if overlay_dist_fpath is not None:
-        latest_map[overlay_dist_fpath] = 'core_metric_overlay_distributions.latest.png'
+        plot_latest_map[overlay_dist_fpath] = 'core_metric_overlay_distributions.latest.png'
     if overlay_dist_legend_png is not None:
-        latest_map[overlay_dist_legend_png] = 'core_metric_overlay_distributions_label_legend.latest.png'
+        plot_latest_map[overlay_dist_legend_png] = 'core_metric_overlay_distributions_label_legend.latest.png'
     if overlay_dist_legend_txt is not None:
-        latest_map[overlay_dist_legend_txt] = 'core_metric_overlay_distributions_label_legend.latest.txt'
+        plot_latest_map[overlay_dist_legend_txt] = 'core_metric_overlay_distributions_label_legend.latest.txt'
     if ecdf_fig_fpath is not None:
-        latest_map[ecdf_fig_fpath] = 'core_metric_ecdfs.latest.png'
+        plot_latest_map[ecdf_fig_fpath] = 'core_metric_ecdfs.latest.png'
     if ecdf_legend_png is not None:
-        latest_map[ecdf_legend_png] = 'core_metric_ecdfs_label_legend.latest.png'
+        plot_latest_map[ecdf_legend_png] = 'core_metric_ecdfs_label_legend.latest.png'
     if ecdf_legend_txt is not None:
-        latest_map[ecdf_legend_txt] = 'core_metric_ecdfs_label_legend.latest.txt'
-    if runlevel_md_fpath is not None:
-        latest_map[runlevel_md_fpath] = 'core_runlevel_table.latest.md'
+        plot_latest_map[ecdf_legend_txt] = 'core_metric_ecdfs_label_legend.latest.txt'
     if per_metric_agree_fpath is not None:
-        latest_map[per_metric_agree_fpath] = 'core_metric_per_metric_agreement.latest.png'
+        plot_latest_map[per_metric_agree_fpath] = 'core_metric_per_metric_agreement.latest.png'
+
+    if plots_only:
+        latest_map = plot_latest_map
+    else:
+        latest_map = {
+            json_fpath: 'core_metric_report.latest.json',
+            txt_fpath: 'core_metric_report.latest.txt',
+            mgmt_fpath: 'core_metric_management_summary.latest.txt',
+            warnings_json_fpath: 'warnings.latest.json',
+            warnings_txt_fpath: 'warnings.latest.txt',
+            runlevel_csv_fpath: 'core_runlevel_table.latest.csv',
+            **plot_latest_map,
+        }
+        if runlevel_md_fpath is not None:
+            latest_map[runlevel_md_fpath] = 'core_runlevel_table.latest.md'
     for src, latest_name in latest_map.items():
         _write_latest_alias(src, report_dpath, latest_name)
-    known_latest_names = {
-        'core_metric_report.latest.json',
-        'core_metric_report.latest.txt',
-        'core_metric_management_summary.latest.txt',
-        'warnings.latest.json',
-        'warnings.latest.txt',
-        'core_metric_report.latest.png',
-        'core_metric_distributions.latest.png',
-        'core_metric_three_run_distributions.latest.png',
-        'core_metric_overlay_distributions.latest.png',
-        'core_metric_overlay_distributions_label_legend.latest.png',
-        'core_metric_overlay_distributions_label_legend.latest.txt',
-        'core_metric_ecdfs.latest.png',
-        'core_metric_ecdfs_label_legend.latest.png',
-        'core_metric_ecdfs_label_legend.latest.txt',
-        'core_metric_per_metric_agreement.latest.png',
-        'core_runlevel_table.latest.csv',
-        'core_runlevel_table.latest.md',
-    }
-    for latest_name in known_latest_names - set(latest_map.values()):
-        safe_unlink(report_dpath / latest_name)
+    if not plots_only:
+        # Stale-alias cleanup is for the canonical (full) write path. In
+        # plots_only mode the other artifacts (JSON/text/runlevel/...) are
+        # deliberately not in latest_map, so blanket cleanup would erase them.
+        known_latest_names = {
+            'core_metric_report.latest.json',
+            'core_metric_report.latest.txt',
+            'core_metric_management_summary.latest.txt',
+            'warnings.latest.json',
+            'warnings.latest.txt',
+            'core_metric_report.latest.png',
+            'core_metric_distributions.latest.png',
+            'core_metric_three_run_distributions.latest.png',
+            'core_metric_overlay_distributions.latest.png',
+            'core_metric_overlay_distributions_label_legend.latest.png',
+            'core_metric_overlay_distributions_label_legend.latest.txt',
+            'core_metric_ecdfs.latest.png',
+            'core_metric_ecdfs_label_legend.latest.png',
+            'core_metric_ecdfs_label_legend.latest.txt',
+            'core_metric_per_metric_agreement.latest.png',
+            'core_runlevel_table.latest.csv',
+            'core_runlevel_table.latest.md',
+        }
+        for latest_name in known_latest_names - set(latest_map.values()):
+            safe_unlink(report_dpath / latest_name)
 
-    logger.info(f'Wrote core metric report: {rich_link(json_fpath)}')
-    logger.info(f'Wrote core metric text: {rich_link(txt_fpath)}')
-    logger.info(f'Wrote core metric management summary: {rich_link(mgmt_fpath)}')
-    logger.info(f'Wrote core metric warnings json: {rich_link(warnings_json_fpath)}')
-    logger.info(f'Wrote core metric warnings text: {rich_link(warnings_txt_fpath)}')
+    if not plots_only:
+        logger.info(f'Wrote core metric report: {rich_link(json_fpath)}')
+        logger.info(f'Wrote core metric text: {rich_link(txt_fpath)}')
+        logger.info(f'Wrote core metric management summary: {rich_link(mgmt_fpath)}')
+        logger.info(f'Wrote core metric warnings json: {rich_link(warnings_json_fpath)}')
+        logger.info(f'Wrote core metric warnings text: {rich_link(warnings_txt_fpath)}')
     logger.info(f'Wrote core metric plot: {rich_link(fig_fpath)}')
     if dist_fig_fpath is not None:
         logger.info(f'Wrote core metric distributions: {rich_link(dist_fig_fpath)}')
@@ -1783,9 +1808,10 @@ def main(argv: list[str] | None = None) -> None:
         logger.info(f'Wrote core metric ecdfs: {rich_link(ecdf_fig_fpath)}')
     if per_metric_agree_fpath is not None:
         logger.info(f'Wrote per-metric agreement curves: {rich_link(per_metric_agree_fpath)}')
-    logger.info(f'Wrote core run-level table csv: {rich_link(runlevel_csv_fpath)}')
-    if runlevel_md_fpath is not None:
-        logger.info(f'Wrote core run-level table md: {rich_link(runlevel_md_fpath)}')
+    if not plots_only:
+        logger.info(f'Wrote core run-level table csv: {rich_link(runlevel_csv_fpath)}')
+        if runlevel_md_fpath is not None:
+            logger.info(f'Wrote core run-level table md: {rich_link(runlevel_md_fpath)}')
 
 
 if __name__ == '__main__':

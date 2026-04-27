@@ -213,6 +213,16 @@ def test_single_run_core_report_uses_planner_packet_and_cleans_repeat_artifacts(
     assert "helm_audit.reports.core_metrics" in script_text
     assert "components_manifest.latest.json" in script_text
     assert "comparisons_manifest.latest.json" in script_text
+    assert "--plots-only" not in script_text, "render script must NOT skip non-plot writes"
+
+    # redraw_plots.latest.sh is written for narrow plot-styling iteration
+    redraw_script = report_dir / "redraw_plots.latest.sh"
+    assert redraw_script.exists(), "redraw_plots.sh must be written"
+    redraw_text = redraw_script.read_text()
+    assert "--plots-only" in redraw_text, "redraw_plots.sh must use --plots-only"
+    assert "--render-heavy-pairwise-plots" in redraw_text
+    assert "components_manifest.latest.json" in redraw_text
+    assert "comparisons_manifest.latest.json" in redraw_text
 
 
 def test_component_link_basename_is_bounded_for_verbose_fallback_ids():
@@ -268,6 +278,13 @@ def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_pat
     assert "helm_audit.reports.core_metrics" in script_text
     assert "components_manifest.latest.json" in script_text
     assert "comparisons_manifest.latest.json" in script_text
+    assert "--plots-only" not in script_text
+
+    # redraw_plots.latest.sh emitted for narrow plot-styling iteration
+    redraw_script = report_dir / "redraw_plots.latest.sh"
+    assert redraw_script.exists()
+    redraw_text = redraw_script.read_text()
+    assert "--plots-only" in redraw_text
 
 
 def test_auto_render_policy_deployment_and_suite_drift_alone_do_not_trigger(tmp_path):

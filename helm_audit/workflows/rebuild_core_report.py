@@ -502,6 +502,28 @@ def main(argv: list[str] | None = None) -> None:
     )
     write_latest_alias(heavy_plots_render_fpath, report_dpath, "render_heavy_pairwise_plots.sh")
 
+    # Narrow tweak script: redraw plots in place using the cached manifests,
+    # leaving the JSON/text/management/warnings/runlevel artifacts untouched.
+    # Use this when iterating on plot styling in helm_audit/reports/core_metrics.py;
+    # it skips the report-writing path so the canonical artifacts stay stable
+    # while you re-render figures.
+    redraw_plots_cmd_parts = [*heavy_plots_cmd_parts, "--plots-only"]
+    redraw_plots_fpath = write_reproduce_script(
+        report_dpath / "redraw_plots.latest.sh",
+        [
+            "#!/usr/bin/env bash",
+            "set -euo pipefail",
+            "# Redraws plots only — does NOT rewrite the JSON/text/management/warnings/runlevel artifacts.",
+            "# Intended for fast iteration on plot styling: edit helm_audit/reports/core_metrics.py and rerun.",
+            *portable_repo_root_lines(),
+            'cd "$REPO_ROOT"',
+            'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" '
+            + " ".join(shlex.quote(part) for part in redraw_plots_cmd_parts)
+            + ' "$@"',
+        ],
+    )
+    write_latest_alias(redraw_plots_fpath, report_dpath, "redraw_plots.sh")
+
     cmd_parts = [
         "-m",
         "helm_audit.workflows.rebuild_core_report",

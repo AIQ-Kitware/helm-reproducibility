@@ -221,6 +221,45 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     ]:
         assert (report_dpath / name).exists(), f"heavy PNG plot missing with --render-heavy-pairwise-plots: {name}"
 
+    # Sidecar legend artifacts (short alias -> long display_name) ride along
+    # with the ECDF and overlay distribution plots so the legend stays legible.
+    for name in [
+        "core_metric_ecdfs_label_legend.latest.png",
+        "core_metric_ecdfs_label_legend.latest.txt",
+        "core_metric_overlay_distributions_label_legend.latest.png",
+        "core_metric_overlay_distributions_label_legend.latest.txt",
+    ]:
+        assert (report_dpath / name).exists(), f"sidecar label legend missing: {name}"
+
+    # Snapshot the canonical (non-plot) latest-alias targets before the
+    # plots-only redraw so we can verify they are not modified.
+    pre_redraw_canonical = {
+        name: (report_dpath / name).resolve()
+        for name in [
+            "core_metric_report.latest.json",
+            "core_metric_report.latest.txt",
+            "core_metric_management_summary.latest.txt",
+            "warnings.latest.json",
+            "warnings.latest.txt",
+            "core_runlevel_table.latest.csv",
+        ]
+        if (report_dpath / name).exists()
+    }
+    pre_redraw_ecdf = (report_dpath / "core_metric_ecdfs.latest.png").resolve()
+
+    # --plots-only must refresh plot symlinks but leave canonical artifacts
+    # exactly as they were. Fast iteration on plot styling should not churn
+    # the JSON/text/management/warnings/runlevel surface.
+    core_metrics.main(base_argv + ["--render-heavy-pairwise-plots", "--plots-only"])
+
+    for name, prior_target in pre_redraw_canonical.items():
+        assert (report_dpath / name).resolve() == prior_target, (
+            f"--plots-only must not modify canonical alias: {name}"
+        )
+    new_ecdf = (report_dpath / "core_metric_ecdfs.latest.png").resolve()
+    assert new_ecdf != pre_redraw_ecdf, "--plots-only must refresh plot symlinks"
+    assert (report_dpath / "core_metric_ecdfs_label_legend.latest.png").exists()
+
 
 def test_diagnostic_flags_use_manifest_semantics_not_component_order():
     components = [
