@@ -14,7 +14,7 @@ from helm_audit.infra.fs_publish import safe_unlink, symlink_to, write_latest_al
 from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.infra.paths import official_public_index_dpath
 from helm_audit.infra.report_layout import (
-    core_run_reports_root,
+    experiments_analysis_root,
     portable_repo_root_lines,
     write_reproduce_script,
 )
@@ -360,7 +360,7 @@ def main(argv: list[str] | None = None) -> None:
     report_dpath = (
         Path(args.report_dpath)
         if args.report_dpath
-        else (core_run_reports_root() / "manual" / f"core-metrics-{slugify_identifier(args.packet_id or args.run_entry)}")
+        else (experiments_analysis_root() / "manual" / f"core-metrics-{slugify_identifier(args.packet_id or args.run_entry)}")
     )
     report_dpath = report_dpath.expanduser().resolve()
     report_dpath.mkdir(parents=True, exist_ok=True)

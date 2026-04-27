@@ -20,7 +20,12 @@ from helm_audit.infra.paths import official_public_index_dpath
 from helm_audit.utils.numeric import nested_get
 from helm_audit.infra.fs_publish import symlink_to, write_latest_alias
 from helm_audit.infra.paths import experiment_analysis_dpath
-from helm_audit.infra.report_layout import compat_core_run_reports_root, portable_repo_root_lines, write_reproduce_script
+from helm_audit.infra.report_layout import (
+    legacy_repo_publication_root,
+    portable_repo_root_lines,
+    publication_experiments_root,
+    write_reproduce_script,
+)
 from helm_audit.planning.core_report_planner import build_planning_artifact
 from helm_audit.reports.core_packet_summary import (
     find_report_pair,
@@ -225,6 +230,18 @@ def main(argv: list[str] | None = None) -> None:
             'execution-driven experiments.'
         ),
     )
+    parser.add_argument(
+        '--publication-root',
+        default=None,
+        help=(
+            'Override the publication surface root (ADR 3). Defaults to '
+            '$HELM_AUDIT_PUBLICATION_ROOT or <audit_store>/reports. The '
+            'experiment-analysis symlink lands at <root>/core-run-analysis/. '
+            'Ignored when --analysis-dpath is supplied: callers managing '
+            'their own publication surface (e.g. virtual experiments) skip '
+            'the symlink entirely.'
+        ),
+    )
     args = parser.parse_args(argv)
 
     index_fpath = (
@@ -251,8 +268,11 @@ def main(argv: list[str] | None = None) -> None:
         out_dpath = Path(args.analysis_dpath).expanduser().resolve()
     else:
         out_dpath = experiment_analysis_dpath(args.experiment_name)
-        # Migrate existing real dir from legacy compat location to canonical store location.
-        compat_dpath = compat_core_run_reports_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
+        # Migrate existing real dir from the pre-parameterization in-repo
+        # location to the canonical store location. Only the in-repo legacy
+        # path is checked here; the new publication root is parameterized and
+        # never holds the canonical analysis content.
+        compat_dpath = legacy_repo_publication_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
         if compat_dpath.is_dir() and not compat_dpath.is_symlink() and not out_dpath.exists():
             import shutil
             logger.info(
@@ -575,17 +595,25 @@ def main(argv: list[str] | None = None) -> None:
     provenance_fpath.write_text(json.dumps(provenance, indent=2))
     logger.debug(f'Write to: {rich_link(provenance_fpath)}')
 
-    # Publish backward-compat symlink at the legacy repo/reports location.
-    # Skip when an explicit --analysis-dpath was supplied: callers (e.g. the
-    # virtual-experiment composer) want their derived results to live entirely
-    # outside the repo, not aliased back into reports/core-run-analysis/.
+    # Publish a symlink under the publication surface (ADR 3) pointing at
+    # the canonical analysis location. The publication root is parameterized
+    # via publication_experiments_root() (default: <audit_store>/reports/
+    # core-run-analysis), and ``--publication-root`` overrides it for this
+    # invocation. Skip entirely when ``--analysis-dpath`` is set: callers
+    # like the virtual-experiment composer manage their own publication
+    # surface under ``output.root`` and don't want a second alias dropped.
     if not args.analysis_dpath:
-        compat_link = compat_core_run_reports_root() / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
+        if args.publication_root:
+            link_root = Path(args.publication_root).expanduser().resolve() / 'core-run-analysis'
+        else:
+            link_root = publication_experiments_root()
+        link_root.mkdir(parents=True, exist_ok=True)
+        compat_link = link_root / f'experiment-analysis-{slugify_identifier(args.experiment_name)}'
         if not compat_link.is_symlink():
             try:
                 symlink_to(out_dpath, compat_link)
             except Exception as ex:
-                logger.warning(f'Could not create compat symlink {rich_link(compat_link)}: {ex}')
+                logger.warning(f'Could not create publication symlink {rich_link(compat_link)}: {ex}')
 
     logger.info(f'Canonical analysis root: {rich_link(out_dpath)}')
     logger.info(f'Wrote experiment summary json: {rich_link(json_fpath)}')

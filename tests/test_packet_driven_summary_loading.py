@@ -203,13 +203,19 @@ def test_analyze_experiment_summary_uses_packet_manifests_for_single_and_multi_r
 
 
 def test_build_reports_summary_loads_rows_from_packet_manifests_without_selection_sidecar(tmp_path, monkeypatch):
-    new_root = tmp_path / "reports" / "core-run-analysis"
-    old_root = tmp_path / "compat"
-    report_dir = new_root / "experiment-analysis-exp-a" / "core-reports" / "core-metrics-bench-model-a"
+    canonical_root = tmp_path / "audit_store" / "analysis" / "experiments"
+    publication_root_link = tmp_path / "publication" / "core-run-analysis"
+    legacy_repo_root = tmp_path / "legacy_repo"
+    # Place the report under the canonical (audit-store) location, mirroring
+    # the post-rename layout where experiments_analysis_root is the live
+    # storage path and publication/legacy roots only host symlinks (or stale
+    # pre-migration data we may still be scanning).
+    report_dir = canonical_root / "exp-a" / "core-reports" / "core-metrics-bench-model-a"
     _write_core_report_packet(report_dir, experiment_name="exp-a", run_entry="bench:model=a", single_run=False)
 
-    monkeypatch.setattr(build_reports_summary, "core_run_reports_root", lambda: new_root)
-    monkeypatch.setattr(build_reports_summary, "compat_core_run_reports_root", lambda: old_root)
+    monkeypatch.setattr(build_reports_summary, "experiments_analysis_root", lambda: canonical_root)
+    monkeypatch.setattr(build_reports_summary, "publication_experiments_root", lambda: publication_root_link)
+    monkeypatch.setattr(build_reports_summary, "legacy_repo_publication_root", lambda: legacy_repo_root)
 
     rows = build_reports_summary._load_all_repro_rows()
 

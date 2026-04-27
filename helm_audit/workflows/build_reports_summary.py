@@ -19,7 +19,13 @@ from helm_audit.infra.plotly_env import configure_plotly_chrome
 from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
 from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.infra.paths import experiment_analysis_dpath
-from helm_audit.infra.report_layout import aggregate_summary_reports_root, compat_core_run_reports_root, core_run_reports_root, portable_repo_root_lines
+from helm_audit.infra.report_layout import (
+    aggregate_summary_reports_root,
+    experiments_analysis_root,
+    legacy_repo_publication_root,
+    portable_repo_root_lines,
+    publication_experiments_root,
+)
 from helm_audit.model_registry import local_model_registry_by_name
 from helm_audit.reports.core_packet_summary import (
     find_report_pair,
@@ -878,13 +884,16 @@ def _fd_count() -> int | None:
 
 
 def _load_all_repro_rows() -> list[dict[str, Any]]:
-    # Scan both the canonical store location and the legacy compat location so
-    # experiments that haven't been re-run since the layout migration are still found.
-    new_root = core_run_reports_root()
-    old_root = compat_core_run_reports_root()
+    # Scan the canonical store location plus the publication-side and
+    # legacy-repo symlink trees so experiments that haven't been re-run
+    # since either layout migration are still found.
+    canonical_root = experiments_analysis_root()
+    publication_root_link_dir = publication_experiments_root()
+    legacy_repo_root = legacy_repo_publication_root()
     report_jsons = sorted(
-        list(new_root.glob("*/core-reports/*/core_metric_report.latest.json"))
-        + list(old_root.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
+        list(canonical_root.glob("*/core-reports/*/core_metric_report.latest.json"))
+        + list(publication_root_link_dir.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
+        + list(legacy_repo_root.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
     )
     deduped: dict[tuple[str | None, str | None], dict[str, Any]] = {}
     for report_json in report_jsons:
@@ -4550,11 +4559,18 @@ def _render_scope_summary(
     experiment_names = {str(row.get("experiment_name")) for row in enriched_rows if row.get("experiment_name")}
     if len(experiment_names) == 1:
         exp_name = next(iter(experiment_names))
-        # Check canonical store location first, fall back to legacy compat path.
-        analysis_dpath = experiment_analysis_dpath(exp_name)
-        if not analysis_dpath.exists():
-            analysis_dpath = compat_core_run_reports_root() / f"experiment-analysis-{slugify(exp_name)}"
-        if analysis_dpath.exists():
+        # Resolve the experiment-analysis target by checking the canonical
+        # store location first, then the parameterized publication-side
+        # symlink directory, then the in-repo legacy location. Anyone of
+        # them may hold the live reference depending on when this experiment
+        # was last analyzed.
+        candidates = [
+            experiment_analysis_dpath(exp_name),
+            publication_experiments_root() / f"experiment-analysis-{slugify(exp_name)}",
+            legacy_repo_publication_root() / f"experiment-analysis-{slugify(exp_name)}",
+        ]
+        analysis_dpath = next((c for c in candidates if c.exists()), None)
+        if analysis_dpath is not None:
             symlink_to(analysis_dpath, level_002 / "experiment-analysis")
 
     story_index_lines = [

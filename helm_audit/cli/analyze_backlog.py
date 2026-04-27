@@ -7,7 +7,7 @@ from collections import Counter
 from pathlib import Path
 
 from helm_audit.infra.logging import setup_cli_logging
-from helm_audit.infra.report_layout import core_run_reports_root
+from helm_audit.infra.report_layout import experiments_analysis_root
 from helm_audit.workflows.rebuild_core_report import main as rebuild_core_report_main, slugify
 from helm_audit.workflows import build_reports_summary
 
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> None:
             flush=True,
         )
         reports_dpath = (
-            core_run_reports_root()
+            experiments_analysis_root()
             / f"experiment-analysis-{slugify(experiment_name)}"
             / "core-reports"
         )

@@ -426,13 +426,16 @@ The system needs both a canonical analysis area and a presentation/browsing area
 
 ### Decision
 
-Treat experiment analysis roots as the canonical derived analysis area, and treat `reports/` as the publication and browsing surface.
+Treat experiment analysis roots as the canonical derived analysis area, and treat a folder named `reports/` as the publication and browsing surface.
+
+The folder is *named* `reports/` consistently, but its **location is parameterized** via `helm_audit.infra.paths.publication_root()`. The default points at `<audit_store>/reports/` so derived outputs do not pollute the checked-in repository tree. The `HELM_AUDIT_PUBLICATION_ROOT` environment variable, and per-CLI flags such as `analyze_experiment --publication-root` or `build_reports_summary --summary-root`, override the default. Code must obtain the publication root via the helper, not by hard-coding `<repo>/reports/`.
 
 ### Consequences
 
 * `reports/` can optimize for readability and navigation,
 * the analysis roots can optimize for correctness and rebuildability,
-* and the two roles stay conceptually separate.
+* the two roles stay conceptually separate,
+* and the publication surface can be relocated (e.g. to a dedicated artifact store, a per-virtual-experiment output root, or back into the repo for the legacy layout) without code changes — only configuration.
 
 ## ADR 4 — The filesystem is part of the interface
 

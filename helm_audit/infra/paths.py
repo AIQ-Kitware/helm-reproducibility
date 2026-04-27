@@ -9,7 +9,36 @@ def repo_root() -> Path:
     return load_env().repo_root
 
 
+def publication_root() -> Path:
+    """Where the publication surface (a folder named ``reports/``) lives.
+
+    ADR 3: there is *one* publication surface, named ``reports/``. Its
+    location is parameterized. The default points at
+    ``<audit_store>/reports/`` so derived outputs do not pollute the
+    checked-in repository. Override with ``HELM_AUDIT_PUBLICATION_ROOT`` to
+    relocate (e.g. set it to ``<repo>/reports`` for the legacy layout).
+    """
+    return load_env().publication_root
+
+
 def reports_root() -> Path:
+    """Backwards-compatible alias for :func:`publication_root`.
+
+    Older code referred to the publication surface as ``reports_root``.
+    The function now returns whatever the configured publication root is,
+    not a hard-coded ``<repo>/reports``. New call sites should prefer
+    :func:`publication_root`.
+    """
+    return publication_root()
+
+
+def repo_reports_root() -> Path:
+    """Legacy in-repo ``reports/`` directory — for migration code only.
+
+    This is the historical path under the source tree. It is preserved
+    so the legacy-dir migration in :mod:`helm_audit.workflows.analyze_experiment`
+    can still locate pre-move directories. New code must not write here.
+    """
     return repo_root() / "reports"
 
 
