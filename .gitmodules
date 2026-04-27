@@ -1,6 +1,7 @@
 [submodule "submodules/vllm_service"]
 	path = submodules/vllm_service
 	url = https://github.com/AIQ-Kitware/vllm_service.git
+	branch = main
 [submodule "submodules/aiq-magnet"]
 	path = submodules/aiq-magnet
 	url = https://github.com/AIQ-Kitware/aiq-magnet.git
