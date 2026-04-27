@@ -202,6 +202,12 @@ def _prefilter_index_rows(
             continue
         if run_entry is not None and run_entry not in _row_logical_keys(row):
             continue
+        # Drop rows that point at no executed run dir. These are scheduled-but-
+        # never-completed attempts (status='', has_run_spec=False, empty run_path);
+        # they have no instances to compare and would otherwise produce a packet
+        # with run_path=None that crashes downstream symlinking.
+        if not _clean_optional_text(row.get("run_path") or row.get("run_dir")):
+            continue
         scoped_local_rows.append(row)
 
     if run_entry is not None:

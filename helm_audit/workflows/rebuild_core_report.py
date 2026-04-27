@@ -232,9 +232,15 @@ def _write_component_symlinks(report_dpath: Path, components: list[dict[str, Any
     components_dir.mkdir(parents=True, exist_ok=True)
     keep_names: set[str] = set()
     for component in components:
+        run_path = component.get("run_path")
+        if not run_path:
+            # Component lacks a concrete run_dir (e.g. an index row never executed
+            # to completion). Skip the symlink rather than crash; the planner has
+            # already filtered most of these but defend against any that slip through.
+            continue
         base = component_link_basename(component["component_id"])
         run_name = f"{base}.run"
-        symlink_to(component["run_path"], components_dir / run_name)
+        symlink_to(run_path, components_dir / run_name)
         keep_names.add(run_name)
         job_path = component.get("job_path")
         if job_path:
