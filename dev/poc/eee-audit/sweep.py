@@ -417,6 +417,42 @@ def print_failures(
             print(f"\n  ...and {total - len(rows)} more (raise --show-failures-limit to see)")
 
 
+def print_failure_paths(
+    con: sqlite3.Connection,
+    *,
+    cls_filter: str | None = None,
+) -> None:
+    """Print one ``run_path`` per line for every failure row. Read-only.
+
+    Output is plain (no headers, no decoration) so it pipes cleanly into
+    ``xargs``, ``rsync --files-from=-``, or a ``while read`` loop. With
+    ``cls_filter``, only that exception_class is included; without, every
+    failure (any class) is printed. NULL run_paths are skipped.
+    """
+    if cls_filter is None:
+        rows = con.execute(
+            """
+            SELECT run_path FROM runs
+            WHERE status IN ('fail','timeout','error')
+              AND run_path IS NOT NULL AND run_path != ''
+            ORDER BY suite, version, run_name
+            """
+        ).fetchall()
+    else:
+        rows = con.execute(
+            """
+            SELECT run_path FROM runs
+            WHERE status IN ('fail','timeout','error')
+              AND COALESCE(exception_class,'UnknownError') = ?
+              AND run_path IS NOT NULL AND run_path != ''
+            ORDER BY suite, version, run_name
+            """,
+            (cls_filter,),
+        ).fetchall()
+    for r in rows:
+        print(r["run_path"])
+
+
 def print_report(con: sqlite3.Connection) -> None:
     """Print a full human-readable conversion report from the DB."""
     W = 72  # report width
@@ -913,6 +949,12 @@ def main():
         "--show-failures-limit", type=int, default=20,
         help="Max number of failures to print per class for --show-failures.",
     )
+    parser.add_argument(
+        "--show-failure-paths", default=None, metavar="CLASS", const="ALL", nargs="?",
+        help="Print one run_path per line for every failure row, suitable for "
+             "piping to rsync/wget. With no argument, prints all classes; pass "
+             "a class name to filter (e.g. JSONDecodeError). Read-only.",
+    )
     args = parser.parse_args()
 
     if args.max_mb == 0:
@@ -927,21 +969,32 @@ def main():
     results_jsonl = OUTPUT_ROOT / "results.jsonl"
     summary_path = OUTPUT_ROOT / "summary.json"
 
-    # --report: read-only, no scanning, no conversions
-    if args.report:
+    # Read-only modes. --report, --show-failures, and --show-failure-paths can
+    # be combined freely (e.g. --report --show-failure-paths JSONDecodeError to
+    # read the dashboard and grab the redownload list in one invocation). When
+    # paths are emitted alongside another section, a header demarcates them so
+    # the output is human-readable; the standalone --show-failure-paths form
+    # stays plain so it pipes cleanly into rsync/xargs.
+    if args.report or args.show_failures is not None or args.show_failure_paths is not None:
         con = open_db(db_path)
-        print_report(con)
-        con.close()
-        return
-
-    # --show-failures: read-only failure dump
-    if args.show_failures is not None:
-        con = open_db(db_path)
-        print_failures(
-            con,
-            cls_filter=None if args.show_failures == "ALL" else args.show_failures,
-            limit_per_class=args.show_failures_limit,
-        )
+        if args.report:
+            print_report(con)
+        if args.show_failures is not None:
+            print_failures(
+                con,
+                cls_filter=None if args.show_failures == "ALL" else args.show_failures,
+                limit_per_class=args.show_failures_limit,
+            )
+        if args.show_failure_paths is not None:
+            paths_cls = None if args.show_failure_paths == "ALL" else args.show_failure_paths
+            combined = args.report or args.show_failures is not None
+            if combined:
+                print()
+                print("=" * 72)
+                label = paths_cls or "all classes"
+                print(f"  FAILURE RUN PATHS  ({label})  — pipe to rsync/wget to redownload")
+                print("=" * 72)
+            print_failure_paths(con, cls_filter=paths_cls)
         con.close()
         return
 
