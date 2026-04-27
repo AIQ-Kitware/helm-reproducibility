@@ -247,6 +247,15 @@ def _write_component_symlinks(report_dpath: Path, components: list[dict[str, Any
             job_name = f"{base}.job"
             symlink_to(job_path, components_dir / job_name)
             keep_names.add(job_name)
+        # Surface the EEE artifact directory (the converter's normalized output)
+        # next to the raw HELM run dir so a reader inspecting the report can
+        # follow either path. The components manifest already records
+        # eee_artifact_path; the symlink is the human-facing surface.
+        eee_artifact_path = component.get("eee_artifact_path")
+        if eee_artifact_path:
+            eee_name = f"{base}.eee"
+            symlink_to(eee_artifact_path, components_dir / eee_name)
+            keep_names.add(eee_name)
     cleanup_glob(components_dir, "*", keep_names)
 
 

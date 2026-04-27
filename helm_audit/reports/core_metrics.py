@@ -20,6 +20,7 @@ import seaborn as sns
 
 from helm_audit.helm.diff import HelmRunDiff
 from helm_audit.helm import metrics as helm_metrics
+from helm_audit.helm.hashers import stable_hash36
 from helm_audit.indexing.schema import extract_run_spec_fields
 from helm_audit.infra.fs_publish import safe_unlink
 from helm_audit.normalized import (
@@ -653,6 +654,96 @@ def _plot_pair_metric_distributions(
     return out_fpath
 
 
+def _short_label_alias_map(labels: list[str], *, prefix: str = 'c') -> dict[str, str]:
+    """Build a deterministic short-alias map for legend labels.
+
+    Long ``display_name`` strings (e.g. the full HELM run-spec name with model
+    and method qualifiers) destroy small plot legends. This helper turns each
+    unique long label into a short, unique alias. The mapping is deterministic
+    in the long label (same input → same output), and unique within the call
+    (no two distinct long labels share an alias).
+
+    The default alias is ``c<hash6>`` where ``hash6`` is the first 6 chars of
+    ``stable_hash36(label)``. If two distinct labels collide on the first 6
+    chars, the hash length is extended uniformly for every label until all
+    aliases are distinct, so the alias surface stays consistent within one
+    figure.
+
+    Why: the *key* property the user cares about is that the alias function
+    is a true map (no two long labels point at the same short alias).
+    Hashing gives that determinism without depending on label order or count.
+    """
+    unique = sorted(set(labels))
+    if not unique:
+        return {}
+    for hash_len in range(6, 33):
+        candidate = {label: f"{prefix}{stable_hash36(label)[:hash_len]}" for label in unique}
+        if len(set(candidate.values())) == len(candidate):
+            return candidate
+    # Pathological fall-through (sha256 base36 collisions are astronomically rare);
+    # disambiguate by appending the index of the offending label.
+    return {label: f"{prefix}{stable_hash36(label)}_{i}" for i, label in enumerate(unique)}
+
+
+def _emit_label_legend_artifacts(
+    alias_map: dict[str, str],
+    *,
+    fig_dpath: Path,
+    stamp: str,
+    out_name: str,
+    title: str,
+) -> tuple[Path | None, Path | None]:
+    """Render a sidecar legend mapping short aliases back to full labels.
+
+    Emits two artifacts next to the main plot:
+      - ``{out_name}_label_legend_{stamp}.png`` — a text-only matplotlib figure
+        with one row per (alias, full label) pair, suitable for embedding next
+        to the main plot.
+      - ``{out_name}_label_legend_{stamp}.txt`` — the same mapping in plain
+        text for easy grep/diff.
+
+    Returns ``(png_path, txt_path)``; either may be ``None`` if the alias map
+    is empty.
+    """
+    if not alias_map:
+        return None, None
+    items = sorted(alias_map.items(), key=lambda kv: kv[1])
+
+    txt_fpath = fig_dpath / f"{out_name}_label_legend_{stamp}.txt"
+    txt_lines = [
+        f"{title}",
+        f"Generated: {stamp}",
+        "",
+        f"{'short':<12s}  full",
+        f"{'-' * 12}  {'-' * 60}",
+    ]
+    for long_label, short_alias in items:
+        txt_lines.append(f"{short_alias:<12s}  {long_label}")
+    txt_fpath.write_text("\n".join(txt_lines) + "\n")
+
+    n_rows = len(items)
+    fig_h = max(1.6, 0.32 * n_rows + 1.2)
+    fig, ax = plt.subplots(figsize=(12, fig_h), constrained_layout=True)
+    ax.axis('off')
+    table_rows = [[short, long_label] for long_label, short in items]
+    table = ax.table(
+        cellText=table_rows,
+        colLabels=['short alias', 'full label'],
+        cellLoc='left',
+        colLoc='left',
+        loc='upper left',
+        colWidths=[0.10, 0.90],
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1.0, 1.25)
+    ax.set_title(title, fontsize=12, loc='left')
+    png_fpath = fig_dpath / f"{out_name}_label_legend_{stamp}.png"
+    fig.savefig(png_fpath, dpi=180)
+    plt.close(fig)
+    return png_fpath, txt_fpath
+
+
 def _plot_run_metric_distributions(
     fig_dpath: Path,
     stamp: str,
@@ -663,7 +754,7 @@ def _plot_run_metric_distributions(
     title: str = 'Overlay of Per-Instance Core Metric Score Distributions by Run',
     subtitle: str = 'This shows the raw score distributions for each core metric across the selected runs.',
     ecdf: bool = False,
-) -> Path | None:
+) -> dict[str, Path] | None:
     frames = [
         _single_run_instance_core_rows(run_path, label)
         for run_path, label in run_specs
@@ -674,6 +765,13 @@ def _plot_run_metric_distributions(
     metrics = sorted(df['metric'].dropna().unique().tolist())
     if not metrics:
         return None
+    # Alias every legend label to a short, unique slug. The full labels
+    # (component display_names) routinely run 80–120 chars and crush the plot
+    # legend; the sidecar legend artifacts emitted below preserve the long
+    # labels so readers can resolve the aliases.
+    long_labels = sorted({label for _, label in run_specs})
+    alias_map = _short_label_alias_map(long_labels)
+    df = df.assign(run=df['run'].map(alias_map).fillna(df['run']))
     fig, axes = plt.subplots(
         len(metrics),
         1,
@@ -723,13 +821,26 @@ def _plot_run_metric_distributions(
     fig.suptitle(
         f'{title}\n'
         f'Run Spec: {run_spec_name}\n'
-        f'{subtitle}',
-        fontsize=16,
+        f'{subtitle}\n'
+        f'Legend uses short aliases; see the sidecar legend artifact for the full labels.',
+        fontsize=15,
     )
     out_fpath = fig_dpath / f'{out_name}_{stamp}.png'
     fig.savefig(out_fpath, dpi=180)
     plt.close(fig)
-    return out_fpath
+    legend_png_fpath, legend_txt_fpath = _emit_label_legend_artifacts(
+        alias_map,
+        fig_dpath=fig_dpath,
+        stamp=stamp,
+        out_name=out_name,
+        title=f"{title} — short alias → full label",
+    )
+    artifacts: dict[str, Path] = {'plot': out_fpath}
+    if legend_png_fpath is not None:
+        artifacts['legend_png'] = legend_png_fpath
+    if legend_txt_fpath is not None:
+        artifacts['legend_txt'] = legend_txt_fpath
+    return artifacts
 
 
 def _single_run_instance_core_rows(run_path: str, label: str) -> pd.DataFrame:
@@ -815,7 +926,7 @@ def _plot_overlay_metric_distributions(
     kwdagger_b_run: str,
     official_run: str,
     run_spec_name: str,
-) -> Path | None:
+) -> dict[str, Path] | None:
     return _plot_run_metric_distributions(
         fig_dpath,
         stamp,
@@ -838,7 +949,7 @@ def _plot_overlay_metric_ecdfs(
     kwdagger_b_run: str,
     official_run: str,
     run_spec_name: str,
-) -> Path | None:
+) -> dict[str, Path] | None:
     return _plot_run_metric_distributions(
         fig_dpath,
         stamp,
@@ -1556,7 +1667,7 @@ def main(argv: list[str] | None = None) -> None:
     if render_pairwise:
         dist_fig_fpath = _plot_pair_metric_distributions(history_dpath, stamp, pairs, run_spec_name)
         run_specs = [(component['run_path'], component['display_name']) for component in components]
-        overlay_dist_fpath = _plot_run_metric_distributions(
+        overlay_dist_artifacts = _plot_run_metric_distributions(
             history_dpath,
             stamp,
             run_specs,
@@ -1565,7 +1676,7 @@ def main(argv: list[str] | None = None) -> None:
             title='Overlay of Per-Instance Core Metric Score Distributions by Component',
             subtitle='Each series comes from a selected report component declared in the components manifest.',
         )
-        ecdf_fig_fpath = _plot_run_metric_distributions(
+        ecdf_artifacts = _plot_run_metric_distributions(
             history_dpath,
             stamp,
             run_specs,
@@ -1584,9 +1695,15 @@ def main(argv: list[str] | None = None) -> None:
         )
     else:
         dist_fig_fpath = None
-        overlay_dist_fpath = None
-        ecdf_fig_fpath = None
+        overlay_dist_artifacts = None
+        ecdf_artifacts = None
         per_metric_agree_fpath = None
+    overlay_dist_fpath = (overlay_dist_artifacts or {}).get('plot') if overlay_dist_artifacts else None
+    overlay_dist_legend_png = (overlay_dist_artifacts or {}).get('legend_png') if overlay_dist_artifacts else None
+    overlay_dist_legend_txt = (overlay_dist_artifacts or {}).get('legend_txt') if overlay_dist_artifacts else None
+    ecdf_fig_fpath = (ecdf_artifacts or {}).get('plot') if ecdf_artifacts else None
+    ecdf_legend_png = (ecdf_artifacts or {}).get('legend_png') if ecdf_artifacts else None
+    ecdf_legend_txt = (ecdf_artifacts or {}).get('legend_txt') if ecdf_artifacts else None
     runlevel_csv_fpath, runlevel_md_fpath = _write_comparison_runlevel_table(
         history_dpath,
         stamp,
@@ -1614,8 +1731,16 @@ def main(argv: list[str] | None = None) -> None:
         latest_map[dist_fig_fpath] = 'core_metric_distributions.latest.png'
     if overlay_dist_fpath is not None:
         latest_map[overlay_dist_fpath] = 'core_metric_overlay_distributions.latest.png'
+    if overlay_dist_legend_png is not None:
+        latest_map[overlay_dist_legend_png] = 'core_metric_overlay_distributions_label_legend.latest.png'
+    if overlay_dist_legend_txt is not None:
+        latest_map[overlay_dist_legend_txt] = 'core_metric_overlay_distributions_label_legend.latest.txt'
     if ecdf_fig_fpath is not None:
         latest_map[ecdf_fig_fpath] = 'core_metric_ecdfs.latest.png'
+    if ecdf_legend_png is not None:
+        latest_map[ecdf_legend_png] = 'core_metric_ecdfs_label_legend.latest.png'
+    if ecdf_legend_txt is not None:
+        latest_map[ecdf_legend_txt] = 'core_metric_ecdfs_label_legend.latest.txt'
     if runlevel_md_fpath is not None:
         latest_map[runlevel_md_fpath] = 'core_runlevel_table.latest.md'
     if per_metric_agree_fpath is not None:
@@ -1632,7 +1757,11 @@ def main(argv: list[str] | None = None) -> None:
         'core_metric_distributions.latest.png',
         'core_metric_three_run_distributions.latest.png',
         'core_metric_overlay_distributions.latest.png',
+        'core_metric_overlay_distributions_label_legend.latest.png',
+        'core_metric_overlay_distributions_label_legend.latest.txt',
         'core_metric_ecdfs.latest.png',
+        'core_metric_ecdfs_label_legend.latest.png',
+        'core_metric_ecdfs_label_legend.latest.txt',
         'core_metric_per_metric_agreement.latest.png',
         'core_runlevel_table.latest.csv',
         'core_runlevel_table.latest.md',
