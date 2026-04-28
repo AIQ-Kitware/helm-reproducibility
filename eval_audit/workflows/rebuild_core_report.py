@@ -515,6 +515,7 @@ def main(argv: list[str] | None = None) -> None:
             "set -euo pipefail",
             "# Redraws plots only — does NOT rewrite the JSON/text/management/warnings/runlevel artifacts.",
             "# Intended for fast iteration on plot styling: edit eval_audit/reports/core_metrics.py and rerun.",
+            "# To redraw one plot family, append e.g.: --plot_target core_metric_report",
             *portable_repo_root_lines(),
             'cd "$REPO_ROOT"',
             'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" '

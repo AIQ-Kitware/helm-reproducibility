@@ -37,13 +37,40 @@ from eval_audit.reports.core_packet import load_packet_manifests
 from eval_audit.utils.numeric import quantile as _quantile
 
 
+MetricDomain = tuple[float, float]
+_PLOT_TARGETS = {
+    'all',
+    'core_metric_report',
+    'core_metric_distributions',
+    'core_metric_overlay_distributions',
+    'core_metric_ecdfs',
+    'core_metric_per_metric_agreement',
+}
+
+
+def _wants_plot(plot_target: str, plot_name: str) -> bool:
+    return plot_target == 'all' or plot_target == plot_name
+
+
 @dataclass(frozen=True)
 class PlotLayout:
     """Matplotlib layout knobs for crowded report figures."""
 
+    # Figure-coordinate y position for the figure-level title. Values near
+    # 1.0 place the suptitle at the top edge; larger values move it upward.
     suptitle_y: float | None = 0.995
-    constrained_h_pad: float | None = 0.20
-    constrained_hspace: float | None = 0.12
+    # Minimum vertical padding around axes decorations, in inches, for
+    # Matplotlib's constrained-layout engine.
+    constrained_h_pad: float | None = 0.40
+    # Minimum vertical space between subplot groups, as a fraction of the
+    # average subplot height, for constrained layout.
+    constrained_hspace: float | None = 0.42
+    # Minimum horizontal padding around axes decorations, in inches, for
+    # Matplotlib's constrained-layout engine.
+    constrained_w_pad: float | None = 0.08
+    # Minimum horizontal space between subplot groups, as a fraction of the
+    # average subplot width, for constrained layout.
+    constrained_wspace: float | None = 0.05
 
 
 def _coalesce(value: float | None, default: float | None) -> float | None:
@@ -56,6 +83,8 @@ def _plot_layout_from_cli(args: argparse.Namespace) -> PlotLayout:
         suptitle_y=_coalesce(args.plot_suptitle_y, default.suptitle_y),
         constrained_h_pad=_coalesce(args.plot_constrained_h_pad, default.constrained_h_pad),
         constrained_hspace=_coalesce(args.plot_constrained_hspace, default.constrained_hspace),
+        constrained_w_pad=_coalesce(args.plot_constrained_w_pad, default.constrained_w_pad),
+        constrained_wspace=_coalesce(args.plot_constrained_wspace, default.constrained_wspace),
     )
 
 
@@ -66,6 +95,8 @@ def _apply_plot_layout(fig: plt.Figure, plot_layout: PlotLayout | None) -> PlotL
         for key, value in {
             'h_pad': layout.constrained_h_pad,
             'hspace': layout.constrained_hspace,
+            'w_pad': layout.constrained_w_pad,
+            'wspace': layout.constrained_wspace,
         }.items()
         if value is not None
     }
@@ -263,6 +294,8 @@ def _diagnostic_flags(
 
 def _group_quantiles(rows: list[dict[str, Any]]) -> dict[str, Any]:
     values = sorted(float(r['abs_delta']) for r in rows)
+    # FIXME: calling quantile like this is likely inefficient and duplicating
+    # work. Use a vectorized approach instead.
     return {
         'count': len(values),
         'abs_delta': {
@@ -288,23 +321,27 @@ def _metric_quantiles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+_BINARY_CORE_METRICS = {
+    'exact_match',
+    'prefix_exact_match',
+    'quasi_exact_match',
+    'quasi_prefix_exact_match',
+    'exact_match@5',
+    'prefix_exact_match@5',
+    'quasi_exact_match@5',
+    'quasi_prefix_exact_match@5',
+}
+_BOUNDED_OVERLAP_CORE_METRICS = {'bleu_1', 'bleu_4', 'f1_score', 'rouge_l'}
+
+
 def _metric_descriptor(metric: str) -> dict[str, str]:
-    if metric in {
-        'exact_match',
-        'prefix_exact_match',
-        'quasi_exact_match',
-        'quasi_prefix_exact_match',
-        'exact_match@5',
-        'prefix_exact_match@5',
-        'quasi_exact_match@5',
-        'quasi_prefix_exact_match@5',
-    }:
+    if metric in _BINARY_CORE_METRICS:
         return {
             'kind': 'binary',
             'range': '0 to 1',
             'direction': 'higher is better',
         }
-    if metric in {'bleu_1', 'bleu_4', 'f1_score', 'rouge_l'}:
+    if metric in _BOUNDED_OVERLAP_CORE_METRICS:
         return {
             'kind': 'bounded overlap score',
             'range': '0 to 1',
@@ -315,6 +352,58 @@ def _metric_descriptor(metric: str) -> dict[str, str]:
         'range': 'metric-dependent',
         'direction': 'higher is better unless documented otherwise',
     }
+
+
+def _metric_domain(metric: str) -> MetricDomain | None:
+    if metric in _BINARY_CORE_METRICS or metric in _BOUNDED_OVERLAP_CORE_METRICS:
+        return (0.0, 1.0)
+    return None
+
+
+def _common_metric_domain(metrics: list[str] | set[str]) -> MetricDomain | None:
+    if not metrics:
+        return None
+    domains = {_metric_domain(str(metric)) for metric in metrics}
+    if None in domains or len(domains) != 1:
+        return None
+    return next(iter(domains))
+
+
+def _pair_metric_domain(*pairs: dict[str, Any]) -> MetricDomain | None:
+    metrics: set[str] = set()
+    for pair in pairs:
+        if not pair:
+            continue
+        pair_metrics = pair.get('core_metrics')
+        if not pair_metrics:
+            return None
+        metrics.update(str(metric) for metric in pair_metrics)
+    return _common_metric_domain(metrics)
+
+
+def _apply_xlim_hint(ax, domain: MetricDomain | None, values) -> None:
+    if domain is None:
+        return
+    observed = [float(value) for value in values if value is not None and pd.notna(value)]
+    if not observed:
+        return
+    lower, upper = domain
+    if min(observed) < lower or max(observed) > upper:
+        return
+    ax.set_xlim(lower, upper)
+
+
+def _apply_abs_delta_ylim_hint(ax, domain: MetricDomain | None, values) -> None:
+    if domain is None:
+        return
+    observed = [float(value) for value in values if value is not None and pd.notna(value)]
+    if not observed or min(observed) < 0:
+        return
+    lower, upper = domain
+    span = upper - lower
+    if span <= 0 or max(observed) > span:
+        return
+    ax.set_ylim(0.0, span)
 
 
 def _should_treat_as_discrete(values) -> bool:
@@ -507,6 +596,7 @@ def _plot_distribution(ax, *pairs: dict[str, Any], level_key: str) -> None:
     )
     ax.set_xscale('symlog', linthresh=1e-12)
     ax.set_ylim(0, 1.02)
+    _apply_xlim_hint(ax, _pair_metric_domain(*pairs), rows['abs_tol'].tolist())
     ax.set_xlabel('Absolute Tolerance Threshold for Core Metric Difference')
     ax.set_ylabel('Fraction of Core Metric Comparisons in Agreement')
     ax.tick_params(axis='x', rotation=28)
@@ -595,6 +685,7 @@ def _plot_per_metric_agreement(
             )
             ax.set_xscale('symlog', linthresh=1e-12)
             ax.set_ylim(0, 1.02)
+            _apply_xlim_hint(ax, _metric_domain(metric), df['abs_tol'].tolist())
             ax.set_xlabel('Abs Tolerance', fontsize=9)
             ax.set_ylabel('Agreement Ratio', fontsize=9)
             ax.tick_params(axis='x', rotation=28, labelsize=8)
@@ -628,6 +719,7 @@ def _plot_quantiles(ax, pair_a: dict[str, Any], pair_b: dict[str, Any], level_ke
     ax.plot(x, b_vals, marker='o', label=pair_b['label'])
     ax.set_xticks(x, labels)
     ax.set_yscale('symlog', linthresh=1e-12)
+    _apply_abs_delta_ylim_hint(ax, _pair_metric_domain(pair_a, pair_b), a_vals + b_vals)
     ax.set_title(title)
     ax.set_xlabel('Quantile')
     ax.set_ylabel('Absolute Difference in Core Metric Value')
@@ -819,7 +911,7 @@ def _emit_label_legend_artifacts(
 def _plot_run_metric_distributions(
     fig_dpath: Path,
     stamp: str,
-    run_specs: list[tuple[str, str]],
+    run_specs: list[tuple[str, str] | tuple[str, str, dict[str, Any] | None]],
     run_spec_name: str,
     *,
     out_name: str = 'core_metric_overlay_distributions',
@@ -828,9 +920,14 @@ def _plot_run_metric_distributions(
     ecdf: bool = False,
     plot_layout: PlotLayout | None = None,
 ) -> dict[str, Path] | None:
+    normalized_run_specs = _normalize_plot_run_specs(run_specs)
     frames = [
-        _single_run_instance_core_rows(run_path, label)
-        for run_path, label in run_specs
+        _single_run_instance_core_rows(
+            run_path,
+            label,
+            component=component,
+        )
+        for run_path, label, component in normalized_run_specs
     ]
     df = pd.concat(frames, ignore_index=True)
     if df.empty or 'metric' not in df.columns:
@@ -842,7 +939,7 @@ def _plot_run_metric_distributions(
     # (component display_names) routinely run 80–120 chars and crush the plot
     # legend; the sidecar legend artifacts emitted below preserve the long
     # labels so readers can resolve the aliases.
-    long_labels = sorted({label for _, label in run_specs})
+    long_labels = sorted({label for _, label, _ in normalized_run_specs})
     alias_map = _short_label_alias_map(long_labels)
     df = df.assign(run=df['run'].map(alias_map).fillna(df['run']))
     fig, axes = plt.subplots(
@@ -918,18 +1015,39 @@ def _plot_run_metric_distributions(
     return artifacts
 
 
-def _single_run_instance_core_rows(run_path: str, label: str) -> pd.DataFrame:
+def _single_run_instance_core_rows(
+    run_path: str,
+    label: str,
+    *,
+    component: dict[str, Any] | None = None,
+) -> pd.DataFrame:
     """Per-(sample, core-metric) score rows for a single run.
 
     Stage-4: reads from the normalized layer's :class:`InstanceRecord`
     instead of HELM's joined per-instance stats table.
     """
-    nrun = _load_normalized(run_path)
+    nrun = _load_component_run(component) if component is not None else _load_normalized(run_path)
     rows = [
         {"run": label, **rec}
         for rec in ncompare.instance_core_score_records(nrun)
     ]
     return pd.DataFrame(rows)
+
+
+def _normalize_plot_run_specs(
+    run_specs: list[tuple[str, str] | tuple[str, str, dict[str, Any] | None]],
+) -> list[tuple[str, str, dict[str, Any] | None]]:
+    normalized = []
+    for item in run_specs:
+        if len(item) == 2:
+            run_path, label = item
+            component = None
+        elif len(item) == 3:
+            run_path, label, component = item
+        else:
+            raise ValueError(f'Expected 2- or 3-tuples in run_specs, got {item!r}')
+        normalized.append((run_path, label, component))
+    return normalized
 
 
 def _plot_three_run_metric_distributions(
@@ -1167,9 +1285,11 @@ def _plot_single_pair_summary(
     fig, axes = plt.subplots(1, 2, figsize=(18, 7.5), constrained_layout=True)
     quantiles = pair['instance_level']['overall_quantiles']['abs_delta']
     labels = ['p50', 'p90', 'p95', 'p99', 'max']
-    axes[0].plot(range(len(labels)), [quantiles[k] for k in labels], marker='o', color='#4C72B0')
+    abs_delta_values = [quantiles[k] for k in labels]
+    axes[0].plot(range(len(labels)), abs_delta_values, marker='o', color='#4C72B0')
     axes[0].set_xticks(range(len(labels)), labels)
     axes[0].set_yscale('symlog', linthresh=1e-12)
+    _apply_abs_delta_ylim_hint(axes[0], _pair_metric_domain(pair), abs_delta_values)
     axes[0].set_title('Official vs Local Instance-Level Delta Quantiles')
     axes[0].set_xlabel('Quantile')
     axes[0].set_ylabel('Absolute Difference in Core Metric Value')
@@ -1184,6 +1304,7 @@ def _plot_single_pair_summary(
         fontsize=15,
         plot_layout=plot_layout,
     )
+    print(f'plot_layout={plot_layout}')
     fig_fpath = fig_dpath / f'core_metric_report_{stamp}.png'
     fig.savefig(fig_fpath, dpi=180)
     plt.close(fig)
@@ -1618,6 +1739,21 @@ def main(argv: list[str] | None = None) -> None:
         ),
     )
     parser.add_argument(
+        '--plot_target',
+        choices=sorted(_PLOT_TARGETS),
+        default='all',
+        help=(
+            'When redrawing plots, render only this plot family. '
+            'Use all to refresh every plot artifact.'
+        ),
+    )
+    parser.add_argument(
+        '--plot-target',
+        dest='plot_target',
+        choices=sorted(_PLOT_TARGETS),
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
         '--plot_suptitle_y',
         type=float,
         default=None,
@@ -1662,8 +1798,39 @@ def main(argv: list[str] | None = None) -> None:
         type=float,
         help=argparse.SUPPRESS,
     )
+    parser.add_argument(
+        '--plot_constrained_w_pad',
+        type=float,
+        default=None,
+        help=(
+            'Optional constrained-layout horizontal padding in inches. '
+            'Useful when y-axis labels, legends, or side-by-side panels crowd each other.'
+        ),
+    )
+    parser.add_argument(
+        '--plot-constrained-w-pad',
+        dest='plot_constrained_w_pad',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        '--plot_constrained_wspace',
+        type=float,
+        default=None,
+        help=(
+            'Optional constrained-layout horizontal spacing between subplot groups. '
+            'Use with --plot_constrained_w_pad when side-by-side panels are too tight.'
+        ),
+    )
+    parser.add_argument(
+        '--plot-constrained-wspace',
+        dest='plot_constrained_wspace',
+        type=float,
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args(argv)
     plot_layout = _plot_layout_from_cli(args)
+    plot_target = args.plot_target
 
     thresholds = [0.0, 1e-12, 1e-9, 1e-6, 1e-4, 1e-3, 1e-2, 2e-2, 5e-2, 1e-1, 2.5e-1, 5e-1, 1.0]
     report_dpath = Path(args.report_dpath).expanduser().resolve()
@@ -1766,7 +1933,8 @@ def main(argv: list[str] | None = None) -> None:
     if official_vs_local is None:
         raise SystemExit('No enabled comparisons were available to render a core metric report')
 
-    if len(pairs) == 1:
+    render_core_metric_report = (not args.plots_only) or _wants_plot(plot_target, 'core_metric_report')
+    if render_core_metric_report and len(pairs) == 1:
         fig_fpath = _plot_single_pair_summary(
             history_dpath,
             stamp,
@@ -1774,7 +1942,7 @@ def main(argv: list[str] | None = None) -> None:
             run_spec_name,
             plot_layout=plot_layout,
         )
-    else:
+    elif render_core_metric_report:
         fig_fpath = history_dpath / f'core_metric_report_{stamp}.png'
         extra_pair = _load_optional_cross_machine_pair(report_dpath)
         paper_labels = load_paper_label_manager(style='paper_short')
@@ -1815,9 +1983,11 @@ def main(argv: list[str] | None = None) -> None:
         )
         fig.savefig(fig_fpath, dpi=180)
         plt.close(fig)
+    else:
+        fig_fpath = None
 
     render_pairwise = args.render_heavy_pairwise_plots
-    if render_pairwise:
+    if render_pairwise and _wants_plot(plot_target, 'core_metric_distributions'):
         dist_fig_fpath = _plot_pair_metric_distributions(
             history_dpath,
             stamp,
@@ -1825,7 +1995,19 @@ def main(argv: list[str] | None = None) -> None:
             run_spec_name,
             plot_layout=plot_layout,
         )
-        run_specs = [(component['run_path'], component['display_name']) for component in components]
+    else:
+        dist_fig_fpath = None
+    if render_pairwise and (
+        _wants_plot(plot_target, 'core_metric_overlay_distributions')
+        or _wants_plot(plot_target, 'core_metric_ecdfs')
+    ):
+        run_specs = [
+            (component['run_path'], component['display_name'], component)
+            for component in components
+        ]
+    else:
+        run_specs = []
+    if render_pairwise and _wants_plot(plot_target, 'core_metric_overlay_distributions'):
         overlay_dist_artifacts = _plot_run_metric_distributions(
             history_dpath,
             stamp,
@@ -1836,6 +2018,9 @@ def main(argv: list[str] | None = None) -> None:
             subtitle='Each series comes from a selected report component declared in the components manifest.',
             plot_layout=plot_layout,
         )
+    else:
+        overlay_dist_artifacts = None
+    if render_pairwise and _wants_plot(plot_target, 'core_metric_ecdfs'):
         ecdf_artifacts = _plot_run_metric_distributions(
             history_dpath,
             stamp,
@@ -1847,6 +2032,9 @@ def main(argv: list[str] | None = None) -> None:
             ecdf=True,
             plot_layout=plot_layout,
         )
+    else:
+        ecdf_artifacts = None
+    if render_pairwise and _wants_plot(plot_target, 'core_metric_per_metric_agreement'):
         per_metric_agree_fpath = _plot_per_metric_agreement(
             history_dpath,
             stamp,
@@ -1856,9 +2044,6 @@ def main(argv: list[str] | None = None) -> None:
             plot_layout=plot_layout,
         )
     else:
-        dist_fig_fpath = None
-        overlay_dist_artifacts = None
-        ecdf_artifacts = None
         per_metric_agree_fpath = None
     overlay_dist_fpath = (overlay_dist_artifacts or {}).get('plot') if overlay_dist_artifacts else None
     overlay_dist_legend_png = (overlay_dist_artifacts or {}).get('legend_png') if overlay_dist_artifacts else None
@@ -1885,7 +2070,9 @@ def main(argv: list[str] | None = None) -> None:
     # aliases — the JSON/text/management/warnings/runlevel artifacts and their
     # latest aliases are intentionally left untouched so the existing canonical
     # report stays consistent while we iterate on plot styling.
-    plot_latest_map: dict[Path, str] = {fig_fpath: 'core_metric_report.latest.png'}
+    plot_latest_map: dict[Path, str] = {}
+    if fig_fpath is not None:
+        plot_latest_map[fig_fpath] = 'core_metric_report.latest.png'
     if dist_fig_fpath is not None:
         plot_latest_map[dist_fig_fpath] = 'core_metric_distributions.latest.png'
     if overlay_dist_fpath is not None:
@@ -1951,7 +2138,8 @@ def main(argv: list[str] | None = None) -> None:
         logger.info(f'Wrote core metric management summary: {rich_link(mgmt_fpath)}')
         logger.info(f'Wrote core metric warnings json: {rich_link(warnings_json_fpath)}')
         logger.info(f'Wrote core metric warnings text: {rich_link(warnings_txt_fpath)}')
-    logger.info(f'Wrote core metric plot: {rich_link(fig_fpath)}')
+    if fig_fpath is not None:
+        logger.info(f'Wrote core metric plot: {rich_link(fig_fpath)}')
     if dist_fig_fpath is not None:
         logger.info(f'Wrote core metric distributions: {rich_link(dist_fig_fpath)}')
     if overlay_dist_fpath is not None:

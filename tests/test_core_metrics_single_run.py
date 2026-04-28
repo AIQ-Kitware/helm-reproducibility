@@ -27,10 +27,17 @@ def test_plot_layout_controls_suptitle_spacing():
         suptitle_y=1.04,
         constrained_h_pad=0.25,
         constrained_hspace=0.18,
+        constrained_w_pad=0.09,
+        constrained_wspace=0.07,
     )
     core_metrics._set_suptitle(FakeFigure(), "Demo", fontsize=13, plot_layout=layout)
 
-    assert calls["pads"] == {"h_pad": 0.25, "hspace": 0.18}
+    assert calls["pads"] == {
+        "h_pad": 0.25,
+        "hspace": 0.18,
+        "w_pad": 0.09,
+        "wspace": 0.07,
+    }
     assert calls["suptitle"] == ("Demo", {"fontsize": 13, "y": 1.04})
 
 
@@ -40,6 +47,45 @@ def test_plot_layout_defaults_are_code_level_controls():
     assert default.suptitle_y == 0.995
     assert default.constrained_h_pad == 0.40
     assert default.constrained_hspace == 0.42
+    assert default.constrained_w_pad == 0.08
+    assert default.constrained_wspace == 0.05
+
+
+def test_metric_domain_helper_is_conservative():
+    assert core_metrics._metric_domain("exact_match") == (0.0, 1.0)
+    assert core_metrics._metric_domain("unknown_metric") is None
+
+
+def test_axis_hints_apply_only_for_known_safe_domains():
+    class FakeAxis:
+        def __init__(self):
+            self.xlim = None
+            self.ylim = None
+
+        def set_xlim(self, lower, upper):
+            self.xlim = (lower, upper)
+
+        def set_ylim(self, lower, upper):
+            self.ylim = (lower, upper)
+
+    known = {"core_metrics": ["exact_match"]}
+    mixed = {"core_metrics": ["exact_match", "unknown_metric"]}
+
+    x_axis = FakeAxis()
+    core_metrics._apply_xlim_hint(
+        x_axis,
+        core_metrics._pair_metric_domain(known),
+        [0.0, 1e-2, 1.0],
+    )
+    assert x_axis.xlim == (0.0, 1.0)
+
+    y_axis = FakeAxis()
+    core_metrics._apply_abs_delta_ylim_hint(
+        y_axis,
+        core_metrics._pair_metric_domain(mixed),
+        [0.0, 0.5],
+    )
+    assert y_axis.ylim is None
 
 
 def test_single_run_instance_rows_honor_manifest_component(monkeypatch):
@@ -307,6 +353,23 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     }
     pre_redraw_ecdf = (report_dpath / "core_metric_ecdfs.latest.png").resolve()
 
+    with monkeypatch.context() as m:
+        def fail_heavy_plot(*args, **kwargs):
+            raise AssertionError("--plot_target core_metric_report must not render heavy plots")
+
+        m.setattr(core_metrics, "_plot_pair_metric_distributions", fail_heavy_plot)
+        m.setattr(core_metrics, "_plot_run_metric_distributions", fail_heavy_plot)
+        m.setattr(core_metrics, "_plot_per_metric_agreement", fail_heavy_plot)
+        core_metrics.main(
+            base_argv + [
+                "--render-heavy-pairwise-plots",
+                "--plots-only",
+                "--plot_target", "core_metric_report",
+            ]
+        )
+
+    assert (report_dpath / "core_metric_ecdfs.latest.png").resolve() == pre_redraw_ecdf
+
     # --plots-only must refresh plot symlinks but leave canonical artifacts
     # exactly as they were. Fast iteration on plot styling should not churn
     # the JSON/text/management/warnings/runlevel surface.
@@ -317,6 +380,8 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
             "--plot_suptitle_y", "1.03",
             "--plot_constrained_h_pad", "0.25",
             "--plot_constrained_hspace", "0.16",
+            "--plot_constrained_w_pad", "0.09",
+            "--plot_constrained_wspace", "0.07",
         ]
     )
 
