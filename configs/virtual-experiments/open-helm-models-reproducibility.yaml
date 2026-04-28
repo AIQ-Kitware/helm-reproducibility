@@ -1,0 +1,41 @@
+schema_version: 1
+name: open-helm-models-reproducibility
+description: >
+  Cross-section of open-weight models with local audit reproductions and
+  matching public HELM rows. Five model families — Pythia (2.8b, 6.9b),
+  Vicuna 7b v1.3, Qwen 2.5 7b instruct, and OpenAI gpt-oss-20b — across
+  every benchmark for which both a local repro and a public HELM row exist
+  in the current indexes. This is the "how reproducible are the open HELM
+  models" case study target; the underlying overlap inventory is documented
+  alongside the manifest.
+
+scope:
+  # Five open-weight model families. The regex form matches both pythia
+  # variants in one pattern; the others are single literals dressed as
+  # regex so the shape stays uniform.
+  models:
+    - "regex:^eleutherai/pythia-(2\\.8b-v0|6\\.9b)$"
+    - "regex:^lmsys/vicuna-7b-v1\\.3$"
+    - "regex:^qwen/qwen2\\.5-7b-instruct-turbo$"
+    - "regex:^openai/gpt-oss-20b$"
+  # benchmarks: deliberately unset. Every benchmark we have a local
+  # reproduction for is in scope; the include_experiments below
+  # implicitly bounds the benchmark axis to whatever was actually run.
+
+sources:
+  - kind: audit_index
+    fpath: /data/crfm-helm-audit-store/indexes/audit_results_index.latest.csv
+    # Empty include_experiments = include all 25 audit experiments. The
+    # manifest scope (model regex) does the narrowing.
+
+  - kind: official_public_index
+    fpath: /data/crfm-helm-audit-store/indexes/official_public_index.latest.csv
+    pre_filter:
+      kind: helm_stage1
+      inventory_fpath: /data/crfm-helm-audit-store/analysis/filter_inventory.json
+
+  - kind: external_eee
+    components: []
+
+output:
+  root: /data/crfm-helm-audit-store/virtual-experiments/open-helm-models-reproducibility
