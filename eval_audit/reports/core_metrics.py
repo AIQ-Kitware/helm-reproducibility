@@ -23,7 +23,7 @@ from eval_audit.helm.diff import HelmRunDiff
 from eval_audit.helm import metrics as helm_metrics
 from eval_audit.helm.hashers import stable_hash36
 from eval_audit.indexing.schema import extract_run_spec_fields
-from eval_audit.infra.fs_publish import safe_unlink
+from eval_audit.infra.fs_publish import safe_unlink, write_latest_alias
 from eval_audit.normalized import (
     NormalizedRun,
     NormalizedRunRef,
@@ -1733,14 +1733,13 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
 
 
 def _write_latest_alias(src: Path | None, latest_root: Path, latest_name: str) -> Path | None:
+    """Thin wrapper around eval_audit.infra.fs_publish.write_latest_alias that
+    tolerates ``src is None`` (skip silently). After the history retirement on
+    2026-04-28 the global helper renames stamped intermediates onto
+    ``*.latest.*`` in place, which is what we want here too."""
     if src is None:
         return None
-    latest_fpath = latest_root / latest_name
-    if latest_fpath.exists() or latest_fpath.is_symlink():
-        latest_fpath.unlink()
-    rel_src = os.path.relpath(src, start=latest_fpath.parent)
-    os.symlink(rel_src, latest_fpath)
-    return latest_fpath
+    return write_latest_alias(src, latest_root, latest_name)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -1866,8 +1865,10 @@ def main(argv: list[str] | None = None) -> None:
     report_dpath = Path(args.report_dpath).expanduser().resolve()
     report_dpath.mkdir(parents=True, exist_ok=True)
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
-    history_dpath = report_dpath / '.history' / stamp[:8]
-    history_dpath.mkdir(parents=True, exist_ok=True)
+    # History layer retired 2026-04-28: write stamped intermediates next to
+    # the visible *.latest.* targets and let write_latest_alias rename them
+    # in place. No .history/ subdir is created.
+    history_dpath = report_dpath
     (
         components_manifest_fpath,
         components_manifest,

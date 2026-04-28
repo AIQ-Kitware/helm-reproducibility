@@ -961,9 +961,11 @@ def write_official_public_index(
     if timestamp is None:
         timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
 
+    from eval_audit.infra.fs_publish import write_latest_alias
+
     out_dpath.mkdir(parents=True, exist_ok=True)
     ts_fpath = out_dpath / f'official_public_index_{timestamp}.csv'
-    latest_fpath = out_dpath / 'official_public_index.latest.csv'
+    latest_name = 'official_public_index.latest.csv'
 
     df = pd.DataFrame(rows)
     for col in OFFICIAL_COMPONENT_COLUMNS:
@@ -972,15 +974,12 @@ def write_official_public_index(
     df = df[OFFICIAL_COMPONENT_COLUMNS]
     df.to_csv(ts_fpath, index=False)
 
-    if latest_fpath.is_symlink() or latest_fpath.exists():
-        latest_fpath.unlink()
-    try:
-        latest_fpath.symlink_to(ts_fpath.name)
-    except OSError:
-        import shutil
-        shutil.copy2(ts_fpath, latest_fpath)
-
-    return ts_fpath, latest_fpath
+    # write_latest_alias renames the stamped intermediate onto the visible
+    # *.latest.csv (history layer retired 2026-04-28). The first return value
+    # of this function used to be the stamped path; after the rename it
+    # equals the latest path.
+    latest_fpath = write_latest_alias(ts_fpath, out_dpath, latest_name)
+    return latest_fpath, latest_fpath
 
 
 __cli__ = CompileHelmReproListConfig

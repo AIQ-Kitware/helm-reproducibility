@@ -39,8 +39,9 @@ def write_pair_samples(
     report_dpath = Path(report_dpath).expanduser().resolve()
     report_dpath.mkdir(parents=True, exist_ok=True)
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
-    history_dpath = report_dpath / '.history' / stamp[:8]
-    history_dpath.mkdir(parents=True, exist_ok=True)
+    # History layer retired 2026-04-28; stamped intermediate goes in the
+    # visible dir, gets renamed onto *.latest.* by write_latest_alias.
+    history_dpath = report_dpath
 
     diff = HelmRunDiff(
         helm_view_from_path(run_a, source_kind=SourceKind.OFFICIAL),

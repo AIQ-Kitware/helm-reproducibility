@@ -415,7 +415,9 @@ def main(argv: list[str] | None = None) -> None:
         cross_machine_rows.append(row)
 
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
-    history_dpath = out_dpath / '.history' / stamp[:8]
+    # History layer retired 2026-04-28; write stamped intermediates next to
+    # the visible *.latest.* targets.
+    history_dpath = out_dpath
     history_dpath.mkdir(parents=True, exist_ok=True)
 
     table = pd.DataFrame(summary_rows)

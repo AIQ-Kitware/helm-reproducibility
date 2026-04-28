@@ -16,6 +16,7 @@ from typing import Any
 import pandas as pd
 
 from eval_audit.infra.api import default_report_root
+from eval_audit.infra.fs_publish import write_latest_alias
 from eval_audit.reports.core_packet_summary import (
     find_report_pair,
     load_core_report_packet,
@@ -67,11 +68,9 @@ def _slugify(text: str) -> str:
 
 
 def _write_latest_alias(src: Path, latest_root: Path, latest_name: str) -> None:
-    latest_fpath = latest_root / latest_name
-    if latest_fpath.exists() or latest_fpath.is_symlink():
-        latest_fpath.unlink()
-    rel_src = os.path.relpath(src, start=latest_root)
-    os.symlink(rel_src, latest_fpath)
+    """Delegate to eval_audit.infra.fs_publish.write_latest_alias so the
+    history-retired rename-or-symlink rule is applied consistently."""
+    write_latest_alias(src, latest_root, latest_name)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -127,7 +126,9 @@ def main(argv: list[str] | None = None) -> None:
 
     table = pd.DataFrame(rows).sort_values(['assessment_label', 'run_spec_name'], na_position='last')
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
-    history_dpath = out_dpath / '.history' / stamp[:8]
+    # History layer retired 2026-04-28; stamped intermediate goes in the
+    # visible dir.
+    history_dpath = out_dpath
     history_dpath.mkdir(parents=True, exist_ok=True)
 
     json_fpath = history_dpath / f'overall_reproducibility_summary_{stamp}.json'

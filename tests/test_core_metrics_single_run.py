@@ -337,10 +337,13 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     ]:
         assert (report_dpath / name).exists(), f"sidecar label legend missing: {name}"
 
-    # Snapshot the canonical (non-plot) latest-alias targets before the
-    # plots-only redraw so we can verify they are not modified.
+    # Snapshot canonical (non-plot) latest-alias content + mtime before the
+    # plots-only redraw so we can verify they are not modified. After the
+    # history retirement (2026-04-28) the *.latest.* paths are the actual
+    # files (not symlinks into .history/), so the right "did this change?"
+    # signal is mtime, not symlink target divergence.
     pre_redraw_canonical = {
-        name: (report_dpath / name).resolve()
+        name: (report_dpath / name).stat().st_mtime_ns
         for name in [
             "core_metric_report.latest.json",
             "core_metric_report.latest.txt",
@@ -351,7 +354,7 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
         ]
         if (report_dpath / name).exists()
     }
-    pre_redraw_ecdf = (report_dpath / "core_metric_ecdfs.latest.png").resolve()
+    pre_redraw_ecdf_mtime = (report_dpath / "core_metric_ecdfs.latest.png").stat().st_mtime_ns
 
     with monkeypatch.context() as m:
         def fail_heavy_plot(*args, **kwargs):
@@ -368,11 +371,13 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
             ]
         )
 
-    assert (report_dpath / "core_metric_ecdfs.latest.png").resolve() == pre_redraw_ecdf
+    # --plot_target=core_metric_report must NOT touch the ecdfs plot.
+    assert (report_dpath / "core_metric_ecdfs.latest.png").stat().st_mtime_ns == pre_redraw_ecdf_mtime
 
-    # --plots-only must refresh plot symlinks but leave canonical artifacts
-    # exactly as they were. Fast iteration on plot styling should not churn
-    # the JSON/text/management/warnings/runlevel surface.
+    # --plots-only (no --plot_target) must refresh plot files but leave
+    # canonical (non-plot) artifacts exactly as they were. Fast iteration on
+    # plot styling should not churn the JSON/text/management/warnings/runlevel
+    # surface.
     core_metrics.main(
         base_argv + [
             "--render-heavy-pairwise-plots",
@@ -385,12 +390,12 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
         ]
     )
 
-    for name, prior_target in pre_redraw_canonical.items():
-        assert (report_dpath / name).resolve() == prior_target, (
-            f"--plots-only must not modify canonical alias: {name}"
+    for name, prior_mtime in pre_redraw_canonical.items():
+        assert (report_dpath / name).stat().st_mtime_ns == prior_mtime, (
+            f"--plots-only must not modify canonical artifact: {name}"
         )
-    new_ecdf = (report_dpath / "core_metric_ecdfs.latest.png").resolve()
-    assert new_ecdf != pre_redraw_ecdf, "--plots-only must refresh plot symlinks"
+    new_ecdf_mtime = (report_dpath / "core_metric_ecdfs.latest.png").stat().st_mtime_ns
+    assert new_ecdf_mtime != pre_redraw_ecdf_mtime, "--plots-only must rewrite the ecdfs plot"
     assert (report_dpath / "core_metric_ecdfs_label_legend.latest.png").exists()
 
 
