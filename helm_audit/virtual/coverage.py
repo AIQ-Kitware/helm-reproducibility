@@ -35,6 +35,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
+from helm_audit.helm.hashers import stable_hash36
 from helm_audit.infra.fs_publish import (
     safe_unlink,
     stamped_history_dir,
@@ -86,6 +87,24 @@ def _row_dim(row: dict[str, Any], dim: str, *, source_kind: str) -> str:
 
 def _logical_run_key(row: dict[str, Any]) -> str:
     return str(row.get("logical_run_key") or row.get("run_entry") or row.get("run_name") or "").strip()
+
+
+def _short_alias_map(values: list[str], *, prefix: str = "v") -> dict[str, str]:
+    """Build a deterministic short alias for each long label.
+
+    Same shape as the ECDF-legend aliasing used in core_metrics: same
+    label always maps to the same alias; no two distinct labels collide.
+    Hash length auto-extends if the default 4 chars happens to collide.
+    """
+    unique = sorted(set(values))
+    if not unique:
+        return {}
+    for hash_len in range(4, 33):
+        candidate = {label: f"{prefix}{stable_hash36(label)[:hash_len]}" for label in unique}
+        if len(set(candidate.values())) == len(candidate):
+            return candidate
+    # Pathological fall-through (sha256 base36 collisions are astronomically rare).
+    return {label: f"{prefix}{stable_hash36(label)}_{i}" for i, label in enumerate(unique)}
 
 
 # ---------------------------------------------------------------------------
