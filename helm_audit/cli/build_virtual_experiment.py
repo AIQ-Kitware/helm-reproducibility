@@ -28,6 +28,10 @@ from helm_audit.virtual import (
     write_synthesized_indexes,
 )
 from helm_audit.virtual.compose import provenance_payload
+from helm_audit.virtual.coverage import (
+    compute_coverage,
+    write_coverage_artifacts,
+)
 from helm_audit.workflows import analyze_experiment
 
 
@@ -121,6 +125,32 @@ def main(argv: list[str] | None = None) -> None:
 
     logger.info(f"Running analyze_experiment over the virtual slice into {rich_link(analysis_dpath)}")
     analyze_experiment.main(analyze_argv)
+
+    # Stage-B coverage funnel: scope (target) -> reproduced -> completed -> analyzed.
+    # Computed after analyze_experiment so we can populate the analyzed-stage
+    # waist from the per-packet manifests on disk. Stage-A (universe -> scope)
+    # is intentionally left null in the JSON for now and will be filled in by
+    # the Stage-3 source-pre-filter pass.
+    coverage_dpath = output_root / "reports" / "scoped_funnel"
+    coverage = compute_coverage(
+        name=manifest.name,
+        description=manifest.description,
+        target_rows=result.official_rows,
+        local_rows=result.local_rows,
+        analysis_root=analysis_dpath,
+    )
+    coverage_paths = write_coverage_artifacts(coverage, out_dpath=coverage_dpath)
+    logger.info(
+        f"Coverage funnel: target={coverage.n_target} "
+        f"reproduced(logical)={coverage.n_reproduced_logical} "
+        f"completed={coverage.n_completed} analyzed={coverage.n_analyzed}"
+    )
+    logger.info(f"Wrote coverage funnel summary: {rich_link(coverage_paths['summary_txt'])}")
+    logger.info(f"Wrote coverage funnel json: {rich_link(coverage_paths['json'])}")
+    if coverage.missing:
+        logger.info(
+            f"Missing targets: {len(coverage.missing)} (see {rich_link(coverage_paths['missing_csv'])})"
+        )
 
 
 if __name__ == "__main__":
