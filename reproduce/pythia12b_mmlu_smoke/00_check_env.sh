@@ -38,9 +38,12 @@ df -h "$RESULTS_ROOT" "$HF_CACHE_DIR" | sed 's/^/    /'
 
 echo
 echo "== helm-run =="
-which helm-run >/dev/null 2>&1 \
-  && helm-run --version 2>&1 | head -1 \
-  || echo "WARN: helm-run not on PATH; eval-audit-run will fail. uv pip install 'crfm-helm[all]'."
+if command -v helm-run >/dev/null 2>&1; then
+  echo "helm-run found at: $(command -v helm-run)"
+  python -c "import helm; print('helm package:', helm.__file__)" || true
+else
+  echo "WARN: helm-run not on PATH; eval-audit-run will fail. uv pip install 'crfm-helm[all]'."
+fi
 
 echo
 echo "OK: preflight passed."
