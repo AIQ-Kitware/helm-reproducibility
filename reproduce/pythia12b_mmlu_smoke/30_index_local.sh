@@ -22,7 +22,9 @@ find "$EXP_DIR" -maxdepth 4 -name 'run_spec.json' | head -5
 
 echo
 echo "== eval-audit-index =="
-eval-audit-index --output-dir "$STORE_ROOT/indexes"
+eval-audit-index \
+  --results-root "$RESULTS_ROOT" \
+  --report-dpath "$STORE_ROOT/indexes"
 
 echo
 echo "OK: index refreshed. Latest CSV: $STORE_ROOT/indexes/audit_results_index.latest.csv"

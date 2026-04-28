@@ -81,7 +81,8 @@ analysis surface:
 
    ```bash
    eval-audit-index \
-     --output-dir /data/crfm-helm-audit-store/indexes
+     --results-root /data/crfm-helm-audit \
+     --report-dpath /data/crfm-helm-audit-store/indexes
    ```
 
 2. Add the experiment to the pythia-mmlu-stress virtual-experiment scope.
