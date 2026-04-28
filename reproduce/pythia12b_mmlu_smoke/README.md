@@ -1,0 +1,137 @@
+# pythia-12b-v0 × MMLU smoke
+
+A single-run smoke test that exercises the **execution path** end-to-end on
+`aiq-gpu`. Goal: produce a local audit run for `eleutherai/pythia-12b-v0` on
+one MMLU subject so it can be folded into the `pythia-mmlu-stress` virtual
+experiment alongside the existing `pythia-6.9b` results.
+
+This also doubles as a real-world test of the dormant `eval-audit-run` →
+`kwdagger` → `magnet` → `helm-run` execution stack, which has not been
+exercised in months. **Treat the result as a verification that those code
+paths still work**, not as production output.
+
+## Scope (one run)
+
+- Model: `eleutherai/pythia-12b-v0`
+- Benchmark: `mmlu:subject=abstract_algebra,method=multiple_choice_joint,data_augmentation=canonical`
+  (override via `HELM_MMLU_SUBJECT`)
+- Suite version target: matches public HELM v0.2.4 / v0.3.0 rows that already
+  live at `/data/crfm-helm-public/classic/benchmark_output/runs/v0.2.4/...`
+- `max_eval_instances`: 1000 (matches the public reference; override via
+  `MAX_EVAL_INSTANCES`)
+
+## Hardware assumptions (aiq-gpu)
+
+- A single GPU with **≥ 28 GB free VRAM** (pythia-12b at fp16 is ~24 GB plus
+  KV cache; pythia-12b at bf16 is the same). 80 GB H100/A100 is comfortable;
+  24 GB cards (3090, A10) are **not** enough — the model won't load.
+- Disk: ~30 GB free under `$HOME/.cache/huggingface/` for the first download.
+- Network: outbound HTTPS to `huggingface.co` for the initial weight pull.
+- Python: same `eval_audit` environment used here, with `crfm-helm` and
+  `magnet` installed (`uv pip install -e .` in the repo root).
+
+## Run order (on aiq-gpu)
+
+```bash
+cd /home/joncrall/code/helm_audit       # or wherever the repo lives on aiq-gpu
+
+bash reproduce/pythia12b_mmlu_smoke/00_check_env.sh
+bash reproduce/pythia12b_mmlu_smoke/10_make_manifest.sh
+bash reproduce/pythia12b_mmlu_smoke/20_run.sh        # this is the long step
+bash reproduce/pythia12b_mmlu_smoke/30_index_local.sh
+```
+
+Each script is short, set -euo, and prints what it's about to do. Step 20
+is the only long one — expect minutes-to-hours depending on the GPU.
+
+If `20_run.sh` fails because the dormant kwdagger path is broken, see the
+**Fallback** section below for a direct `helm-run` invocation.
+
+## Rsync results back
+
+After `30_index_local.sh` finishes on aiq-gpu, the artifacts to rsync are:
+
+```bash
+# from the analysis machine (this one):
+rsync --exclude scenarios --exclude cache -avPR \
+  aiq-gpu:/data/./crfm-helm-audit/audit-pythia-12b-mmlu-smoke /data
+rsync -avPR aiq-gpu:/data/./crfm-helm-audit-store/indexes /data
+```
+
+Path layout produced on aiq-gpu (and mirrored to this machine after rsync):
+
+```
+/data/crfm-helm-audit/audit-pythia-12b-mmlu-smoke/
+└── helm/helm_id_<hash>/
+    └── benchmark_output/runs/audit-pythia-12b-mmlu-smoke/
+        └── mmlu:subject=abstract_algebra,...,model=eleutherai_pythia-12b-v0,data_augmentation=canonical/
+            ├── run_spec.json
+            ├── per_instance_stats.json
+            ├── stats.json
+            └── ...
+```
+
+## Post-rsync steps (on the analysis machine)
+
+After the rsync lands, the new run still needs to be folded into the
+analysis surface:
+
+1. Refresh the local audit-results index so the new `audit-pythia-12b-mmlu-smoke`
+   experiment is picked up:
+
+   ```bash
+   eval-audit-index \
+     --output-dir /data/crfm-helm-audit-store/indexes
+   ```
+
+2. Add the experiment to the pythia-mmlu-stress virtual-experiment scope.
+   Edit [`configs/virtual-experiments/pythia-mmlu-stress.yaml`](../../configs/virtual-experiments/pythia-mmlu-stress.yaml)
+   and add `audit-pythia-12b-mmlu-smoke` to the `include_experiments:` list
+   under the `audit_index` source.
+
+3. Recompose and rebuild the report:
+
+   ```bash
+   ./reproduce/pythia_mmlu_stress/compose.sh
+   ./reproduce/pythia_mmlu_stress/build_summary.sh
+   ```
+
+   The 12b row should now appear in the per-subject + per-model tables and
+   one of the missing-targets entries should disappear from
+   [`reports/scoped_funnel/missing_targets.latest.csv`](../../../data/crfm-helm-audit-store/virtual-experiments/pythia-mmlu-stress/reports/scoped_funnel/missing_targets.latest.csv).
+
+## Fallback: direct `helm-run` (skip the eval-audit/kwdagger layer)
+
+If `20_run.sh` fails — likely if the dormant kwdagger or magnet integration
+has bit-rotted — bypass it and invoke `helm-run` directly. This won't write
+the eval-audit experiment provenance, but it produces output at the same
+HELM-shaped path so the indexer + analysis side still pick it up:
+
+```bash
+EXP=audit-pythia-12b-mmlu-smoke
+SUBJECT="${HELM_MMLU_SUBJECT:-abstract_algebra}"
+RUN_DIR=/data/crfm-helm-audit/$EXP/helm/helm_id_manual
+mkdir -p "$RUN_DIR"
+cd "$RUN_DIR"
+helm-run \
+  --run-entries "mmlu:subject=$SUBJECT,method=multiple_choice_joint,model=eleutherai/pythia-12b-v0,data_augmentation=canonical" \
+  --enable-huggingface-models eleutherai/pythia-12b-v0 \
+  --suite "$EXP" \
+  --max-eval-instances "${MAX_EVAL_INSTANCES:-1000}" \
+  --num-threads 1 \
+  --local-path prod_env
+```
+
+That command is canonical HELM usage; if it fails, the failure is in HELM /
+transformers / GPU, not in eval-audit code.
+
+## What this exercise tells us
+
+- If `20_run.sh` succeeds: the `eval-audit-run` → kwdagger → magnet →
+  helm-run chain is still alive end-to-end. The README's `**UNSURE**` flag
+  on the execution path can be downgraded to a confirmed-working note.
+- If `20_run.sh` fails but the fallback direct `helm-run` works: the
+  failure is in the orchestration layer (kwdagger/magnet integration), not
+  in HELM itself, and we have a concrete repro.
+- Either way we get a real reproduction of pythia-12b-v0 on one MMLU
+  subject, which fills a gap in the pythia-mmlu-stress study.
