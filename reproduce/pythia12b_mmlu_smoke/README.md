@@ -128,13 +128,29 @@ from the model alias; no `--enable-huggingface-models` needed.)
 That command is canonical HELM usage; if it fails, the failure is in HELM /
 transformers / GPU, not in eval-audit code.
 
-## What this exercise tells us
+## Result (2026-04-28 first run)
 
-- If `20_run.sh` succeeds: the `eval-audit-run` → kwdagger → magnet →
-  helm-run chain is still alive end-to-end. The README's `**UNSURE**` flag
-  on the execution path can be downgraded to a confirmed-working note.
-- If `20_run.sh` fails but the fallback direct `helm-run` works: the
-  failure is in the orchestration layer (kwdagger/magnet integration), not
-  in HELM itself, and we have a concrete repro.
-- Either way we get a real reproduction of pythia-12b-v0 on one MMLU
-  subject, which fills a gap in the pythia-mmlu-stress study.
+The runbook ran end-to-end on aiq-gpu (4× NVIDIA RTX PRO 6000 Blackwell,
+~98 GB each) through the `eval-audit-run` → `kwdagger` → `magnet` →
+`helm-run` chain, no manual intervention. Two `helm_id_*` directories
+landed under `/data/crfm-helm-audit/audit-pythia-12b-mmlu-smoke/helm/`:
+one successful (`helm_id_52r6fe0fb4po`, with `run_spec.json`,
+`per_instance_stats.json`, `stats.json`, and a `DONE` marker) and one
+truncated/incomplete attempt (`helm_id_nlq7z0by5704`).
+
+After rsync + reindex + recompose against `pythia-mmlu-stress`:
+
+- The 12b run matched both v0.2.4 and v0.3.0 official rows.
+- abs_tol=0 agreement = **1.000** across 888 instances and all 8 metrics.
+- max |Δ| = 0.0; the diagnosis label `deployment_drift` is the
+  category-name for HF-vs-HF reproductions, not a signal of actual drift.
+
+This is the same result as 6.9b on `abstract_algebra` — a clean
+HuggingFaceClient-on-both-sides reproduction with no detectable
+divergence.
+
+**Implication for the wider docs:** the dormant execution path described
+in the top-level README is alive — at least the basic
+HuggingFaceClient + kwdagger + helm-run combination. The vLLM/KubeAI/
+LiteLLM extensions and `eval-audit-make-manifest` remain unverified;
+this run did not exercise those.

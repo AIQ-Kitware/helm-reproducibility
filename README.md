@@ -8,10 +8,12 @@ report bundles.
 The recent (2026 Q1–Q2) line of work has been almost entirely on the
 **analysis side** — composing virtual-experiment slices over already-existing
 audit runs and producing reproducibility reports. The execution side
-(scheduling new local HELM runs through `kwdagger`, launching vLLM/KubeAI
-serving stacks, building manifests from scratch) **has not been exercised in
-months** and is marked **UNSURE / not recently tested** below. Code paths still
-exist; whether they still run end-to-end is unverified.
+(`eval-audit-run` → `kwdagger` → `magnet` → `helm-run`) was confirmed working
+on **2026-04-28** by [`reproduce/pythia12b_mmlu_smoke/`](reproduce/pythia12b_mmlu_smoke/),
+which produced a perfect-agreement local reproduction of pythia-12b-v0 ×
+MMLU on aiq-gpu through the HuggingFace transformers path. The serving-stack
+extensions (vLLM, KubeAI, LiteLLM) and the `eval-audit-make-manifest` path
+have **not** been re-validated; those remain marked **UNSURE** below.
 
 > If you only want the active path, jump to [Analysis runbooks](#analysis-runbooks-actively-maintained).
 
@@ -97,24 +99,36 @@ The HELM-specific gotchas surfaced while building the comparison pipeline are
 catalogued in [`docs/helm-gotchas.md`](docs/helm-gotchas.md) — that file is
 current.
 
-## Execution runbooks (UNSURE — not recently exercised)
+## Execution runbooks
 
-These were the original framing of the project: schedule a local HELM run via
+These are the original framing of the project: schedule a local HELM run via
 `kwdagger`, point HELM at a model deployment (vLLM, KubeAI, LiteLLM, or
-HuggingFace), then compare. The Python and shell code still exists, but
-**none of these scenarios have been exercised since the 2025 vLLM/KubeAI
-work**. Treat them as historical reference, not as supported entry points.
+HuggingFace), then compare. The core chain
+(`eval-audit-run` → `kwdagger` → `magnet` → `helm-run`) was confirmed working
+on **2026-04-28** by the [`pythia12b_mmlu_smoke`](reproduce/pythia12b_mmlu_smoke/)
+runbook on aiq-gpu — pythia-12b-v0 × MMLU abstract_algebra, 1000 instances,
+HELM `huggingface/*` HuggingFaceClient deployment. That run reproduced the
+public HELM v0.2.4/v0.3.0 reference *exactly* (1.000 agreement, max |Δ| = 0.0
+across all 8 metrics). So the basic execution stack is alive.
+
+The other runbooks bring in additional serving stacks (vLLM, LiteLLM, KubeAI)
+and additional scenario-specific assumptions (server URLs, deployment YAML,
+namespace setup) that **have not been re-validated**. Pick one, run it, and
+update its README before claiming it's still good.
 
 | runbook | what it claims to do | status |
 |---|---|---|
+| `reproduce/pythia12b_mmlu_smoke/` | pythia-12b-v0 × abstract_algebra via HF transformers + kwdagger | **WORKING** (2026-04-28) |
+| `reproduce/pythia_mmlu_stress/` | analysis-only pythia × MMLU slice | **WORKING** (analysis) |
+| `reproduce/open_helm_models_reproducibility/` | analysis-only open-weight × benchmark slice | **WORKING** (analysis) |
 | `reproduce/smoke/` | minimal end-to-end sanity run | **UNSURE** |
 | `reproduce/apples/` | apples-to-apples reproduction control | **UNSURE** |
 | `reproduce/historic_grid/` | regenerate a historic public-run manifest grid | **UNSURE** |
 | `reproduce/machine_compare/` | cross-machine indexing + pairwise comparison | **UNSURE** |
-| `reproduce/qwen35_vllm/` | local vLLM smoke for `qwen/qwen3.5-9b` | **UNSURE** |
-| `reproduce/qwen2_72b_vllm/` | vLLM smoke + EWOK historic grid for qwen2-72b | **UNSURE** |
-| `reproduce/gpt_oss_20b_vllm/` | LiteLLM-fronted vLLM batch for gpt-oss-20b | **UNSURE** |
-| `reproduce/small_models_kubeai/` | KubeAI overnight batch (qwen2.5-7b + vicuna-7b) | **UNSURE** |
+| `reproduce/qwen35_vllm/` | local vLLM smoke for `qwen/qwen3.5-9b` | **UNSURE** (vLLM-side) |
+| `reproduce/qwen2_72b_vllm/` | vLLM smoke + EWOK historic grid for qwen2-72b | **UNSURE** (vLLM-side) |
+| `reproduce/gpt_oss_20b_vllm/` | LiteLLM-fronted vLLM batch for gpt-oss-20b | **UNSURE** (vLLM/LiteLLM-side) |
+| `reproduce/small_models_kubeai/` | KubeAI overnight batch (qwen2.5-7b + vicuna-7b) | **UNSURE** (KubeAI-side) |
 | `reproduce/setup/` | one-time host setup scripts | **UNSURE** but harmless |
 
 Re-validating any of these is its own piece of work — the assumptions in
@@ -141,12 +155,19 @@ dormant breakdown:
 - `eval-audit-portfolio-status` — multi-experiment status snapshot
 - `eval-audit-prepare-eee` — prepare EEE artifacts for downstream analysis
 
-**UNSURE (execution-shaped; not recently exercised):**
+**Execution path (verified 2026-04-28 by `pythia12b_mmlu_smoke`):**
 
-- `eval-audit-check-env` — host-environment preflight (probably still works; light)
-- `eval-audit-make-manifest` — generate execution manifests from run-spec selections
+- `eval-audit-check-env` — host-environment preflight (light; works)
 - `eval-audit-run` — preview/execute a kwdagger experiment from a manifest
-  (default is preview; `--run=1` to execute)
+  (default is preview; `--run=1` to execute). End-to-end chain through
+  kwdagger → magnet → helm-run is alive.
+
+**UNSURE:**
+
+- `eval-audit-make-manifest` — `historic` and `preset` subcommands read from
+  `$STORE_ROOT/configs/run_specs.yaml`; not exercised by the recent runbook
+  (which writes its manifest by hand because pythia-12b-v0 was Stage-1
+  filtered out). The two subcommands haven't been touched in months.
 
 `eval-audit-run` was originally the scheduling boundary. It still imports
 cleanly but its kwdagger and HELM-execution side-effects haven't been

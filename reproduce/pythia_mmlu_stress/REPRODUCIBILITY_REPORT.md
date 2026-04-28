@@ -8,17 +8,24 @@ The runbook is `reproduce/pythia_mmlu_stress/`.
 
 ## Headline reproducibility number
 
-> **Across 5 analyzed Pythia 6.9b × MMLU subjects (4,536 instances), local
+> **Across 5 Pythia 6.9b × MMLU subjects (4,536 instances), local
 > reproductions agree with public HELM reports at instance-level agreement
-> rate 0.965 ± 0.023 (95% CI 0.937–1.000) at abs_tol=0.**
+> rate 0.965 ± 0.023 (95% CI 0.937–1.000) at abs_tol=0. The Pythia 12b-v0
+> abstract_algebra smoke (888 instances) reproduces *exactly*
+> (abs_tol=0 agreement = 1.000, max |Δ| = 0.0).**
 
-Every analyzed packet is diagnosed as `deployment_drift`: the local audit
-runs through a vLLM-served Pythia 6.9b, while the public HELM run used the
-HuggingFace API. The drift is bounded — the per-instance score
-distribution has a *median* absolute delta of exactly 0.0 across all 5
-packets. The 3.5% non-agreement rate is concentrated in instances where
-the multiple-choice answer flipped completely (max |Δ| = 1.0 on four of
-five subjects).
+Both the local audit and the public HELM runs go through HELM's built-in
+`huggingface/pythia-*` deployments, which use `HuggingFaceClient`
+(transformers `.generate()` on GPU). No vLLM, no LiteLLM, no API. The
+~3.5% non-agreement on 6.9b is the residual HF-vs-HF flip rate from
+hardware / library / PyTorch-version differences between when the public
+runs were collected (~2023) and when our local runs went (~2025–2026);
+see `docs/helm-gotchas.md` §G7. The flips are full multiple-choice flips
+(max |Δ| = 1.0), so smaller tolerances don't recover them.
+
+The 12b smoke result confirms the same recipe-canonical-clean pythia
+subset reproduces with no drift signal at all on `abstract_algebra` —
+consistent with 6.9b's `abstract_algebra` row (also 1.000 / 0.0).
 
 ## Stage A — context establishment (Universe → Scope)
 
@@ -48,24 +55,31 @@ plus a complementary scope-aware funnel at `reports/scoped_funnel/`:
 | stage                                                               | count | % of target |
 |---------------------------------------------------------------------|------:|------------:|
 | target (in-scope official rows; 5 subjects × 2 models × 2 versions) |    20 |        100% |
-| reproduced (logical-key match against local audit)                  |    10 |         50% |
-| completed (reproduced + run_path on disk)                           |    10 |         50% |
-| analyzed (completed + has core_metric report)                       |    10 |         50% |
+| reproduced (logical-key match against local audit)                  |    12 |         60% |
+| completed (reproduced + run_path on disk)                           |    12 |         60% |
+| analyzed (completed + has core_metric report)                       |    12 |         60% |
 
-The 10/20 split is a model-coverage gap, not a reproduction-quality
+The 12/20 split is a model-coverage gap, not a reproduction-quality
 issue:
 
 - **eleutherai/pythia-6.9b** target rows (10): all reproduced and analyzed.
-- **eleutherai/pythia-12b** target rows (10): never run locally; missing.
+- **eleutherai/pythia-12b-v0** target rows (10): 2 reproduced
+  (`abstract_algebra` × {v0.2.4, v0.3.0}) by the
+  `audit-pythia-12b-mmlu-smoke` run on aiq-gpu, 2026-04-28. The other 8
+  (4 subjects × 2 versions) are still missing locally.
 
-`reports/scoped_funnel/missing_targets.latest.csv` enumerates the 10
-missing pythia-12b rows. Running them is the obvious next step if we
-want full pythia-family coverage.
+`reports/scoped_funnel/missing_targets.latest.csv` enumerates the 8
+remaining missing pythia-12b rows. The smoke run also confirmed that
+the dormant `eval-audit-run` → kwdagger → magnet → helm-run chain
+still works end-to-end; running the other 4 subjects to fill the table
+is now a straightforward expansion.
 
-## Per-subject reproducibility (Pythia 6.9b on the 5 covered MMLU subjects)
+## Per-subject reproducibility
 
 (`abs Δ` columns are absolute per-instance score deltas; pipe chars
 in `|Δ|` would break the table syntax so the heading is spelled out.)
+
+**Pythia 6.9b on the 5 covered MMLU subjects:**
 
 | subject           | instances | agree @ tol=0 | agree @ tol=.001 | agree @ tol=.05 | p95 abs Δ | max abs Δ | diagnosis        |
 |-------------------|----------:|--------------:|-----------------:|----------------:|----------:|----------:|------------------|
@@ -75,6 +89,18 @@ in `|Δ|` would break the table syntax so the heading is spelled out.)
 | econometrics      |     1,008 |        0.9603 |           0.9603 |          0.9603 |    0.0000 |    1.0000 | deployment_drift |
 | us_foreign_policy |       888 |        0.9369 |           0.9369 |          0.9369 |    1.0000 |    1.0000 | deployment_drift |
 
+**Pythia 12b-v0 on the 1 covered MMLU subject (smoke run):**
+
+| subject          | instances | agree @ tol=0 | agree @ tol=.001 | agree @ tol=.05 | p95 abs Δ | max abs Δ | diagnosis        |
+|------------------|----------:|--------------:|-----------------:|----------------:|----------:|----------:|------------------|
+| abstract_algebra |       888 |        1.0000 |           1.0000 |          1.0000 |    0.0000 |    0.0000 | deployment_drift |
+
+The 12b row matches against both the v0.2.4 and v0.3.0 official runs
+(they share a canonical-recipe hash); the table shows the v0.3.0
+comparison. Diagnosis label `deployment_drift` is the *category* used
+for HF-vs-HF reproductions; with `max |Δ| = 0.0` here it's a
+no-op label, not an actual drift signal.
+
 Observations:
 
 - **The agreement curve is flat** in tolerance: no subject's agreement
@@ -82,9 +108,9 @@ Observations:
   disagree do so by *exactly 1.0* (multiple-choice flip), so a
   small-tolerance ablation doesn't recover any. This is consistent with
   deployment_drift on a multiple-choice scorer.
-- **abstract_algebra agrees byte-for-byte** at every tolerance level —
-  the deployment substitution does not flip any instance for this
-  subject. The other four show a 3–6% flip rate.
+- **abstract_algebra agrees byte-for-byte** at every tolerance level for
+  *both* 6.9b and 12b-v0. The other four 6.9b subjects show a 3–6% flip
+  rate; the 12b smoke only covered abstract_algebra so far.
 - **us_foreign_policy is the outlier** at 6.3% flip rate. The p95 |Δ| is
   1.0, meaning the upper 5% of instance-level deltas are full flips. At
   the run-level (8 metrics) this packet's agreement at abs_tol=0.05 is
