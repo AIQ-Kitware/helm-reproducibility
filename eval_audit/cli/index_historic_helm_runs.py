@@ -956,29 +956,31 @@ def write_official_public_index(
 
     Returns (timestamped_fpath, latest_fpath).
     """
+    import io
+
     import pandas as pd
+    import safer
 
     if timestamp is None:
         timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-
-    from eval_audit.infra.fs_publish import write_latest_alias
+    del timestamp  # currently unused; preserved as an arg for callers
 
     out_dpath.mkdir(parents=True, exist_ok=True)
-    ts_fpath = out_dpath / f'official_public_index_{timestamp}.csv'
-    latest_name = 'official_public_index.latest.csv'
+    latest_fpath = out_dpath / 'official_public_index.latest.csv'
 
     df = pd.DataFrame(rows)
     for col in OFFICIAL_COMPONENT_COLUMNS:
         if col not in df.columns:
             df[col] = None
     df = df[OFFICIAL_COMPONENT_COLUMNS]
-    df.to_csv(ts_fpath, index=False)
-
-    # write_latest_alias renames the stamped intermediate onto the visible
-    # *.latest.csv (history layer retired 2026-04-28). The first return value
-    # of this function used to be the stamped path; after the rename it
-    # equals the latest path.
-    latest_fpath = write_latest_alias(ts_fpath, out_dpath, latest_name)
+    # pandas .to_csv accepts a file-like; use safer.open so a crash mid-write
+    # leaves the previous official_public_index.latest.csv intact.
+    buf = io.StringIO()
+    df.to_csv(buf, index=False)
+    with safer.open(latest_fpath, 'w', make_parents=True) as fp:
+        fp.write(buf.getvalue())
+    # Returns (path, path) for backward-compat with callers that expected
+    # (timestamped_fpath, latest_fpath) — both now the same canonical file.
     return latest_fpath, latest_fpath
 
 

@@ -8,7 +8,10 @@ from typing import Any
 
 from loguru import logger
 
-from eval_audit.infra.fs_publish import stamped_history_dir, write_latest_alias
+import datetime as datetime_mod
+import io as _io
+
+from eval_audit.infra.fs_publish import write_text_atomic
 from eval_audit.infra.logging import rich_link, setup_cli_logging
 from eval_audit.normalized.eee_artifacts import (
     default_local_eee_root,
@@ -61,13 +64,14 @@ def _selected_official_rows(
 
 def _write_csv(rows: list[dict[str, Any]], fpath: Path) -> None:
     fieldnames = sorted({key for row in rows for key in row.keys()}) if rows else []
-    with fpath.open("w", newline="") as file:
-        if not fieldnames:
-            file.write("")
-            return
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
+    if not fieldnames:
+        write_text_atomic(fpath, "")
+        return
+    buf = _io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerows(rows)
+    write_text_atomic(fpath, buf.getvalue())
 
 
 def _summary_lines(payload: dict[str, Any]) -> list[str]:
@@ -126,7 +130,7 @@ def main(argv: list[str] | None = None) -> None:
     local_eee_root = Path(args.local_eee_root).expanduser().resolve() if args.local_eee_root else default_local_eee_root()
     out_dpath = Path(args.out_dpath).expanduser().resolve()
     out_dpath.mkdir(parents=True, exist_ok=True)
-    stamp, history_dpath = stamped_history_dir(out_dpath)
+    stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime("%Y%m%dT%H%M%SZ")
 
     local_rows = _selected_local_rows(
         load_index_rows(local_index_fpath),
@@ -202,20 +206,15 @@ def main(argv: list[str] | None = None) -> None:
         "local_rows": prepared_local,
     }
 
-    json_fpath = history_dpath / f"eee_readiness_{stamp}.json"
-    txt_fpath = history_dpath / f"eee_readiness_{stamp}.txt"
-    local_csv_fpath = history_dpath / f"eee_local_rows_{stamp}.csv"
-    official_csv_fpath = history_dpath / f"eee_official_rows_{stamp}.csv"
+    json_fpath = out_dpath / "eee_readiness.latest.json"
+    txt_fpath = out_dpath / "eee_readiness.latest.txt"
+    local_csv_fpath = out_dpath / "eee_local_rows.latest.csv"
+    official_csv_fpath = out_dpath / "eee_official_rows.latest.csv"
 
-    json_fpath.write_text(json.dumps(payload, indent=2) + "\n")
-    txt_fpath.write_text("\n".join(_summary_lines(payload)) + "\n")
+    write_text_atomic(json_fpath, json.dumps(payload, indent=2) + "\n")
+    write_text_atomic(txt_fpath, "\n".join(_summary_lines(payload)) + "\n")
     _write_csv(prepared_local, local_csv_fpath)
     _write_csv(prepared_official, official_csv_fpath)
-
-    write_latest_alias(json_fpath, out_dpath, "eee_readiness.latest.json")
-    write_latest_alias(txt_fpath, out_dpath, "eee_readiness.latest.txt")
-    write_latest_alias(local_csv_fpath, out_dpath, "eee_local_rows.latest.csv")
-    write_latest_alias(official_csv_fpath, out_dpath, "eee_official_rows.latest.csv")
 
     logger.info(f"Wrote EEE readiness json: {rich_link(json_fpath)}")
     logger.info(f"Wrote EEE readiness text: {rich_link(txt_fpath)}")

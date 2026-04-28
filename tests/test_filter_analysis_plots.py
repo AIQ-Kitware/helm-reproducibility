@@ -11,7 +11,6 @@ from eval_audit.reports.filter_analysis import (
     make_reason_breakout_table,
     make_reason_combo_table,
 )
-from eval_audit.infra.fs_publish import history_publish_root
 from eval_audit.utils import sankey_builder
 from eval_audit.utils.sankey import emit_sankey_artifacts
 
@@ -193,10 +192,18 @@ def test_open_access_exclusion_reason_by_model_table_can_filter_text_and_size_ga
 def test_emit_sankey_artifacts_writes_png_and_latest_alias(tmp_path: Path, monkeypatch):
     class FakeFigure:
         def write_html(self, fpath, include_plotlyjs="cdn"):
-            Path(fpath).write_text("<html></html>")
+            # Real plotly accepts a path or a file-like; emit_sankey_artifacts
+            # now passes a safer file-like (with .write()) rather than a path.
+            if hasattr(fpath, "write"):
+                fpath.write("<html></html>")
+            else:
+                Path(fpath).write_text("<html></html>")
 
-        def write_image(self, fpath, scale=1.0):
-            Path(fpath).write_bytes(b"PNG")
+        def write_image(self, fpath, format=None, scale=1.0):
+            if hasattr(fpath, "write"):
+                fpath.write(b"PNG")
+            else:
+                Path(fpath).write_bytes(b"PNG")
 
     monkeypatch.setattr(sankey_builder.SankeyDiGraph, "to_plotly", lambda self, title="Sankey": FakeFigure())
     monkeypatch.setattr("eval_audit.utils.sankey.configure_plotly_chrome", lambda: None)

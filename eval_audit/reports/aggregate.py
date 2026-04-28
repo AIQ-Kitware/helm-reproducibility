@@ -16,7 +16,7 @@ from typing import Any
 import pandas as pd
 
 from eval_audit.infra.api import default_report_root
-from eval_audit.infra.fs_publish import write_latest_alias
+from eval_audit.infra.fs_publish import write_text_atomic
 from eval_audit.reports.core_packet_summary import (
     find_report_pair,
     load_core_report_packet,
@@ -67,10 +67,6 @@ def _slugify(text: str) -> str:
     )
 
 
-def _write_latest_alias(src: Path, latest_root: Path, latest_name: str) -> None:
-    """Delegate to eval_audit.infra.fs_publish.write_latest_alias so the
-    history-retired rename-or-symlink rule is applied consistently."""
-    write_latest_alias(src, latest_root, latest_name)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -126,15 +122,12 @@ def main(argv: list[str] | None = None) -> None:
 
     table = pd.DataFrame(rows).sort_values(['assessment_label', 'run_spec_name'], na_position='last')
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
-    # History layer retired 2026-04-28; stamped intermediate goes in the
-    # visible dir.
-    history_dpath = out_dpath
-    history_dpath.mkdir(parents=True, exist_ok=True)
+    out_dpath.mkdir(parents=True, exist_ok=True)
 
-    json_fpath = history_dpath / f'overall_reproducibility_summary_{stamp}.json'
-    csv_fpath = history_dpath / f'overall_reproducibility_summary_{stamp}.csv'
-    txt_fpath = history_dpath / f'overall_reproducibility_summary_{stamp}.txt'
-    md_fpath = history_dpath / f'overall_reproducibility_summary_{stamp}.md'
+    json_fpath = out_dpath / 'overall_reproducibility_summary.latest.json'
+    csv_fpath = out_dpath / 'overall_reproducibility_summary.latest.csv'
+    txt_fpath = out_dpath / 'overall_reproducibility_summary.latest.txt'
+    md_fpath = out_dpath / 'overall_reproducibility_summary.latest.md'
 
     summary = {
         'generated_utc': stamp,
@@ -142,9 +135,12 @@ def main(argv: list[str] | None = None) -> None:
         'assessment_counts': dict(Counter(row['assessment_label'] for row in rows)),
         'run_specs': rows,
     }
-    json_fpath.write_text(json.dumps(summary, indent=2))
-    table.to_csv(csv_fpath, index=False)
-    md_fpath.write_text(table.to_markdown(index=False) + '\n')
+    write_text_atomic(json_fpath, json.dumps(summary, indent=2))
+    import io as _io
+    _csv_buf = _io.StringIO()
+    table.to_csv(_csv_buf, index=False)
+    write_text_atomic(csv_fpath, _csv_buf.getvalue())
+    write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
 
     lines = []
     lines.append('Overall Reproducibility Assessment')
@@ -175,15 +171,7 @@ def main(argv: list[str] | None = None) -> None:
         lines.append(f"    official_instance_agree_05: {row['official_instance_agree_05']}")
         lines.append(f"    official_runlevel_p90: {row['official_runlevel_p90']}")
         lines.append(f"    official_runlevel_max: {row['official_runlevel_max']}")
-    txt_fpath.write_text('\n'.join(lines) + '\n')
-
-    for src, latest_name in [
-        (json_fpath, 'overall_reproducibility_summary.latest.json'),
-        (csv_fpath, 'overall_reproducibility_summary.latest.csv'),
-        (txt_fpath, 'overall_reproducibility_summary.latest.txt'),
-        (md_fpath, 'overall_reproducibility_summary.latest.md'),
-    ]:
-        _write_latest_alias(src, out_dpath, latest_name)
+    write_text_atomic(txt_fpath, '\n'.join(lines) + '\n')
 
     logger.info(f'Wrote summary json: {rich_link(json_fpath)}')
     logger.info(f'Wrote summary csv: {rich_link(csv_fpath)}')

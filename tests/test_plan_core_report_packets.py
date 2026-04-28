@@ -4,6 +4,8 @@ import csv
 import json
 from pathlib import Path
 
+import pytest
+
 from eval_audit.planning import core_report_planner
 from eval_audit.normalized.eee_artifacts import local_eee_parent_for_row
 from eval_audit.workflows import plan_core_report_packets
@@ -204,6 +206,7 @@ def _setup_index_inputs(
     return local_index, official_index
 
 
+@pytest.mark.slow
 def test_planner_emits_packet_intent_for_one_official_one_local_case(tmp_path):
     local_index, official_index = _setup_index_inputs(tmp_path)
     artifact = core_report_planner.build_planning_artifact(

@@ -8,7 +8,9 @@ from typing import Any
 
 from loguru import logger
 
-from eval_audit.infra.fs_publish import stamped_history_dir, write_latest_alias
+import io as _io
+
+from eval_audit.infra.fs_publish import write_text_atomic
 from eval_audit.infra.logging import rich_link, setup_cli_logging
 from eval_audit.planning.core_report_planner import (
     build_planning_artifact,
@@ -22,37 +24,37 @@ from eval_audit.planning.core_report_planner import (
 
 
 def _write_json(payload: Any, fpath: Path) -> None:
-    fpath.write_text(json.dumps(payload, indent=2) + "\n")
+    write_text_atomic(fpath, json.dumps(payload, indent=2) + "\n")
 
 
 def _write_text(lines: list[str], fpath: Path) -> None:
-    fpath.write_text("\n".join(lines).rstrip() + "\n")
+    write_text_atomic(fpath, "\n".join(lines).rstrip() + "\n")
 
 
 def _write_csv(rows: list[dict[str, Any]], fpath: Path) -> None:
     fieldnames = sorted({key for row in rows for key in row.keys()}) if rows else []
-    with fpath.open("w", newline="") as file:
-        if not fieldnames:
-            file.write("")
-            return
-        writer = csv.DictWriter(file, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
+    if not fieldnames:
+        write_text_atomic(fpath, "")
+        return
+    buf = _io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(row)
+    write_text_atomic(fpath, buf.getvalue())
 
 
 def write_planning_outputs(*, artifact: dict[str, Any], out_dpath: Path) -> dict[str, Path]:
     out_dpath = out_dpath.expanduser().resolve()
     out_dpath.mkdir(parents=True, exist_ok=True)
-    stamp, history_dpath = stamped_history_dir(out_dpath)
 
-    json_fpath = history_dpath / f"comparison_intents_{stamp}.json"
-    txt_fpath = history_dpath / f"comparison_intents_{stamp}.txt"
-    packet_csv_fpath = history_dpath / f"comparison_intent_packets_{stamp}.csv"
-    component_csv_fpath = history_dpath / f"comparison_intent_components_{stamp}.csv"
-    comparison_csv_fpath = history_dpath / f"comparison_intent_comparisons_{stamp}.csv"
-    warnings_json_fpath = history_dpath / f"comparison_intent_warnings_{stamp}.json"
-    warnings_txt_fpath = history_dpath / f"comparison_intent_warnings_{stamp}.txt"
+    json_fpath = out_dpath / "comparison_intents.latest.json"
+    txt_fpath = out_dpath / "comparison_intents.latest.txt"
+    packet_csv_fpath = out_dpath / "comparison_intent_packets.latest.csv"
+    component_csv_fpath = out_dpath / "comparison_intent_components.latest.csv"
+    comparison_csv_fpath = out_dpath / "comparison_intent_comparisons.latest.csv"
+    warnings_json_fpath = out_dpath / "warnings.latest.json"
+    warnings_txt_fpath = out_dpath / "warnings.latest.txt"
 
     _write_json(artifact, json_fpath)
     _write_text(planning_summary_lines(artifact), txt_fpath)
@@ -62,13 +64,6 @@ def write_planning_outputs(*, artifact: dict[str, Any], out_dpath: Path) -> dict
     _write_json({"warnings": warning_rows(artifact)}, warnings_json_fpath)
     _write_text(warning_summary_lines(artifact), warnings_txt_fpath)
 
-    write_latest_alias(json_fpath, out_dpath, "comparison_intents.latest.json")
-    write_latest_alias(txt_fpath, out_dpath, "comparison_intents.latest.txt")
-    write_latest_alias(packet_csv_fpath, out_dpath, "comparison_intent_packets.latest.csv")
-    write_latest_alias(component_csv_fpath, out_dpath, "comparison_intent_components.latest.csv")
-    write_latest_alias(comparison_csv_fpath, out_dpath, "comparison_intent_comparisons.latest.csv")
-    write_latest_alias(warnings_json_fpath, out_dpath, "warnings.latest.json")
-    write_latest_alias(warnings_txt_fpath, out_dpath, "warnings.latest.txt")
     return {
         "comparison_intents_json": json_fpath,
         "comparison_intents_txt": txt_fpath,

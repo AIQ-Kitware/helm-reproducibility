@@ -36,6 +36,7 @@ dependencies = [
     "loguru>=0.7.3",
     "plotly>=6.0.0",
     "kaleido>=1.0.0",
+    "safer>=4.0.0",
 ]
 
 
@@ -65,6 +66,9 @@ include = ["eval_audit*"]
 # repo, including old-backup-reports/, reports/, dev/, submodules/, etc.,
 # which adds minutes to collection.
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow; deselected by default (pass --run-slow to include). Exercises matplotlib/plotly rendering, sankey HTML/PNG generation, or end-to-end summary builds.",
+]
 # Belt-and-suspenders: explicitly skip directories pytest should never enter
 # even when invoked with a custom path or when conftest discovery walks up.
 norecursedirs = [

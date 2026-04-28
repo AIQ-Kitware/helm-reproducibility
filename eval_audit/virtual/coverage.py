@@ -38,8 +38,7 @@ from typing import Any
 from eval_audit.helm.hashers import stable_hash36
 from eval_audit.infra.fs_publish import (
     safe_unlink,
-    stamped_history_dir,
-    write_latest_alias,
+    write_text_atomic,
 )
 from eval_audit.utils import sankey_builder
 from eval_audit.utils.sankey import emit_sankey_artifacts
@@ -610,26 +609,26 @@ def _by_dim_csv_rows(coverage: CoverageReport, dim: str) -> list[dict[str, Any]]
 
 
 def _write_text(path: Path, lines: list[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + ("\n" if lines and not lines[-1].endswith("\n") else ""))
+    text = "\n".join(lines) + ("\n" if lines and not lines[-1].endswith("\n") else "")
+    write_text_atomic(path, text)
 
 
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     if not rows:
-        path.write_text("")
+        write_text_atomic(path, "")
         return
+    import io as _io
     fieldnames = sorted({k for r in rows for k in r.keys()})
-    with path.open("w", newline="") as fh:
-        w = csv.DictWriter(fh, fieldnames=fieldnames)
-        w.writeheader()
-        for row in rows:
-            w.writerow(row)
+    buf = _io.StringIO()
+    w = csv.DictWriter(buf, fieldnames=fieldnames)
+    w.writeheader()
+    for row in rows:
+        w.writerow(row)
+    write_text_atomic(path, buf.getvalue())
 
 
 def _write_json(path: Path, payload: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+    write_text_atomic(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
 
 
 def write_coverage_artifacts(
@@ -650,10 +649,9 @@ def write_coverage_artifacts(
     """
     out_dpath = Path(out_dpath).expanduser().resolve()
     out_dpath.mkdir(parents=True, exist_ok=True)
-    stamp, history_dpath = stamped_history_dir(out_dpath)
 
-    # Pre-clean any stale latest aliases we own so an empty re-run doesn't
-    # leave dangling files from a richer prior run.
+    # Pre-clean any stale aliases we own so an empty re-run doesn't leave
+    # dangling files from a richer prior run.
     for alias_name in [
         "coverage_funnel_summary.latest.txt",
         "coverage_funnel.latest.json",
@@ -668,33 +666,27 @@ def write_coverage_artifacts(
     for dim in coverage.by_dim:
         safe_unlink(out_dpath / f"coverage_by_{dim}.latest.csv")
 
-    summary_lines = _format_summary(coverage)
-    summary_fpath = history_dpath / f"coverage_funnel_summary_{stamp}.txt"
-    _write_text(summary_fpath, summary_lines)
-    write_latest_alias(summary_fpath, out_dpath, "coverage_funnel_summary.latest.txt")
+    summary_fpath = out_dpath / "coverage_funnel_summary.latest.txt"
+    _write_text(summary_fpath, _format_summary(coverage))
 
-    json_fpath = history_dpath / f"coverage_funnel_{stamp}.json"
+    json_fpath = out_dpath / "coverage_funnel.latest.json"
     _write_json(json_fpath, _coverage_payload(coverage))
-    write_latest_alias(json_fpath, out_dpath, "coverage_funnel.latest.json")
 
-    missing_csv_fpath = history_dpath / f"missing_targets_{stamp}.csv"
+    missing_csv_fpath = out_dpath / "missing_targets.latest.csv"
     _write_csv(missing_csv_fpath, _missing_csv_rows(coverage))
-    write_latest_alias(missing_csv_fpath, out_dpath, "missing_targets.latest.csv")
 
-    missing_txt_lines = [f"Missing targets ({len(coverage.missing)}):"] + [
-        f"  - [{r.model}/{r.benchmark}/{r.suite_version}] {r.run_name}"
-        for r in coverage.missing
-    ]
-    missing_txt_fpath = history_dpath / f"missing_targets_{stamp}.txt"
-    _write_text(missing_txt_fpath, missing_txt_lines)
-    write_latest_alias(missing_txt_fpath, out_dpath, "missing_targets.latest.txt")
+    missing_txt_fpath = out_dpath / "missing_targets.latest.txt"
+    _write_text(
+        missing_txt_fpath,
+        [f"Missing targets ({len(coverage.missing)}):"]
+        + [
+            f"  - [{r.model}/{r.benchmark}/{r.suite_version}] {r.run_name}"
+            for r in coverage.missing
+        ],
+    )
 
-    by_dim_paths: dict[str, Path] = {}
     for dim in coverage.by_dim:
-        csv_fpath = history_dpath / f"coverage_by_{dim}_{stamp}.csv"
-        _write_csv(csv_fpath, _by_dim_csv_rows(coverage, dim))
-        write_latest_alias(csv_fpath, out_dpath, f"coverage_by_{dim}.latest.csv")
-        by_dim_paths[dim] = csv_fpath
+        _write_csv(out_dpath / f"coverage_by_{dim}.latest.csv", _by_dim_csv_rows(coverage, dim))
 
     # Sankey: rows split by model -> outcome. Same shape as build_reports_summary's
     # operational sankeys so a future Stage-A sankey can sit alongside.
@@ -708,7 +700,6 @@ def write_coverage_artifacts(
     sankey_paths = emit_sankey_artifacts(
         rows=funnel_rows,
         report_dpath=out_dpath,
-        stamp=stamp,
         kind="b_scope_to_analyzed",
         title=f"Stage B Coverage — {coverage.name}",
         stage_defs={},

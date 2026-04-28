@@ -23,7 +23,9 @@ from eval_audit.helm.diff import HelmRunDiff
 from eval_audit.helm import metrics as helm_metrics
 from eval_audit.helm.hashers import stable_hash36
 from eval_audit.indexing.schema import extract_run_spec_fields
-from eval_audit.infra.fs_publish import safe_unlink, write_latest_alias
+import safer
+
+from eval_audit.infra.fs_publish import link_alias, safe_unlink, write_text_atomic
 from eval_audit.normalized import (
     NormalizedRun,
     NormalizedRunRef,
@@ -734,8 +736,8 @@ def _plot_per_metric_agreement(
         y=layout.suptitle_y if layout.suptitle_y is not None else 0.995,
     )
     fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.92))
-    fig_fpath = fig_dpath / f'core_metric_per_metric_agreement_{stamp}.png'
-    fig.savefig(fig_fpath, dpi=180)
+    fig_fpath = fig_dpath / f'core_metric_per_metric_agreement.latest.png'
+    _atomic_savefig(fig, fig_fpath, dpi=180)
     plt.close(fig)
     return fig_fpath
 
@@ -842,8 +844,8 @@ def _plot_pair_metric_distributions(
         fontsize=16,
         plot_layout=plot_layout,
     )
-    out_fpath = fig_dpath / f'core_metric_distributions_{stamp}.png'
-    fig.savefig(out_fpath, dpi=180)
+    out_fpath = fig_dpath / f'core_metric_distributions.latest.png'
+    _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
     return out_fpath
 
@@ -890,10 +892,10 @@ def _emit_label_legend_artifacts(
     """Render a sidecar legend mapping short aliases back to full labels.
 
     Emits two artifacts next to the main plot:
-      - ``{out_name}_label_legend_{stamp}.png`` — a text-only matplotlib figure
+      - ``{out_name}_label_legend.latest.png`` — a text-only matplotlib figure
         with one row per (alias, full label) pair, suitable for embedding next
         to the main plot.
-      - ``{out_name}_label_legend_{stamp}.txt`` — the same mapping in plain
+      - ``{out_name}_label_legend.latest.txt`` — the same mapping in plain
         text for easy grep/diff.
 
     Returns ``(png_path, txt_path)``; either may be ``None`` if the alias map
@@ -903,7 +905,7 @@ def _emit_label_legend_artifacts(
         return None, None
     items = sorted(alias_map.items(), key=lambda kv: kv[1])
 
-    txt_fpath = fig_dpath / f"{out_name}_label_legend_{stamp}.txt"
+    txt_fpath = fig_dpath / f"{out_name}_label_legend.latest.txt"
     txt_lines = [
         f"{title}",
         f"Generated: {stamp}",
@@ -913,7 +915,7 @@ def _emit_label_legend_artifacts(
     ]
     for long_label, short_alias in items:
         txt_lines.append(f"{short_alias:<12s}  {long_label}")
-    txt_fpath.write_text("\n".join(txt_lines) + "\n")
+    write_text_atomic(txt_fpath, "\n".join(txt_lines) + "\n")
 
     n_rows = len(items)
     fig_h = max(1.6, 0.32 * n_rows + 1.2)
@@ -932,8 +934,8 @@ def _emit_label_legend_artifacts(
     table.set_fontsize(9)
     table.scale(1.0, 1.25)
     ax.set_title(title, fontsize=12, loc='left')
-    png_fpath = fig_dpath / f"{out_name}_label_legend_{stamp}.png"
-    fig.savefig(png_fpath, dpi=180)
+    png_fpath = fig_dpath / f"{out_name}_label_legend.latest.png"
+    _atomic_savefig(fig, png_fpath, dpi=180)
     plt.close(fig)
     return png_fpath, txt_fpath
 
@@ -1027,8 +1029,8 @@ def _plot_run_metric_distributions(
         fontsize=15,
         plot_layout=plot_layout,
     )
-    out_fpath = fig_dpath / f'{out_name}_{stamp}.png'
-    fig.savefig(out_fpath, dpi=180)
+    out_fpath = fig_dpath / f'{out_name}.latest.png'
+    _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
     legend_png_fpath, legend_txt_fpath = _emit_label_legend_artifacts(
         alias_map,
@@ -1140,8 +1142,8 @@ def _plot_three_run_metric_distributions(
         fontsize=16,
         plot_layout=plot_layout,
     )
-    out_fpath = fig_dpath / f'core_metric_three_run_distributions_{stamp}.png'
-    fig.savefig(out_fpath, dpi=180)
+    out_fpath = fig_dpath / f'core_metric_three_run_distributions.latest.png'
+    _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
     return out_fpath
 
@@ -1262,11 +1264,11 @@ def _write_three_run_runlevel_table(
             'delta_kwdagger_a_vs_kwdagger_b': None if a.mean is None or b.mean is None else abs(a.mean - b.mean),
         })
     table = pd.DataFrame(rows)
-    csv_fpath = out_dpath / f'core_runlevel_table_{stamp}.csv'
-    md_fpath = out_dpath / f'core_runlevel_table_{stamp}.md'
+    csv_fpath = out_dpath / f'core_runlevel_table.latest.csv'
+    md_fpath = out_dpath / f'core_runlevel_table.latest.md'
     table.to_csv(csv_fpath, index=False)
     try:
-        md_fpath.write_text(table.to_markdown(index=False) + '\n')
+        write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
     except ImportError:
         md_fpath = None
     return csv_fpath, md_fpath
@@ -1293,11 +1295,11 @@ def _write_two_run_runlevel_table(
             'delta_official_vs_kwdagger': None if kw.mean is None or off.mean is None else abs(off.mean - kw.mean),
         })
     table = pd.DataFrame(rows)
-    csv_fpath = out_dpath / f'core_runlevel_table_{stamp}.csv'
-    md_fpath = out_dpath / f'core_runlevel_table_{stamp}.md'
+    csv_fpath = out_dpath / f'core_runlevel_table.latest.csv'
+    md_fpath = out_dpath / f'core_runlevel_table.latest.md'
     table.to_csv(csv_fpath, index=False)
     try:
-        md_fpath.write_text(table.to_markdown(index=False) + '\n')
+        write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
     except ImportError:
         md_fpath = None
     return csv_fpath, md_fpath
@@ -1335,8 +1337,8 @@ def _plot_single_pair_summary(
         plot_layout=plot_layout,
     )
     print(f'plot_layout={plot_layout}')
-    fig_fpath = fig_dpath / f'core_metric_report_{stamp}.png'
-    fig.savefig(fig_fpath, dpi=180)
+    fig_fpath = fig_dpath / f'core_metric_report.latest.png'
+    _atomic_savefig(fig, fig_fpath, dpi=180)
     plt.close(fig)
     return fig_fpath
 
@@ -1524,11 +1526,11 @@ def _write_comparison_runlevel_table(
                 'abs_delta': None if left.mean is None or right.mean is None else abs(left.mean - right.mean),
             })
     table = pd.DataFrame(rows)
-    csv_fpath = out_dpath / f'core_runlevel_table_{stamp}.csv'
-    md_fpath = out_dpath / f'core_runlevel_table_{stamp}.md'
+    csv_fpath = out_dpath / f'core_runlevel_table.latest.csv'
+    md_fpath = out_dpath / f'core_runlevel_table.latest.md'
     table.to_csv(csv_fpath, index=False)
     try:
-        md_fpath.write_text(table.to_markdown(index=False) + '\n')
+        write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
     except ImportError:
         md_fpath = None
     return csv_fpath, md_fpath
@@ -1615,7 +1617,7 @@ def _write_text(report: dict[str, Any], out_fpath: Path) -> None:
                 f"    - abs_tol={row['abs_tol']} agree_ratio={row['agree_ratio']}"
             )
         lines.append('')
-    out_fpath.write_text('\n'.join(lines) + '\n')
+    write_text_atomic(out_fpath, '\n'.join(lines) + '\n')
 
 
 def _find_curve_value(rows: list[dict[str, Any]], abs_tol: float) -> float | None:
@@ -1729,17 +1731,30 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
         f"{official_vs_local['instance_level']['overall_quantiles']['abs_delta']['p99']} / "
         f"{official_vs_local['instance_level']['overall_quantiles']['abs_delta']['max']}"
     )
-    out_fpath.write_text('\n'.join(lines) + '\n')
+    write_text_atomic(out_fpath, '\n'.join(lines) + '\n')
 
 
 def _write_latest_alias(src: Path | None, latest_root: Path, latest_name: str) -> Path | None:
-    """Thin wrapper around eval_audit.infra.fs_publish.write_latest_alias that
-    tolerates ``src is None`` (skip silently). After the history retirement on
-    2026-04-28 the global helper renames stamped intermediates onto
-    ``*.latest.*`` in place, which is what we want here too."""
+    """Tolerates ``src is None``. After the simplification (2026-04-28b)
+    the canonical artifact is written directly to ``<root>/<name>.latest.<ext>``,
+    so callers passing ``src`` already at that target make this a no-op.
+    The fallback is :func:`link_alias` for cross-tree navigation aliases."""
     if src is None:
         return None
-    return write_latest_alias(src, latest_root, latest_name)
+    target = latest_root / latest_name
+    if Path(src) == target:
+        return target
+    return link_alias(src, latest_root, latest_name)
+
+
+def _atomic_savefig(fig, fpath: Path, **kwargs) -> Path:
+    """matplotlib ``fig.savefig`` writing to ``fpath`` atomically via safer.
+    Format inferred from the file suffix (defaults to png)."""
+    fpath = Path(fpath)
+    suffix = fpath.suffix.lstrip('.') or 'png'
+    with safer.open(fpath, 'wb', make_parents=True) as fp:
+        fig.savefig(fp, format=suffix, **kwargs)
+    return fpath
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -1953,11 +1968,11 @@ def main(argv: list[str] | None = None) -> None:
         'official_selection': components_manifest.get('official_selection') or {},
     }
 
-    json_fpath = history_dpath / f'core_metric_report_{stamp}.json'
-    txt_fpath = history_dpath / f'core_metric_report_{stamp}.txt'
-    mgmt_fpath = history_dpath / f'core_metric_management_summary_{stamp}.txt'
-    warnings_json_fpath = history_dpath / f'warnings_{stamp}.json'
-    warnings_txt_fpath = history_dpath / f'warnings_{stamp}.txt'
+    json_fpath = history_dpath / f'core_metric_report.latest.json'
+    txt_fpath = history_dpath / f'core_metric_report.latest.txt'
+    mgmt_fpath = history_dpath / f'core_metric_management_summary.latest.txt'
+    warnings_json_fpath = history_dpath / f'warnings.latest.json'
+    warnings_txt_fpath = history_dpath / f'warnings.latest.txt'
     official_vs_local = _find_pair(report, 'official_vs_local') or (pairs[-1] if pairs else None)
     local_repeat = _find_pair(report, 'local_repeat')
 
@@ -1974,7 +1989,7 @@ def main(argv: list[str] | None = None) -> None:
             plot_layout=plot_layout,
         )
     elif render_core_metric_report:
-        fig_fpath = history_dpath / f'core_metric_report_{stamp}.png'
+        fig_fpath = history_dpath / f'core_metric_report.latest.png'
         extra_pair = _load_optional_cross_machine_pair(report_dpath)
         paper_labels = load_paper_label_manager(style='paper_short')
         extra_label = extra_pair['label'] if extra_pair is not None else None
@@ -2012,7 +2027,7 @@ def main(argv: list[str] | None = None) -> None:
             fontsize=15,
             plot_layout=plot_layout,
         )
-        fig.savefig(fig_fpath, dpi=180)
+        _atomic_savefig(fig, fig_fpath, dpi=180)
         plt.close(fig)
     else:
         fig_fpath = None
@@ -2091,11 +2106,11 @@ def main(argv: list[str] | None = None) -> None:
             component_lookup,
         )
         report = kwutil.Json.ensure_serializable(_strip_private(report))
-        json_fpath.write_text(json.dumps(report, indent=2))
+        write_text_atomic(json_fpath, json.dumps(report, indent=2))
         _write_text(report, txt_fpath)
         _write_management_summary(report, mgmt_fpath)
-        warnings_json_fpath.write_text(json.dumps(_warnings_payload(report), indent=2) + '\n')
-        warnings_txt_fpath.write_text('\n'.join(_warning_summary_lines(report)) + '\n')
+        write_text_atomic(warnings_json_fpath, json.dumps(_warnings_payload(report), indent=2) + '\n')
+        write_text_atomic(warnings_txt_fpath, '\n'.join(_warning_summary_lines(report)) + '\n')
 
     # Build the latest alias map. In plots_only mode we only refresh plot
     # aliases — the JSON/text/management/warnings/runlevel artifacts and their

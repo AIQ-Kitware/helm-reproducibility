@@ -5,14 +5,13 @@ import argparse
 from loguru import logger
 
 from eval_audit.infra.logging import rich_link, setup_cli_logging
-import datetime as datetime_mod
 from pathlib import Path
 
 from eval_audit.helm.diff import HelmRunDiff
-from eval_audit.infra.fs_publish import write_latest_alias
+from eval_audit.infra.fs_publish import write_text_atomic
 from eval_audit.normalized import SourceKind
 from eval_audit.normalized.helm_compat import helm_view_from_path
-from eval_audit.reports.core_packet import comparison_sample_history_name, comparison_sample_latest_name
+from eval_audit.reports.core_packet import comparison_sample_latest_name
 
 
 def _infer_run_spec_name(*run_paths: str) -> str:
@@ -38,10 +37,6 @@ def write_pair_samples(
 ) -> Path:
     report_dpath = Path(report_dpath).expanduser().resolve()
     report_dpath.mkdir(parents=True, exist_ok=True)
-    stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
-    # History layer retired 2026-04-28; stamped intermediate goes in the
-    # visible dir, gets renamed onto *.latest.* by write_latest_alias.
-    history_dpath = report_dpath
 
     diff = HelmRunDiff(
         helm_view_from_path(run_a, source_kind=SourceKind.OFFICIAL),
@@ -63,10 +58,8 @@ def write_pair_samples(
         show_details=show_details,
         writer=lines.append,
     )
-    out_fpath = history_dpath / comparison_sample_history_name(label, stamp)
-    out_fpath.write_text('\n'.join(lines) + '\n')
-    latest_name = comparison_sample_latest_name(label)
-    write_latest_alias(out_fpath, report_dpath, latest_name)
+    out_fpath = report_dpath / comparison_sample_latest_name(label)
+    write_text_atomic(out_fpath, '\n'.join(lines) + '\n')
     return out_fpath
 
 

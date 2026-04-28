@@ -16,7 +16,7 @@ import kwutil
 
 from eval_audit.infra.api import audit_root, default_index_root, default_store_root
 from eval_audit.infra.plotly_env import configure_plotly_chrome
-from eval_audit.infra.fs_publish import safe_unlink, stamped_history_dir, symlink_to, write_latest_alias
+from eval_audit.infra.fs_publish import link_alias, safe_unlink, symlink_to, write_text_atomic
 from eval_audit.infra.logging import rich_link, setup_cli_logging
 from eval_audit.infra.paths import experiment_analysis_dpath
 from eval_audit.infra.report_layout import (
@@ -2714,8 +2714,8 @@ def _publish_prioritized_examples_tree(
         "Each recommendation directory links to the selected breakdown, its parent index, and example report dirs with key latest artifacts.",
     ]
     _write_text(readme_lines, tree_root / "README.txt")
-    write_latest_alias(tree_root / "README.txt", tree_root, "README.latest.txt")
-    write_latest_alias(tree_root, level_002, "prioritized_examples.latest")
+    link_alias(tree_root / "README.txt", tree_root, "README.latest.txt")
+    link_alias(tree_root, level_002, "prioritized_examples.latest")
     return tree_root
 
 
@@ -3150,10 +3150,10 @@ def _build_high_level_readme(
 
 
 def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: Path) -> None:
-    write_latest_alias(level_001 / "README.latest.txt", summary_root, "README.latest.txt")
-    write_latest_alias(level_001 / "story_index.latest.txt", summary_root, "story_index.latest.txt")
-    write_latest_alias(level_001, summary_root, "level_001.latest")
-    write_latest_alias(level_002, summary_root, "level_002.latest")
+    link_alias(level_001 / "README.latest.txt", summary_root, "README.latest.txt")
+    link_alias(level_001 / "story_index.latest.txt", summary_root, "story_index.latest.txt")
+    link_alias(level_001, summary_root, "level_001.latest")
+    link_alias(level_002, summary_root, "level_002.latest")
     level_001_interactive = level_001 / "interactive"
     level_001_static = level_001 / "static"
     level_002_static = level_002 / "static"
@@ -3173,7 +3173,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
     ]:
         src = level_001_interactive / src_name
         if src.exists() or src.is_symlink():
-            write_latest_alias(src, summary_root, src_name)
+            link_alias(src, summary_root, src_name)
     for src_name in [
         "cardinality_summary.latest.txt",
         "sankey_s01_operational.latest.jpg",
@@ -3198,9 +3198,9 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
     ]:
         src = level_001_static / src_name
         if src.exists() or src.is_symlink():
-            write_latest_alias(src, summary_root, src_name)
-    write_latest_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.latest.sh")
-    write_latest_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.sh")
+            link_alias(src, summary_root, src_name)
+    link_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.latest.sh")
+    link_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.sh")
     for src_name in [
         "benchmark_summary.latest.csv",
         "run_inventory.latest.csv",
@@ -3211,7 +3211,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
     ]:
         src = level_002_static / src_name
         if src.exists() or src.is_symlink():
-            write_latest_alias(src, summary_root, src_name)
+            link_alias(src, summary_root, src_name)
     for src_name in [
         "prioritized_breakdowns.latest.txt",
         "prioritized_examples.latest",
@@ -3220,7 +3220,7 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
     ]:
         src = level_002_static / src_name if src_name.endswith(".txt") else level_002 / src_name
         if src.exists() or src.is_symlink():
-            write_latest_alias(src, summary_root, src_name)
+            link_alias(src, summary_root, src_name)
     for src_name in [
         "prioritized_breakdowns.latest.json",
         "off_story_summary.latest.json",
@@ -3228,11 +3228,11 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
     ]:
         src = level_002 / "machine" / src_name
         if src.exists() or src.is_symlink():
-            write_latest_alias(src, summary_root, src_name)
+            link_alias(src, summary_root, src_name)
 
     machine_csv = level_002 / "breakdowns" / "by_machine_host" / "index.latest.csv"
     if machine_csv.exists() or machine_csv.is_symlink():
-        write_latest_alias(machine_csv, summary_root, "machine_summary.latest.csv")
+        link_alias(machine_csv, summary_root, "machine_summary.latest.csv")
 
 
 def _render_breakdown_scopes(
@@ -3269,7 +3269,7 @@ def _render_breakdown_scopes(
         summary_rows = _summarize_by_dimension(enriched_rows, dimension=dim, repro_keyed=repro_keyed)
         table_artifacts = _write_table_artifacts(summary_rows, dim_root / f"index_{slugify(dim)}")
         for kind in ["json", "csv", "txt"]:
-            write_latest_alias(Path(table_artifacts[kind]), dim_root, f"index.latest.{kind}")
+            link_alias(Path(table_artifacts[kind]), dim_root, f"index.latest.{kind}")
         for value in top_values:
             child_rows = [row for row in enriched_rows if str(row.get(dim) or "unknown") == value]
             child_repro = [
@@ -3303,7 +3303,7 @@ def _render_breakdown_scopes(
             )
     manifest_fpath = breakdowns_root / "manifest.json"
     _write_json(manifest_rows, manifest_fpath)
-    write_latest_alias(manifest_fpath, breakdowns_root, "manifest.latest.json")
+    link_alias(manifest_fpath, breakdowns_root, "manifest.latest.json")
 
 
 def _bucket_metric_delta(max_delta: float | None) -> str:
@@ -4056,12 +4056,10 @@ def _render_scope_summary(
     if not scope_rows:
         return
 
-    generated_utc, history_dpath = stamped_history_dir(summary_root)
-    # History layer retired 2026-04-28: write level_001/ and level_002/
-    # directly under summary_root rather than into a stamped <version>/ subdir.
-    version_dpath = history_dpath
-    level_001 = version_dpath / "level_001"
-    level_002 = version_dpath / "level_002"
+    generated_utc = datetime_mod.datetime.now(datetime_mod.UTC).strftime("%Y%m%dT%H%M%SZ")
+    summary_root.mkdir(parents=True, exist_ok=True)
+    level_001 = summary_root / "level_001"
+    level_002 = summary_root / "level_002"
     level_001.mkdir(parents=True, exist_ok=True)
     level_002.mkdir(parents=True, exist_ok=True)
     level_001_machine = level_001 / "machine"
@@ -4681,8 +4679,8 @@ def _render_scope_summary(
     )
     cardinality_fpath = level_001_static / f"cardinality_summary_{generated_utc}.txt"
     _write_text(cardinality_lines, cardinality_fpath)
-    write_latest_alias(cardinality_fpath, level_001_static, "cardinality_summary.latest.txt")
-    write_latest_alias(cardinality_fpath, level_001, "cardinality_summary.latest.txt")
+    link_alias(cardinality_fpath, level_001_static, "cardinality_summary.latest.txt")
+    link_alias(cardinality_fpath, level_001, "cardinality_summary.latest.txt")
 
     level_002_lines = [
         "Drilldown Summary",
@@ -4732,8 +4730,8 @@ def _render_scope_summary(
         (Path(run_multiplicity_table["txt"]), level_002_static, "run_multiplicity_summary.latest.txt"),
     ]
     for src, root, name in latest_pairs:
-        write_latest_alias(src, root, name)
-    write_latest_alias(prioritized_examples_tree, level_002, "prioritized_examples.latest")
+        link_alias(src, root, name)
+    link_alias(prioritized_examples_tree, level_002, "prioritized_examples.latest")
 
     if include_visuals:
         for base_name, artifact in [
@@ -4744,13 +4742,13 @@ def _render_scope_summary(
             ("failure_taxonomy", failure_taxonomy_plot),
             ("filter_selection_by_model", filter_selection_by_model_plot),
         ]:
-            write_latest_alias(Path(artifact["json"]), level_001_machine, f"{base_name}.latest.json")
+            link_alias(Path(artifact["json"]), level_001_machine, f"{base_name}.latest.json")
             if artifact.get("html"):
-                write_latest_alias(Path(str(artifact["html"])), level_001_interactive, f"{base_name}.latest.html")
+                link_alias(Path(str(artifact["html"])), level_001_interactive, f"{base_name}.latest.html")
             if artifact.get("png"):
-                write_latest_alias(Path(str(artifact["png"])), level_001_static, f"{base_name}.latest.png")
+                link_alias(Path(str(artifact["png"])), level_001_static, f"{base_name}.latest.png")
             if artifact.get("jpg"):
-                write_latest_alias(Path(str(artifact["jpg"])), level_001_static, f"{base_name}.latest.jpg")
+                link_alias(Path(str(artifact["jpg"])), level_001_static, f"{base_name}.latest.jpg")
 
     manifest = {
         "generated_utc": generated_utc,
@@ -4798,7 +4796,7 @@ def _render_scope_summary(
     }
     manifest_fpath = level_001_machine / f"summary_manifest_{generated_utc}.json"
     _write_json(manifest, manifest_fpath)
-    write_latest_alias(manifest_fpath, level_001_machine, "summary_manifest.latest.json")
+    link_alias(manifest_fpath, level_001_machine, "summary_manifest.latest.json")
 
     reproduce_sh_fpath = level_001 / f"reproduce_{generated_utc}.sh"
     _write_reproduce_sh(
@@ -4808,8 +4806,8 @@ def _render_scope_summary(
         index_path=index_fpath,
         filter_inventory_json=filter_inventory_json,
     )
-    write_latest_alias(reproduce_sh_fpath, level_001, "reproduce.latest.sh")
-    write_latest_alias(reproduce_sh_fpath, level_001, "reproduce.sh")
+    link_alias(reproduce_sh_fpath, level_001, "reproduce.latest.sh")
+    link_alias(reproduce_sh_fpath, level_001, "reproduce.sh")
 
     symlink_to(level_002, level_001 / "next_level")
     symlink_to(level_001, level_002 / "up_level")
@@ -4873,7 +4871,7 @@ def _render_scope_summary(
     ]
     story_index_fpath = level_001 / f"story_index_{generated_utc}.txt"
     _write_text(story_index_lines, story_index_fpath)
-    write_latest_alias(story_index_fpath, level_001, "story_index.latest.txt")
+    link_alias(story_index_fpath, level_001, "story_index.latest.txt")
 
     _write_scope_level_aliases(level_001, level_002, summary_root)
 

@@ -11,6 +11,7 @@ from typing import Any
 import kwutil
 
 from eval_audit.helm.diff import HelmRunDiff
+from eval_audit.infra.fs_publish import write_text_atomic
 from eval_audit.normalized import SourceKind
 from eval_audit.normalized.helm_compat import helm_view_from_path
 
@@ -123,7 +124,7 @@ def write_text_report(report: dict[str, Any], out_fpath: Path) -> None:
         lines.append(
             f"  {row.get('name')}: abs_tol={row.get('abs_tol')} rel_tol={row.get('rel_tol')} agree_ratio={row.get('agree_ratio')}"
         )
-    out_fpath.write_text('\n'.join(lines) + '\n')
+    write_text_atomic(out_fpath, '\n'.join(lines) + '\n')
 
 
 def build_pair_report(
@@ -202,12 +203,10 @@ def main(argv: list[str] | None = None) -> None:
         run_tolerances_yaml=args.run_tolerances_yaml,
         instance_tolerances_yaml=args.instance_tolerances_yaml,
     )
-    stamp = report["generated_utc"]
-
-    json_fpath = report_dpath / f'pair_report_{stamp}.json'
-    txt_fpath = report_dpath / f'pair_report_{stamp}.txt'
+    json_fpath = report_dpath / 'pair_report.latest.json'
+    txt_fpath = report_dpath / 'pair_report.latest.txt'
     report = kwutil.Json.ensure_serializable(report)
-    json_fpath.write_text(json.dumps(report, indent=2, ensure_ascii=False))
+    write_text_atomic(json_fpath, json.dumps(report, indent=2, ensure_ascii=False))
     write_text_report(report, txt_fpath)
     print(f'Wrote pair report: {json_fpath}')
     print(f'Wrote pair text: {txt_fpath}')

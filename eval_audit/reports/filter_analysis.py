@@ -14,7 +14,9 @@ import kwutil
 
 from eval_audit.cli.index_historic_helm_runs import CLOSED_JUDGE_REQUIRED_REASON
 from eval_audit.infra.api import audit_root
-from eval_audit.infra.fs_publish import history_publish_root, write_latest_alias
+import safer
+
+from eval_audit.infra.fs_publish import link_alias, write_text_atomic
 from eval_audit.infra.logging import rich_link, setup_cli_logging
 from eval_audit.infra.report_layout import filtering_reports_root, portable_repo_root_lines, write_reproduce_script
 from eval_audit.infra.plotly_env import configure_plotly_chrome
@@ -632,15 +634,18 @@ def to_markdown(rows: list[dict[str, Any]]) -> str:
 
 
 def _write_stamped_text(report_root: Path, root: Path, stem: str, stamp: str, suffix: str, text: str) -> Path:
-    root.mkdir(parents=True, exist_ok=True)
-    history_root = history_publish_root(report_root, root, stamp)
-    fpath = history_root / f'{stem}_{stamp}{suffix}'
+    """Write ``text`` directly to ``root/<stem>.latest<suffix>``.
+
+    The ``report_root`` and ``stamp`` arguments are vestigial after the
+    simplification (2026-04-28b); they're kept in the signature so existing
+    callers don't have to be rewritten. Stamp infixes are no longer used in
+    filenames.
+    """
+    del report_root, stamp
+    fpath = root / f'{stem}.latest{suffix}'
     logger.debug(f'Write to: {rich_link(fpath)}')
-    fpath.write_text(text)
-    # write_latest_alias renames fpath in place onto the visible *.latest.*
-    # name (post-history-retirement). Return the actual on-disk path so
-    # downstream consumers point at the real file.
-    return write_latest_alias(fpath, root, f'{stem}.latest{suffix}')
+    write_text_atomic(fpath, text)
+    return fpath
 
 
 def _write_stamped_json(report_root: Path, root: Path, stem: str, stamp: str, payload: Any) -> Path:
@@ -677,7 +682,7 @@ def write_filter_rebuild_script(report_dpath: Path, *, inventory_json: Path | No
         'cd "$REPO_ROOT"',
         f'PYTHONPATH="$REPO_ROOT" {" ".join(cmd)} "$@"',
     ])
-    write_latest_alias(script, report_dpath, 'rebuild_analysis.sh')
+    link_alias(script, report_dpath, 'rebuild_analysis.sh')
     return script
 
 
@@ -703,7 +708,7 @@ def write_filter_reproduce_script(report_dpath: Path, *, source_command: str | N
             'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" -m eval_audit.cli.reports filter --report-dpath "$REPORT_DPATH" "$@"',
         ])
     script = write_reproduce_script(report_dpath / 'reproduce.latest.sh', lines)
-    write_latest_alias(script, report_dpath, 'reproduce.sh')
+    link_alias(script, report_dpath, 'reproduce.sh')
     return script
 
 
@@ -1035,8 +1040,8 @@ def emit_filter_report_artifacts(
         interactive_dpath=interactive_dpath,
         static_dpath=static_dpath,
     )
-    write_latest_alias(Path(outputs['filter_cardinality_txt']), report_dpath, 'filter_cardinality_summary.latest.txt')
-    write_latest_alias(Path(outputs['local_serving_txt']), report_dpath, 'filter_local_serving_summary.latest.txt')
+    link_alias(Path(outputs['filter_cardinality_txt']), report_dpath, 'filter_cardinality_summary.latest.txt')
+    link_alias(Path(outputs['local_serving_txt']), report_dpath, 'filter_local_serving_summary.latest.txt')
     return outputs
 
 
@@ -1190,10 +1195,9 @@ def _emit_bar_chart(
 ) -> dict[str, str | None]:
     if not rows:
         return {'html': None, 'png': None, 'plotly_error': None}
-    html_root = history_publish_root(report_dpath, interactive_dpath, stamp)
-    png_root = history_publish_root(report_dpath, static_dpath, stamp)
-    html_fpath = html_root / f'{stem}_{stamp}.html'
-    png_fpath = png_root / f'{stem}_{stamp}.png'
+    del report_dpath, stamp  # vestigial; kept in signature for backwards-compat
+    html_fpath = interactive_dpath / f'{stem}.latest.html'
+    png_fpath = static_dpath / f'{stem}.latest.png'
     html_out = None
     png_out = None
     plotly_error = None
@@ -1207,16 +1211,16 @@ def _emit_bar_chart(
         fig = px.bar(pd.DataFrame(rows), x=x, y=y, title=title)
         fig.update_layout(**_bar_chart_layout(rows, x))
         fig.update_xaxes(**_bar_chart_xaxis_update(rows, x=x, xaxis_title=xaxis_title, compact=False))
-        fig.write_html(str(html_fpath), include_plotlyjs='cdn')
+        with safer.open(html_fpath, 'w', make_parents=True, temp_file=True) as fp:
+            fig.write_html(fp, include_plotlyjs='cdn')
         logger.debug(f'Write to 📝: {rich_link(html_fpath)}')
-        write_latest_alias(html_fpath, interactive_dpath, f'{stem}.latest.html')
         html_out = str(html_fpath)
         try:
             fig.update_layout(**_bar_chart_layout(rows, x, compact=True))
             fig.update_xaxes(**_bar_chart_xaxis_update(rows, x=x, xaxis_title=xaxis_title, compact=True))
-            fig.write_image(str(png_fpath), scale=1.0)
+            with safer.open(png_fpath, 'wb', make_parents=True, temp_file=True) as fp:
+                fig.write_image(fp, format='png', scale=1.0)
             logger.debug(f'Write 🖼: {rich_link(png_fpath)}')
-            write_latest_alias(png_fpath, static_dpath, f'{stem}.latest.png')
             png_out = str(png_fpath)
         except Exception as ex:
             plotly_error = f'unable to write PNG: {ex!r}'
@@ -1247,10 +1251,9 @@ def _emit_stacked_bar_chart(
 ) -> dict[str, str | None]:
     if not rows:
         return {'html': None, 'png': None, 'plotly_error': None}
-    html_root = history_publish_root(report_dpath, interactive_dpath, stamp)
-    png_root = history_publish_root(report_dpath, static_dpath, stamp)
-    html_fpath = html_root / f'{stem}_{stamp}.html'
-    png_fpath = png_root / f'{stem}_{stamp}.png'
+    del report_dpath, stamp  # vestigial; kept in signature for backwards-compat
+    html_fpath = interactive_dpath / f'{stem}.latest.html'
+    png_fpath = static_dpath / f'{stem}.latest.png'
     html_out = None
     png_out = None
     plotly_error = None
@@ -1278,16 +1281,16 @@ def _emit_stacked_bar_chart(
             **_bar_chart_layout(rows, x),
         )
         fig.update_xaxes(**_bar_chart_xaxis_update(rows, x=x, xaxis_title=xaxis_title, compact=False))
-        fig.write_html(str(html_fpath), include_plotlyjs='cdn')
+        with safer.open(html_fpath, 'w', make_parents=True, temp_file=True) as fp:
+            fig.write_html(fp, include_plotlyjs='cdn')
         logger.debug(f'Write to 📝: {rich_link(html_fpath)}')
-        write_latest_alias(html_fpath, interactive_dpath, f'{stem}.latest.html')
         html_out = str(html_fpath)
         try:
             fig.update_layout(**_bar_chart_layout(rows, x, compact=True))
             fig.update_xaxes(**_bar_chart_xaxis_update(rows, x=x, xaxis_title=xaxis_title, compact=True))
-            fig.write_image(str(png_fpath), scale=1.0)
+            with safer.open(png_fpath, 'wb', make_parents=True, temp_file=True) as fp:
+                fig.write_image(fp, format='png', scale=1.0)
             logger.debug(f'Write 🖼: {rich_link(png_fpath)}')
-            write_latest_alias(png_fpath, static_dpath, f'{stem}.latest.png')
             png_out = str(png_fpath)
         except Exception as ex:
             plotly_error = f'unable to write PNG: {ex!r}'

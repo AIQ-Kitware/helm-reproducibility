@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from eval_audit.cli.index_historic_helm_runs import (
     build_filter_inventory_rows,
     describe_run_spec,
@@ -262,6 +264,7 @@ def test_emit_filter_report_artifacts_writes_tables(tmp_path: Path):
     assert latest_inventory.is_file()
 
 
+@pytest.mark.slow
 def test_emit_filter_analysis_artifacts_writes_explanatory_outputs(tmp_path: Path):
     inventory_rows = [
         {

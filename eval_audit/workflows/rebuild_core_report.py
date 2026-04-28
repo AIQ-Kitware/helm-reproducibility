@@ -10,7 +10,7 @@ from typing import Any
 from loguru import logger
 
 from eval_audit.infra.api import default_index_root
-from eval_audit.infra.fs_publish import safe_unlink, symlink_to, write_latest_alias
+from eval_audit.infra.fs_publish import safe_unlink, symlink_to, link_alias
 from eval_audit.infra.logging import rich_link, setup_cli_logging
 from eval_audit.infra.paths import official_public_index_dpath
 from eval_audit.infra.report_layout import (
@@ -500,7 +500,7 @@ def main(argv: list[str] | None = None) -> None:
             + ' "$@"',
         ],
     )
-    write_latest_alias(heavy_plots_render_fpath, report_dpath, "render_heavy_pairwise_plots.sh")
+    link_alias(heavy_plots_render_fpath, report_dpath, "render_heavy_pairwise_plots.sh")
 
     # Narrow tweak script: redraw plots in place using the cached manifests,
     # leaving the JSON/text/management/warnings/runlevel artifacts untouched.
@@ -523,7 +523,7 @@ def main(argv: list[str] | None = None) -> None:
             + ' "$@"',
         ],
     )
-    write_latest_alias(redraw_plots_fpath, report_dpath, "redraw_plots.sh")
+    link_alias(redraw_plots_fpath, report_dpath, "redraw_plots.sh")
 
     cmd_parts = [
         "-m",
@@ -555,7 +555,7 @@ def main(argv: list[str] | None = None) -> None:
             + ' "$@"',
         ],
     )
-    write_latest_alias(reproduce_fpath, report_dpath, "reproduce.sh")
+    link_alias(reproduce_fpath, report_dpath, "reproduce.sh")
 
     logger.info(f"Wrote components manifest: {rich_link(components_fpath)}")
     logger.info(f"Wrote comparisons manifest: {rich_link(comparisons_fpath)}")

@@ -19,7 +19,11 @@ from eval_audit.indexing.schema import (
     now_utc_iso,
 )
 from eval_audit.infra.api import default_index_root, env_defaults
-from eval_audit.infra.fs_publish import write_latest_alias
+import io as _io
+
+import safer
+
+from eval_audit.infra.fs_publish import write_text_atomic
 from eval_audit.infra.logging import rich_link, setup_cli_logging
 from eval_audit.helm.run_entries import parse_run_entry_description
 
@@ -291,7 +295,7 @@ def _write_summary(rows: list[dict[str, Any]], out_fpath: Path) -> None:
     for key, val in sorted(model_counts.items()):
         lines.append(f'  {key}: {val}')
     logger.debug(f'Write to: {rich_link(out_fpath)}')
-    out_fpath.write_text('\n'.join(lines) + '\n')
+    write_text_atomic(out_fpath, '\n'.join(lines) + '\n')
 
 
 def write_combined_component_index(
@@ -326,8 +330,9 @@ def write_combined_component_index(
         axis=0,
         ignore_index=True,
     )
-    out_fpath.parent.mkdir(parents=True, exist_ok=True)
-    combined.to_csv(out_fpath, index=False)
+    buf = _io.StringIO()
+    combined.to_csv(buf, index=False)
+    write_text_atomic(out_fpath, buf.getvalue())
     return out_fpath
 
 
@@ -374,11 +379,12 @@ def main(argv: list[str] | None = None) -> None:
                 'index_generated_utc': index_generated_utc,
             })
 
-    jsonl_fpath = report_dpath / f'audit_results_index_{stamp}.jsonl'
-    csv_fpath = report_dpath / f'audit_results_index_{stamp}.csv'
-    summary_fpath = report_dpath / f'audit_results_index_{stamp}.txt'
+    del stamp  # vestigial after the simplification (2026-04-28b)
+    jsonl_fpath = report_dpath / 'audit_results_index.latest.jsonl'
+    csv_fpath = report_dpath / 'audit_results_index.latest.csv'
+    summary_fpath = report_dpath / 'audit_results_index.latest.txt'
     logger.debug(f'Writing to: {rich_link(jsonl_fpath)}')
-    with jsonl_fpath.open('w') as file:
+    with safer.open(jsonl_fpath, 'w', make_parents=True) as file:
         for row in rows:
             file.write(json.dumps(kwutil.Json.ensure_serializable(row)) + '\n')
 
@@ -402,12 +408,10 @@ def main(argv: list[str] | None = None) -> None:
         ]
         cols = [c for c in preferred if c in table.columns] + [c for c in table.columns if c not in preferred]
         table = table[cols]
-    table.to_csv(csv_fpath, index=False)
+    _csv_buf = _io.StringIO()
+    table.to_csv(_csv_buf, index=False)
+    write_text_atomic(csv_fpath, _csv_buf.getvalue())
     _write_summary(rows, summary_fpath)
-
-    write_latest_alias(jsonl_fpath, report_dpath, 'audit_results_index.latest.jsonl')
-    write_latest_alias(csv_fpath, report_dpath, 'audit_results_index.latest.csv')
-    write_latest_alias(summary_fpath, report_dpath, 'audit_results_index.latest.txt')
 
     logger.info(f'Wrote jsonl index: {rich_link(jsonl_fpath)}')
     logger.info(f'Wrote csv index: {rich_link(csv_fpath)}')
@@ -416,13 +420,12 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.combined_with_official:
         official_fpath = Path(args.combined_with_official).expanduser().resolve()
-        combined_fpath = report_dpath / f'combined_component_index_{stamp}.csv'
+        combined_fpath = report_dpath / 'combined_component_index.latest.csv'
         write_combined_component_index(
             official_index_fpath=official_fpath,
             local_rows=rows,
             out_fpath=combined_fpath,
         )
-        write_latest_alias(combined_fpath, report_dpath, 'combined_component_index.latest.csv')
         logger.info(f'Wrote combined index: {rich_link(combined_fpath)}')
 
 

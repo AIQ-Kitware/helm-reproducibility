@@ -18,7 +18,7 @@ from eval_audit.infra.api import audit_root, default_index_root
 from eval_audit.infra.logging import rich_link, setup_cli_logging
 from eval_audit.infra.paths import official_public_index_dpath
 from eval_audit.utils.numeric import nested_get
-from eval_audit.infra.fs_publish import symlink_to, write_latest_alias
+from eval_audit.infra.fs_publish import link_alias, symlink_to, write_text_atomic
 from eval_audit.infra.paths import experiment_analysis_dpath
 from eval_audit.infra.report_layout import (
     legacy_repo_publication_root,
@@ -97,23 +97,40 @@ def _latest_matching_aiq_gpu_row(
 
 
 def _latest_pair_report(report_dpath: Path) -> tuple[Path | None, Path | None]:
-    json_cands = sorted(report_dpath.glob("pair_report_*.json"), reverse=True)
-    txt_cands = sorted(report_dpath.glob("pair_report_*.txt"), reverse=True)
-    return (
-        json_cands[0] if json_cands else None,
-        txt_cands[0] if txt_cands else None,
-    )
+    # pair_report.py writes directly to pair_report.latest.{json,txt} since
+    # the history retirement (2026-04-28). Old stamped pair_report_<stamp>.*
+    # files may still exist as orphans; we still pick those up as a fallback
+    # so reports built on top of orphan data keep loading.
+    json_fpath = report_dpath / "pair_report.latest.json"
+    txt_fpath = report_dpath / "pair_report.latest.txt"
+    if not json_fpath.exists():
+        cands = sorted(report_dpath.glob("pair_report_*.json"), reverse=True)
+        json_fpath = cands[0] if cands else None
+    if not txt_fpath.exists():
+        cands = sorted(report_dpath.glob("pair_report_*.txt"), reverse=True)
+        txt_fpath = cands[0] if cands else None
+    return (json_fpath, txt_fpath)
 
 
 def _write_latest_pair_aliases(report_dpath: Path) -> dict[str, str]:
+    """Return paths to the canonical pair_report artifacts under
+    ``report_dpath``. Since pair_report.py writes directly to
+    ``pair_report.latest.{json,txt}`` (history layer retired) this function
+    is now mostly a path-resolver; it only creates a symlink alias when the
+    canonical name doesn't already exist (i.e. only the orphaned stamped
+    file is on disk)."""
     json_fpath, txt_fpath = _latest_pair_report(report_dpath)
     created: dict[str, str] = {}
     if json_fpath is not None:
-        write_latest_alias(json_fpath, report_dpath, "pair_report.latest.json")
-        created["pair_report.latest.json"] = str(report_dpath / "pair_report.latest.json")
+        canonical = report_dpath / "pair_report.latest.json"
+        if json_fpath != canonical and not canonical.exists():
+            link_alias(json_fpath, report_dpath, "pair_report.latest.json")
+        created["pair_report.latest.json"] = str(canonical)
     if txt_fpath is not None:
-        write_latest_alias(txt_fpath, report_dpath, "pair_report.latest.txt")
-        created["pair_report.latest.txt"] = str(report_dpath / "pair_report.latest.txt")
+        canonical = report_dpath / "pair_report.latest.txt"
+        if txt_fpath != canonical and not canonical.exists():
+            link_alias(txt_fpath, report_dpath, "pair_report.latest.txt")
+        created["pair_report.latest.txt"] = str(canonical)
     return created
 
 
@@ -415,17 +432,14 @@ def main(argv: list[str] | None = None) -> None:
         cross_machine_rows.append(row)
 
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
-    # History layer retired 2026-04-28; write stamped intermediates next to
-    # the visible *.latest.* targets.
-    history_dpath = out_dpath
-    history_dpath.mkdir(parents=True, exist_ok=True)
+    out_dpath.mkdir(parents=True, exist_ok=True)
 
     table = pd.DataFrame(summary_rows)
     if 'run_spec_name' in table.columns:
         table = table.sort_values('run_spec_name')
-    json_fpath = history_dpath / f'experiment_summary_{stamp}.json'
-    csv_fpath = history_dpath / f'experiment_summary_{stamp}.csv'
-    txt_fpath = history_dpath / f'experiment_summary_{stamp}.txt'
+    json_fpath = out_dpath / 'experiment_summary.latest.json'
+    csv_fpath = out_dpath / 'experiment_summary.latest.csv'
+    txt_fpath = out_dpath / 'experiment_summary.latest.txt'
 
     payload = {
         'generated_utc': stamp,
@@ -448,9 +462,12 @@ def main(argv: list[str] | None = None) -> None:
         'cross_machine_rows': cross_machine_rows,
         'rows': summary_rows,
     }
-    json_fpath.write_text(json.dumps(payload, indent=2))
+    write_text_atomic(json_fpath, json.dumps(payload, indent=2))
     logger.debug(f'Write to: {rich_link(json_fpath)}')
-    table.to_csv(csv_fpath, index=False)
+    import io as _io
+    _csv_buf = _io.StringIO()
+    table.to_csv(_csv_buf, index=False)
+    write_text_atomic(csv_fpath, _csv_buf.getvalue())
     logger.debug(f'Write to: {rich_link(csv_fpath)}')
 
     lines = []
@@ -536,12 +553,8 @@ def main(argv: list[str] | None = None) -> None:
         lines.append(f"    official_instance_agree_05: {row['official_instance_agree_05']}")
         lines.append(f"    official_runlevel_p90: {row['official_runlevel_p90']}")
         lines.append(f"    official_runlevel_max: {row['official_runlevel_max']}")
-    txt_fpath.write_text('\n'.join(lines) + '\n')
+    write_text_atomic(txt_fpath, '\n'.join(lines) + '\n')
     logger.debug(f'Write to: {rich_link(txt_fpath)}')
-
-    write_latest_alias(json_fpath, out_dpath, 'experiment_summary.latest.json')
-    write_latest_alias(csv_fpath, out_dpath, 'experiment_summary.latest.csv')
-    write_latest_alias(txt_fpath, out_dpath, 'experiment_summary.latest.txt')
     cmd_parts = [
         '-m',
         'eval_audit.workflows.analyze_experiment',
@@ -565,7 +578,9 @@ def main(argv: list[str] | None = None) -> None:
         + ' '.join(shlex.quote(part) for part in cmd_parts)
         + ' "$@"',
     ])
-    write_latest_alias(reproduce_fpath, out_dpath, 'reproduce.sh')
+    # reproduce.sh is a navigation alias to the canonical reproduce.latest.sh
+    # so the legacy path keeps working.
+    link_alias(reproduce_fpath, out_dpath, 'reproduce.sh')
 
     # Write provenance.json at the experiment root (overwritten each run).
     provenance: dict[str, Any] = {
@@ -594,7 +609,7 @@ def main(argv: list[str] | None = None) -> None:
     except Exception:
         pass
     provenance_fpath = out_dpath / 'provenance.json'
-    provenance_fpath.write_text(json.dumps(provenance, indent=2))
+    write_text_atomic(provenance_fpath, json.dumps(provenance, indent=2))
     logger.debug(f'Write to: {rich_link(provenance_fpath)}')
 
     # Publish a symlink under the publication surface (ADR 3) pointing at

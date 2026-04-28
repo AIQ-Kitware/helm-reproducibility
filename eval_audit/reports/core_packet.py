@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from eval_audit.helm.hashers import stable_hash36
-from eval_audit.infra.fs_publish import safe_unlink, stamped_history_dir, write_latest_alias
+from eval_audit.infra.fs_publish import safe_unlink, write_text_atomic
 
 
 def slugify_identifier(text: str) -> str:
@@ -32,7 +32,11 @@ def comparison_sample_latest_name(comparison_id: str) -> str:
 
 
 def comparison_sample_history_name(comparison_id: str, stamp: str) -> str:
-    return f"instance_samples_{comparison_artifact_stem(comparison_id)}_{stamp}.txt"
+    """Deprecated: kept for backwards-compat with callers that still pass a
+    stamp. Returns the same path as :func:`comparison_sample_latest_name`
+    (the stamp infix is no longer written; see fs_publish.py docstring)."""
+    del stamp
+    return comparison_sample_latest_name(comparison_id)
 
 
 def write_manifest(
@@ -42,10 +46,8 @@ def write_manifest(
     latest_name: str,
     payload: dict[str, Any],
 ) -> Path:
-    stamp, history_dpath = stamped_history_dir(report_dpath)
-    out_fpath = history_dpath / f"{stem}_{stamp}.json"
-    out_fpath.write_text(json.dumps(payload, indent=2) + "\n")
-    write_latest_alias(out_fpath, report_dpath, latest_name)
+    out_fpath = Path(report_dpath) / latest_name
+    write_text_atomic(out_fpath, json.dumps(payload, indent=2) + "\n")
     return out_fpath
 
 

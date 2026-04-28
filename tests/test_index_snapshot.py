@@ -13,9 +13,16 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from eval_audit.cli.index_historic_helm_runs import OFFICIAL_INDEX_COLUMNS
 from eval_audit.workflows.analyze_index_snapshot import analyze_index_snapshot
+
+# Each test in this file calls analyze_index_snapshot, which renders HTML/JPG
+# artifacts through plotly + chrome (~10s/test on 22 tests = ~3.5 min). Mark
+# the whole module slow so the default `pytest tests/` run skips it; pass
+# `--run-slow` to include.
+pytestmark = pytest.mark.slow
 
 
 # ---------------------------------------------------------------------------
