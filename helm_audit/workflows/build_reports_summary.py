@@ -16,7 +16,7 @@ import kwutil
 
 from helm_audit.infra.api import audit_root, default_index_root, default_store_root
 from helm_audit.infra.plotly_env import configure_plotly_chrome
-from helm_audit.infra.fs_publish import stamped_history_dir, symlink_to, write_latest_alias
+from helm_audit.infra.fs_publish import safe_unlink, stamped_history_dir, symlink_to, write_latest_alias
 from helm_audit.infra.logging import rich_link, setup_cli_logging
 from helm_audit.infra.paths import experiment_analysis_dpath
 from helm_audit.infra.report_layout import (
@@ -254,7 +254,20 @@ def _default_filter_inventory_json() -> Path:
     return default_store_root() / "analysis" / "filter_inventory.json"
 
 
-def _load_filter_inventory_rows(filter_inventory_json: Path | None) -> list[dict[str, Any]]:
+def _load_filter_inventory_rows(
+    filter_inventory_json: Path | None,
+    *,
+    skip: bool = False,
+) -> list[dict[str, Any]]:
+    """Load the Stage-1 filter inventory.
+
+    When ``skip`` is True, return an empty list regardless of any explicit
+    or default path. Use this for scoped sub-experiments (e.g. virtual
+    experiments) where the global Stage-1 filter funnel does not describe
+    the report's denominator and would only mislead the reader.
+    """
+    if skip:
+        return []
     path = filter_inventory_json if filter_inventory_json is not None else _default_filter_inventory_json()
     if not path.exists():
         return []
@@ -4788,6 +4801,47 @@ def _render_scope_summary(
 
     _write_scope_level_aliases(level_001, level_002, summary_root)
 
+    if not filter_inventory_rows:
+        # No filter inventory was loaded for this scope (e.g. virtual
+        # experiments where the global Stage-1 funnel does not describe
+        # the report's denominator). Remove any stale ``latest`` aliases
+        # for the filter-side artifacts so a reader doesn't see a
+        # misleading "selected vs excluded by model" plot or a
+        # ``discovered -> attempted`` sankey rooted in a universe that
+        # doesn't apply to this scope. Timestamped history files in
+        # ``.history/`` are left alone — only the surfaced aliases are
+        # cleaned up.
+        _cleanup_filter_artifact_aliases(summary_root)
+
+
+_FILTER_ARTIFACT_ALIAS_NAMES = (
+    "filter_selection_by_model.latest.json",
+    "filter_selection_by_model.latest.html",
+    "filter_selection_by_model.latest.jpg",
+    "filter_selection_by_model.latest.png",
+    "sankey_s02_filter_to_attempt.latest.html",
+    "sankey_s02_filter_to_attempt.latest.jpg",
+    "sankey_s02_filter_to_attempt.latest.txt",
+    "sankey_s02_filter_to_attempt.latest.json",
+    "sankey_s04_end_to_end.latest.html",
+    "sankey_s04_end_to_end.latest.jpg",
+    "sankey_s04_end_to_end.latest.txt",
+    "sankey_s04_end_to_end.latest.json",
+)
+
+
+def _cleanup_filter_artifact_aliases(scope_root: Path) -> None:
+    """Unlink any latest alias that surfaces a filter-funnel artifact.
+
+    Used when a scope has no filter inventory; without this, latest
+    aliases from a previous run (when one was loaded) still surface a
+    misleading filter funnel for the current scope.
+    """
+    target_names = set(_FILTER_ARTIFACT_ALIAS_NAMES)
+    for path in scope_root.rglob("*"):
+        if path.name in target_names:
+            safe_unlink(path)
+
 
 def main(argv: list[str] | None = None) -> None:
     setup_cli_logging()
@@ -4796,6 +4850,20 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--index-fpath", default=None)
     parser.add_argument("--index-dpath", default=str(default_index_root()))
     parser.add_argument("--filter-inventory-json", default=None)
+    parser.add_argument(
+        "--no-filter-inventory",
+        action="store_true",
+        help=(
+            "Skip loading the Stage-1 filter inventory entirely (overrides "
+            "both --filter-inventory-json and the default fallback at "
+            "<audit_store>/analysis/filter_inventory.json). Use this for "
+            "scoped sub-experiments — e.g. virtual experiments — where the "
+            "global filter funnel doesn't describe the report's denominator "
+            "and would only mislead the reader. Filter sankeys, the model "
+            "selection plot, and the discovered/selected cardinality lines "
+            "all naturally drop out when the inventory is empty."
+        ),
+    )
     parser.add_argument("--summary-root", default=str(aggregate_summary_reports_root()))
     parser.add_argument(
         "--analysis-root",
@@ -4828,7 +4896,10 @@ def main(argv: list[str] | None = None) -> None:
         else None
     )
     rows = load_rows(index_fpath)
-    filter_inventory_rows = _load_filter_inventory_rows(filter_inventory_json)
+    filter_inventory_rows = _load_filter_inventory_rows(
+        filter_inventory_json,
+        skip=args.no_filter_inventory,
+    )
     _raise_fd_limit()  # Note: this probably is not necessary, as fd limits are usually due to a VM issue.
     configure_plotly_chrome()
     all_repro_rows = _load_all_repro_rows(extra_analysis_roots=args.analysis_root)

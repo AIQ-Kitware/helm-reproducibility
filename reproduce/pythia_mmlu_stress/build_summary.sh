@@ -32,11 +32,19 @@ fi
 # own analysis tree. Without it, _load_all_repro_rows scans only the
 # canonical/publication/legacy locations and finds zero rows here, so
 # prioritized examples and breakdowns come up empty.
+#
+# --no-filter-inventory suppresses the Stage-1 filter funnel artifacts
+# (filter_selection_by_model, sankey_s02_filter_to_attempt,
+# sankey_s04_end_to_end, and the discovered/selected cardinality lines).
+# A virtual experiment is *already* a pre-filtered slice; the global
+# discover->select funnel doesn't describe its denominator and the
+# excluded-by-stage-1 visualization is misleading in this scope.
 PYTHONPATH="$ROOT" "$PYTHON_BIN" -m helm_audit.workflows.build_reports_summary \
     --experiment-name "$EXPERIMENT_NAME" \
     --index-fpath "$INDEX_FPATH" \
     --summary-root "$SUMMARY_ROOT" \
     --analysis-root "$OUTPUT_ROOT" \
+    --no-filter-inventory \
     "$@"
 
 echo
