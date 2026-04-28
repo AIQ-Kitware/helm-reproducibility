@@ -61,10 +61,10 @@ class PlotLayout:
     suptitle_y: float | None = 0.995
     # Minimum vertical padding around axes decorations, in inches, for
     # Matplotlib's constrained-layout engine.
-    constrained_h_pad: float | None = 0.40
+    constrained_h_pad: float | None = 0.80
     # Minimum vertical space between subplot groups, as a fraction of the
     # average subplot height, for constrained layout.
-    constrained_hspace: float | None = 0.42
+    constrained_hspace: float | None = 0.82
     # Minimum horizontal padding around axes decorations, in inches, for
     # Matplotlib's constrained-layout engine.
     constrained_w_pad: float | None = 0.08
@@ -121,6 +121,30 @@ def _set_suptitle(
     if layout.suptitle_y is not None:
         kwargs['y'] = layout.suptitle_y
     fig.suptitle(text, **kwargs)
+
+
+def _subplot_adjust_kwargs(
+    fig: plt.Figure,
+    layout: PlotLayout,
+    *,
+    top: float = 0.92,
+) -> dict[str, float]:
+    """Translate layout knobs into stable manual subplot spacing."""
+    fig_w, fig_h = fig.get_size_inches()
+    kwargs = {'top': top}
+    if layout.constrained_h_pad is not None and fig_h > 0:
+        vpad = min(0.20, max(0.0, layout.constrained_h_pad / fig_h))
+        kwargs['bottom'] = max(0.04, vpad)
+        kwargs['top'] = min(kwargs['top'], 1.0 - vpad)
+    if layout.constrained_w_pad is not None and fig_w > 0:
+        hpad = min(0.20, max(0.0, layout.constrained_w_pad / fig_w))
+        kwargs['left'] = max(0.04, hpad)
+        kwargs['right'] = min(0.98, 1.0 - hpad)
+    if layout.constrained_hspace is not None:
+        kwargs['hspace'] = layout.constrained_hspace
+    if layout.constrained_wspace is not None:
+        kwargs['wspace'] = layout.constrained_wspace
+    return kwargs
 
 
 def _load_json(fpath: Path) -> Any:
@@ -656,7 +680,12 @@ def _plot_per_metric_agreement(
     n_cols = min(3, len(metrics))
     n_rows = (len(metrics) + n_cols - 1) // n_cols
 
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(6.5 * n_cols, 4.5 * n_rows), constrained_layout=True)
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(6.5 * n_cols, 4.8 * n_rows),
+        constrained_layout=False,
+    )
     if len(metrics) == 1:
         axes = [[axes]]
     elif n_rows == 1:
@@ -698,12 +727,13 @@ def _plot_per_metric_agreement(
         col_idx = idx % n_cols
         fig.delaxes(axes[row_idx][col_idx])
 
-    _set_suptitle(
-        fig,
+    layout = plot_layout or PlotLayout()
+    fig.suptitle(
         'Per-Metric Agreement vs Absolute Tolerance',
         fontsize=14,
-        plot_layout=plot_layout,
+        y=layout.suptitle_y if layout.suptitle_y is not None else 0.995,
     )
+    fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.92))
     fig_fpath = fig_dpath / f'core_metric_per_metric_agreement_{stamp}.png'
     fig.savefig(fig_fpath, dpi=180)
     plt.close(fig)
