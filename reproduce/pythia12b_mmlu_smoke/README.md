@@ -115,12 +115,14 @@ mkdir -p "$RUN_DIR"
 cd "$RUN_DIR"
 helm-run \
   --run-entries "mmlu:subject=$SUBJECT,method=multiple_choice_joint,model=eleutherai/pythia-12b-v0,data_augmentation=canonical" \
-  --enable-huggingface-models eleutherai/pythia-12b-v0 \
   --suite "$EXP" \
   --max-eval-instances "${MAX_EVAL_INSTANCES:-1000}" \
   --num-threads 1 \
   --local-path prod_env
 ```
+
+(HELM's built-in `huggingface/pythia-12b-v0` deployment is auto-resolved
+from the model alias; no `--enable-huggingface-models` needed.)
 
 That command is canonical HELM usage; if it fails, the failure is in HELM /
 transformers / GPU, not in eval-audit code.

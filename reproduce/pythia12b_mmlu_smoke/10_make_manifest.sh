@@ -23,9 +23,10 @@ schema_version: 1
 experiment_name: $EXP
 description: >-
   Smoke run of eleutherai/pythia-12b-v0 on MMLU subject=$SUBJECT, exercising
-  the eval-audit-run / kwdagger / magnet / helm-run execution path. One run
-  entry; HELM dynamically registers the huggingface deployment via
-  --enable-huggingface-models.
+  the eval-audit-run / kwdagger / magnet / helm-run execution path. Uses
+  HELM's built-in huggingface/pythia-12b-v0 deployment
+  (model_deployments.yaml line 1697; tokenizer EleutherAI/gpt-neox-20b,
+  max_sequence_length 2048).
 run_entries:
   - mmlu:subject=$SUBJECT,method=multiple_choice_joint,model=eleutherai/pythia-12b-v0,data_augmentation=canonical
 suite: $EXP
@@ -39,8 +40,7 @@ local_path: prod_env
 precomputed_root: null
 require_per_instance_stats: true
 model_deployments_fpath: null
-enable_huggingface_models:
-  - eleutherai/pythia-12b-v0
+enable_huggingface_models: []
 enable_local_huggingface_models: []
 EOF
 
