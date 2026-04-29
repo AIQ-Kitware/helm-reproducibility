@@ -891,3 +891,121 @@ experiments — ``configs/virtual-experiments/<name>.yaml`` currently
 assumes HELM-driven sources, and an ``eee_only`` source kind would let
 a user define a slice over their own EEE tree the same way they
 currently slice over the audit store.
+
+## 2026-04-29 13:30:00 -0000
+
+**Model:** claude-opus-4-7 (continued autonomous /loop session).
+
+**User intent.** "We need a pairwise comparison and report for EEE
+results as analogous to the HELM version as possible. ... robust to
+[missing HELM metadata] when it isn't there and also have the reports
+explain clearly when it isn't there." Plus: build a doc cataloguing
+what HELM has that EEE doesn't and recommendations on persisting it.
+
+**What landed.**
+
+1. *New CLI: `eval-audit-compare-pair-eee`.* Analogue of
+   `eval-audit-compare-pair` but for two `every_eval_ever` artifacts
+   instead of two HELM run dirs. Args: `--official PATH --local PATH
+   --out-dpath PATH` (each path can be a `<uuid>.json` or its dir).
+   Internally: builds 1-row in-memory indexes, calls the same planner
+   + core_metrics path `from_eee` uses for batch flows, lands the
+   standard `core_metric_report.latest.{txt,json,png}` + sidecar
+   manifests directly in `--out-dpath`. The index CSVs are tucked
+   into `<out>/_indexes/` so the report surface lives at the top
+   level. Includes `--force-pair` for the (rare) case where the user
+   wants to compare across mismatched logical-run keys.
+
+2. *HELM-sidecar pickup.* Added
+   `from_eee.detect_helm_sidecars(artifact_dir)` — looks for
+   `run_spec.json` next to the EEE aggregate; when present, returns
+   the path **and** parses out `max_eval_instances` (because the
+   planner reads that one off the index row, not the run-spec blob).
+   Both `from_eee` and `compare_pair_eee` thread the sidecar fields
+   onto every index row. With a sidecar present, all five HELM-side
+   comparability facts (`same_scenario_class`,
+   `same_benchmark_family`, `same_deployment`, `same_instructions`,
+   `same_max_eval_instances`) flip from `unknown` to `yes`/`no` —
+   verified end-to-end with a synthesized sidecar in the test.
+
+3. *Self-explanatory caveats file.* Every
+   `eval-audit-compare-pair-eee` run lands an
+   `eee_metadata_caveats.latest.txt` next to
+   `core_metric_report.latest.txt`. It records sidecar
+   present/absent for both inputs, lists the five HELM-side facts and
+   their `unknown` → `yes` triggers, and references
+   `docs/eee-vs-helm-metadata.md`. A reader of the report doesn't
+   have to grep the warnings manifest to understand what was and
+   wasn't evaluable.
+
+4. *Doc: `docs/eee-vs-helm-metadata.md`.* The catalogue the user
+   asked for. Sections:
+   - "At a glance" mapping table — comparability fact ↔ HELM source
+     field ↔ EEE-only outcome ↔ outcome with sidecar.
+   - What does NOT depend on HELM metadata (agreement curves,
+     same-model identity, etc.).
+   - Detailed walkthrough of `run_spec.json`, `scenario.json`,
+     `stats.json`/`per_instance_stats.json`, `scenario_state.json`.
+   - Three recommendations: ship `run_spec.json` next to EEE
+     artifacts (no-op cost, fully supported today), JSON sidecar
+     in the same shape (option 1), or extend EEE schema with a
+     `comparison_metadata` block (option 2 — flagged as a future
+     EEE-side change). Plus the negative recommendation: don't
+     fabricate metadata you don't have; the `unknown` collapse is
+     the *correct* behavior.
+
+5. *Slow-marked test: `tests/test_compare_pair_eee.py`.* 6 tests —
+   report-artifact presence, `unknown` collapse without sidecar, all-
+   facts-known with sidecar, caveats-file content reflects sidecar
+   status, **agreement curves are invariant under sidecar
+   presence** (the quantitative answer doesn't depend on whether
+   we have HELM metadata; only the qualitative comparability facts
+   do), and `--force-pair` enforcement on mismatched keys.
+
+**Design insight.** The user's framing — "as analogous to the HELM
+version as possible" — initially read as "produce
+`pair_report.latest.{txt,json}`" (the HELM CLI's output). But the
+HELM CLI's report is the *legacy* shape; the actively-evolved shape
+is `core_metric_report.latest.*` from the planner pipeline (which
+`from_eee` already emits per pair). The right call was to produce
+that shape from `compare-pair-eee` so the EEE-driven surface stays
+internally consistent — single-pair reports, per-experiment reports,
+and aggregate roll-ups all use the same artifact shape. The HELM
+legacy `pair_report` will likely be retired when the planner
+displaces it; tying the EEE pair tool to the legacy shape would
+have left two report formats to maintain.
+
+**Design insight #2.** "Robust when it isn't there, leverage it when
+it is" turned out to be cheap to implement — the planner's
+`extract_run_spec_fields` was already tolerant of None and missing
+files; all the new CLI had to do was *opt-in* to writing
+`run_spec_fpath` on the index row when a sidecar exists. That's a
+total of six lines of code to make the EEE-only comparison fully
+upgrade-able by shipping one extra file.
+
+**Test status.** Default suite: 122 passed, 56 skipped in 13s.
+With `--run-slow`: 178/178 passed in ~6 min (includes the new 6
+compare-pair-eee tests + the prior 11 from the demo).
+
+**Files touched this session.**
+- `eval_audit/cli/compare_pair_eee.py` (new)
+- `eval_audit/cli/from_eee.py` (sidecar detection + thread fields)
+- `pyproject.toml` (registered `eval-audit-compare-pair-eee`)
+- `docs/eee-vs-helm-metadata.md` (new)
+- `tests/test_compare_pair_eee.py` (new, slow-marked)
+- `README.md` (CLI list + docs status table entry)
+- `CLAUDE.md` (sidecar pickup mention + critical-modules entries)
+- `dev/journals/claude.md` (this entry)
+
+**Next step.** The EEE-only path now has full functional parity with
+the HELM path's *primary* user-facing surfaces:
+
+| HELM | EEE-only |
+|---|---|
+| `eval-audit-compare-pair` | `eval-audit-compare-pair-eee` |
+| `eval-audit-analyze-experiment` | `eval-audit-from-eee` (single experiment) |
+| `eval-audit-build-summary` | `eval-audit-from-eee --build-aggregate-summary` |
+| `eval-audit-build-virtual-experiment` | (not yet — virtual experiments still HELM-shaped) |
+
+Virtual experiments remain the one surface that doesn't have an
+EEE-only analogue. That's the natural next session.

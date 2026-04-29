@@ -163,6 +163,15 @@ dormant breakdown:
   the inputs *are* the scope. See
   [`reproduce/eee_only_demo/README.md`](reproduce/eee_only_demo/README.md)
   for a worked tutorial against a checked-in 3×3 fixture.
+- `eval-audit-compare-pair-eee` — **EEE-only single-pair report.**
+  The EEE analogue of `eval-audit-compare-pair`. Takes one official EEE
+  artifact and one local EEE artifact, produces the same shape of
+  core-metric report ``eval-audit-from-eee`` writes per pair. If you
+  ship the original ``run_spec.json`` next to the EEE artifact, the
+  HELM-side comparability facts (scenario class, deployment,
+  instructions, max_eval_instances) flip from `unknown` to `yes`/`no`.
+  See [`docs/eee-vs-helm-metadata.md`](docs/eee-vs-helm-metadata.md)
+  for the full HELM↔EEE field mapping and recommendations.
 
 **Execution path (verified 2026-04-28 by `pythia12b_mmlu_smoke`):**
 
@@ -204,6 +213,7 @@ straightforward apt invocation).
 | [`docs/pipeline.md`](docs/pipeline.md) | **CURRENT** | rewritten 2026-04-28 to match the active EEE-driven analysis pipeline; the prior version is preserved at [`docs/historical/pipeline-pre-eee-refactor.md`](docs/historical/pipeline-pre-eee-refactor.md) |
 | [`docs/helm-gotchas.md`](docs/helm-gotchas.md) | **CURRENT** | running ledger of HELM-specific behaviors hit during analysis |
 | [`docs/helm-reproduction-research-journal.md`](docs/helm-reproduction-research-journal.md) | **CURRENT** | research context, failure taxonomies |
+| [`docs/eee-vs-helm-metadata.md`](docs/eee-vs-helm-metadata.md) | **CURRENT** | what HELM has that EEE doesn't, what `unknown` comparability facts mean, how to ship sidecar metadata so they evaluate normally |
 | [`docs/kwdagger-notes.md`](docs/kwdagger-notes.md) | **UNSURE** | small file, may still be accurate |
 | [`docs/helm-null-completion-text-patch-proposal.md`](docs/helm-null-completion-text-patch-proposal.md) | **UNSURE** | pre-EEE patch proposal; outcome unclear |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | **PARTIALLY STALE** | core ADRs (raw vs derived, reports/, filesystem-as-interface) still hold; specific module/CLI lists drifted with the rename and recent refactors |

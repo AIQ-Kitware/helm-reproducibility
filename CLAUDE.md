@@ -85,19 +85,31 @@ Stages 5–6 against them, and lands a per-packet + cross-packet report
 at `<out>/`. The tutorial fixture lives at
 [`tests/fixtures/eee_only_demo/eee_artifacts/`](tests/fixtures/eee_only_demo/eee_artifacts/)
 and the runbook at
-[`reproduce/eee_only_demo/`](reproduce/eee_only_demo/). Comparability
-facts that the HELM-shaped pipeline derives from `run_spec.json`
-(scenario class, deployment, instructions, max_eval_instances)
-collapse to `status=unknown` for EEE-only inputs and surface as
+[`reproduce/eee_only_demo/`](reproduce/eee_only_demo/).
+
+For a single-pair comparison (analogous to `eval-audit-compare-pair`
+but EEE-only), use
+[`eval-audit-compare-pair-eee`](eval_audit/cli/compare_pair_eee.py) —
+it produces the same `core_metric_report.latest.{txt,json,png}` shape
+the per-packet reports use. Comparability facts that the HELM-shaped
+pipeline derives from `run_spec.json` (scenario class, deployment,
+instructions, max_eval_instances, benchmark family) collapse to
+`status=unknown` for EEE-only inputs and surface as
 `comparability_unknown:*` warnings — that's the correct behavior, not
-a bug.
+a bug. **Both EEE-driven CLIs auto-detect a sidecar `run_spec.json`
+next to the EEE artifact** (see `detect_helm_sidecars` in
+`eval_audit/cli/from_eee.py`); when present, the HELM-side
+comparability facts evaluate normally. Full mapping +
+recommendations: [`docs/eee-vs-helm-metadata.md`](docs/eee-vs-helm-metadata.md).
 
 ### Critical Modules
 
 | File | Purpose |
 |---|---|
 | `eval_audit/cli/index_historic_helm_runs.py` | Stage 1: filtering, filter-step analysis, sankey emission |
-| `eval_audit/cli/from_eee.py` | EEE-only tutorial path; skips Stages 1–2 and routes EEE artifacts straight into the planner + core-metrics + aggregate summary |
+| `eval_audit/cli/from_eee.py` | EEE-only tutorial path; skips Stages 1–2 and routes EEE artifacts straight into the planner + core-metrics + aggregate summary. Also exports `detect_helm_sidecars(artifact_dir)` for the sidecar `run_spec.json` pickup. |
+| `eval_audit/cli/compare_pair_eee.py` | EEE-only single-pair comparison CLI; analogue of `eval-audit-compare-pair` |
+| `docs/eee-vs-helm-metadata.md` | HELM↔EEE field mapping + recommendations for shipping sidecar metadata |
 | `eval_audit/reports/core_metrics.py` | Per-metric agreement curves, tolerance thresholds, instance-level vs. run-level metrics |
 | `eval_audit/planning/core_report_planner.py` | Comparison-intent planner; pairs official + local components by logical run key, emits `local_repeat` for multi-attempt locals |
 | `eval_audit/normalized/helm_compat.py` | Adapter that lets HELM-shape consumers (HelmRunDiff) read EEE-only NormalizedRun via shape-correct empty defaults |

@@ -90,6 +90,44 @@ def _discover_eee_artifacts(root: Path) -> list[dict[str, Any]]:
     return rows
 
 
+_HELM_SIDECAR_FILENAMES = ("run_spec.json",)
+
+
+def detect_helm_sidecars(artifact_dir: Path) -> dict[str, Any]:
+    """Look for HELM-shape sidecar files next to an EEE artifact dir.
+
+    When a HELM run was the upstream of the EEE artifact, the user
+    *can* ship the original ``run_spec.json`` alongside ``<uuid>.json``
+    and ``<uuid>_samples.jsonl`` — doing so lets the planner populate
+    comparability facts (scenario class, deployment, instructions,
+    max_eval_instances) instead of collapsing them to ``unknown``.
+
+    Returns ``{"run_spec_fpath": <abs path or None>,
+              "max_eval_instances": <str or None>}``. The
+    ``max_eval_instances`` field is parsed out of ``run_spec.json``
+    because the planner expects it on the index row, not in the
+    ``run_spec_fpath`` blob — every other adapter/scenario field flows
+    through the planner's existing ``extract_run_spec_fields`` reader.
+    """
+    run_spec_fpath = artifact_dir / "run_spec.json"
+    if not run_spec_fpath.is_file():
+        return {"run_spec_fpath": None, "max_eval_instances": None}
+    max_eval_instances: str | None = None
+    try:
+        spec = json.loads(run_spec_fpath.read_text())
+        adapter = spec.get("adapter_spec") if isinstance(spec, dict) else None
+        if isinstance(adapter, dict):
+            mei = adapter.get("max_eval_instances")
+            if mei is not None:
+                max_eval_instances = str(mei)
+    except (OSError, json.JSONDecodeError):
+        pass
+    return {
+        "run_spec_fpath": str(run_spec_fpath),
+        "max_eval_instances": max_eval_instances,
+    }
+
+
 def _extract_artifact_meta(row: dict[str, Any], *, root: Path) -> dict[str, Any]:
     """From a discovered artifact, pull model / benchmark / experiment fields."""
     data = row["data"]
@@ -117,6 +155,7 @@ def _extract_artifact_meta(row: dict[str, Any], *, root: Path) -> dict[str, Any]
     experiment_name: str | None = None
     if len(rel.parts) > 4:
         experiment_name = rel.parts[0]
+    sidecars = detect_helm_sidecars(artifact_dir)
     return {
         "artifact_dir": artifact_dir,
         "json_path": json_path,
@@ -124,6 +163,8 @@ def _extract_artifact_meta(row: dict[str, Any], *, root: Path) -> dict[str, Any]
         "benchmark": benchmark,
         "experiment_name": experiment_name,
         "evaluation_id": data.get("evaluation_id"),
+        "run_spec_fpath": sidecars["run_spec_fpath"],
+        "max_eval_instances": sidecars["max_eval_instances"],
     }
 
 
@@ -150,6 +191,8 @@ def _build_official_index_row(meta: dict[str, Any]) -> dict[str, Any]:
         "logical_run_key": logical_run_key,
         "run_name": logical_run_key,
         "run_spec_name": logical_run_key,
+        "run_spec_fpath": meta.get("run_spec_fpath"),
+        "max_eval_instances": meta.get("max_eval_instances"),
         "model": meta["model_id"],
         "benchmark": meta["benchmark"],
         "public_track": "eee_only_demo",
@@ -174,6 +217,8 @@ def _build_local_index_row(meta: dict[str, Any], *, experiment_override: str | N
         "logical_run_key": logical_run_key,
         "run_entry": logical_run_key,
         "run_spec_name": logical_run_key,
+        "run_spec_fpath": meta.get("run_spec_fpath"),
+        "max_eval_instances": meta.get("max_eval_instances"),
         "model": meta["model_id"],
         "benchmark": meta["benchmark"],
         "experiment_name": experiment_name,
