@@ -116,6 +116,16 @@ def _scaled_figsize(width: float, height: float, plot_layout: PlotLayout | None 
     return (width * scale, height * scale)
 
 
+def _apply_matplotlib_style() -> None:
+    """Apply the eval_audit matplotlib/seaborn theme.
+
+    Every plotting function that creates a Figure should call this before
+    ``plt.subplots`` so the whitegrid background, talk-context font sizes,
+    and seaborn palette are consistent across the report. (Plotly plots
+    are styled separately; this helper is matplotlib-only.)"""
+    sns.set_theme(style='whitegrid', context='talk')
+
+
 def _apply_plot_layout(fig: plt.Figure, plot_layout: PlotLayout | None) -> PlotLayout:
     layout = plot_layout or PlotLayout()
     pad_kwargs = {
@@ -743,6 +753,7 @@ def _plot_per_metric_agreement(
     pair_labels = sorted({row['pair'] for metric_rows in curves.values() for row in metric_rows})
     alias_map = short_alias_map(pair_labels)
 
+    _apply_matplotlib_style()
     fig, axes = plt.subplots(
         n_rows,
         n_cols,
@@ -887,6 +898,7 @@ def _plot_pair_metric_distributions(
     # Pad the per-row height so 1-row × N-col grids leave room for a
     # multi-line suptitle without colliding with the axis-level titles.
     row_height = 4.2 + (1.6 if len(pair_order) == 1 else 0.0)
+    _apply_matplotlib_style()
     fig, axes = plt.subplots(
         len(pair_order),
         len(metrics),
@@ -983,6 +995,7 @@ def _plot_run_metric_distributions(
     long_labels = sorted({label for _, label, _ in normalized_run_specs})
     alias_map = short_alias_map(long_labels)
     df = df.assign(run=df['run'].map(alias_map).fillna(df['run']))
+    _apply_matplotlib_style()
     fig, axes = plt.subplots(
         len(metrics),
         1,
@@ -1112,6 +1125,7 @@ def _plot_three_run_metric_distributions(
     if not metrics:
         return None
     run_order = ['kwdagger A', 'kwdagger B', 'official']
+    _apply_matplotlib_style()
     fig, axes = plt.subplots(
         len(metrics),
         len(run_order),
@@ -1322,7 +1336,7 @@ def _plot_single_pair_summary(
     *,
     plot_layout: PlotLayout | None = None,
 ) -> Path:
-    sns.set_theme(style='whitegrid', context='talk')
+    _apply_matplotlib_style()
     layout = plot_layout or PlotLayout()
     # The full pair label (a spliced comparison id; ~150-200 chars on real
     # packets) crushes the suptitle and the right-pane legend. Alias it for
@@ -2101,7 +2115,7 @@ def main(argv: list[str] | None = None) -> None:
             pair_line += f' + {pair_alias_map[extra_pair["label"]]}'
         pair_line += '  (full labels in sidecar legend artifact)'
         pair_line = paper_labels.relabel_text(pair_line)
-        sns.set_theme(style='whitegrid', context='talk')
+        _apply_matplotlib_style()
         layout = plot_layout or PlotLayout()
         fig, axes = plt.subplots(
             2,
