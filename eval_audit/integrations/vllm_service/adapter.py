@@ -121,6 +121,123 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
             "max_eval_instances": 1000,
         },
     },
+    "finish_qwen25_gptoss": {
+        # Closes the Qwen-2.5 + gpt-oss gaps surfaced by the Case Study 3
+        # audit (see ``paper_draft/case_study_3_appendix.tex``):
+        #   - Qwen 2.5 7B Instruct: 9 unique HELM run_entries from
+        #     lite/v1.9.0 with no local repro at all (math × 7 subjects
+        #     + natural_qa × 2 modes), plus reruns of the 6
+        #     execution-spec-drifted benchmark families with the public
+        #     adapter_spec.instructions intact.
+        #   - gpt-oss 20B: 8 capabilities/v1.12.0 + safety/v1.14.0
+        #     run_entries with no local repro.
+        # Driven by the ``pythia-qwen25-gptoss-mixed-4x96`` profile in
+        # the vllm_service submodule, which co-resides Qwen 2.5 + gpt-oss
+        # alongside the two Pythia services another experiment uses on
+        # the same host.
+        "bundle_name": "finish_qwen25_gptoss",
+        "backend": "compose",
+        "vllm_service_profile": "pythia-qwen25-gptoss-mixed-4x96",
+        "profiles": [
+            {
+                "profile": "qwen2-5-7b-instruct-turbo-default",
+                "model_deployment_name": "vllm/qwen2-5-7b-instruct-turbo-local",
+                "helm_model_name": "qwen/qwen2.5-7b-instruct-turbo",
+                "helm_tokenizer_name": "qwen/qwen2.5-7b-instruct",
+            },
+            {
+                "profile": "gpt-oss-20b-chat",
+                "model_deployment_name": "litellm/gpt-oss-20b-local",
+                "helm_model_name": "openai/gpt-oss-20b",
+                "helm_tokenizer_name": "openai/o200k_harmony",
+            },
+        ],
+        "smoke_manifest": {
+            "experiment_name": "audit-finish-qwen25-gptoss-smoke",
+            "description": (
+                "Smoke-test batch covering one Qwen 2.5 + one gpt-oss "
+                "run_entry from the finish_qwen25_gptoss target list."
+            ),
+            "run_entries": [
+                # One quick run from each model, both 5 instances.
+                "math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                "ifeval:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+            ],
+            "suite": "audit-finish-qwen25-gptoss-smoke",
+            "max_eval_instances": 5,
+        },
+        "full_manifest": {
+            "experiment_name": "audit-finish-qwen25-gptoss",
+            "description": (
+                "Closes the Qwen 2.5 + gpt-oss gaps in the open-weight "
+                "HELM audit (Case Study 3). Qwen rows replay the "
+                "execution-spec-drifted public run_specs (with the "
+                "matching adapter_spec.instructions prefix) plus the 9 "
+                "missing math + natural_qa entries; gpt-oss rows cover "
+                "the 8 capabilities/safety entries from suite v1.12.0 / "
+                "v1.14.0 with no local repro yet."
+            ),
+            "run_entries": [
+                # ── Qwen 2.5 7B: missing benchmarks (no local repro yet)
+                # MATH × 7 subjects, level=1, CoT=True. The lite/v1.9.0
+                # and tmp/lite/v1.9.0 tracks are the same benchmark
+                # spec; running once covers both.
+                "math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                "math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                "math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                "math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                "math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                "math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                "math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                # natural_qa × 2 modes
+                "natural_qa:mode=closedbook,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                "natural_qa:mode=openbook_longans,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                # ── Qwen 2.5 7B: rerun execution-spec-drifted families
+                # The local audit previously ran these without the
+                # public adapter_spec.instructions prefix that the
+                # public HELM Qwen runs use; rerunning here pulls the
+                # public run_spec via eval-audit-run, which carries the
+                # prefix through to the locally-served model.
+                # MMLU × 10 subjects (one entry per subject; HELM run
+                # naming uses subject as the only varying knob for
+                # mmlu's recipe-canonical packets).
+                "mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                # legalbench × 10 subjects
+                "legalbench:subset=abercrombie,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                # commonsense × 2
+                "commonsense:dataset=openbookqa,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                # gsm — was completion_content_drift; rerun with public
+                # adapter_spec to verify the stop-sequence handling
+                # matches now.
+                "gsm:model=qwen/qwen2.5-7b-instruct-turbo,stop=none,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                # med_qa
+                "med_qa:model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                # narrative_qa
+                "narrative_qa:model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                # wmt_14 × 10 language pairs (one representative; the
+                # rest follow the same pattern and can be added as
+                # HELM_EXTRA_RUN_ENTRIES if desired)
+                "wmt_14:language_pair=fr-en,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+
+                # ── gpt-oss 20B: missing capabilities/v1.12.0 entries
+                "gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                "mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                "omni_math:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                "wildbench:subset=v2,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                # ── gpt-oss 20B: missing safety/v1.14.0 entries
+                # NOTE: these scenarios may require a HELM upgrade to
+                # the v1.14.0+ safety track on aiq-gpu before they will
+                # resolve; verify with ``helm-run --help`` listing
+                # before running 50_run_full.sh.
+                "anthropic_red_team:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                "harm_bench:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                "simple_safety_tests:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                "xstest:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+            ],
+            "suite": "audit-finish-qwen25-gptoss",
+            "max_eval_instances": 1000,
+        },
+    },
 }
 
 
