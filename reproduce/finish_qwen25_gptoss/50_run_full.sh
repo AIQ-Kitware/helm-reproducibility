@@ -13,7 +13,7 @@ BUNDLE_ROOT="${BUNDLE_ROOT:-$STORE_ROOT/local-bundles/finish_qwen25_gptoss}"
 
 cd "$ROOT"
 
-if [[ ! -f "$BUNDLE_ROOT/manifest.yaml" ]]; then
+if [[ ! -f "$BUNDLE_ROOT/full_manifest.yaml" ]]; then
   bash reproduce/finish_qwen25_gptoss/05_write_bundle.sh >/dev/null
 fi
 
@@ -23,7 +23,7 @@ if [[ -n "${MAX_EVAL_INSTANCES:-}" ]]; then
   EXTRA_ARGS+=(--override-max-eval-instances "$MAX_EVAL_INSTANCES")
 fi
 
-eval-audit-run --run=1 "${EXTRA_ARGS[@]}" "$BUNDLE_ROOT/manifest.yaml"
+eval-audit-run --run=1 "${EXTRA_ARGS[@]}" "$BUNDLE_ROOT/full_manifest.yaml"
 
 echo
 echo "Full run done. Output:"

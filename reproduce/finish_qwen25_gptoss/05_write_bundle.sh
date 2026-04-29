@@ -40,4 +40,4 @@ python -m eval_audit.integrations.vllm_service export-benchmark-bundle \
 echo
 echo "Bundle: $BUNDLE_ROOT"
 echo "  smoke manifest: $BUNDLE_ROOT/smoke_manifest.yaml"
-echo "  full manifest:  $BUNDLE_ROOT/manifest.yaml"
+echo "  full manifest:  $BUNDLE_ROOT/full_manifest.yaml"

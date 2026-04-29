@@ -12,8 +12,8 @@ BUNDLE_ROOT="${BUNDLE_ROOT:-$STORE_ROOT/local-bundles/finish_qwen25_gptoss}"
 
 cd "$ROOT"
 
-if [[ ! -f "$BUNDLE_ROOT/manifest.yaml" ]]; then
+if [[ ! -f "$BUNDLE_ROOT/full_manifest.yaml" ]]; then
   bash reproduce/finish_qwen25_gptoss/05_write_bundle.sh >/dev/null
 fi
 
-eval-audit-run --run=0 "$BUNDLE_ROOT/manifest.yaml"
+eval-audit-run --run=0 "$BUNDLE_ROOT/full_manifest.yaml"

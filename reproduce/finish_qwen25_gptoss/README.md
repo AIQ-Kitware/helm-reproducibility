@@ -34,6 +34,7 @@ this runbook supports today.
 
 ```bash
 ./00_check_env.sh         # eval-audit-check-env + verify GPU layout
+./02_warmup_data.sh       # pre-cache the HF datasets HELM needs (math, gpqa, ...)
 ./05_write_bundle.sh      # write the eval-audit benchmark bundle
 ./10_start_service.sh     # vllm_service: switch to the new profile
 ./15_validate_server.sh   # smoke-test the LiteLLM router for all 4 models
@@ -51,7 +52,7 @@ Each step is idempotent (compute_if_missing skips DONE markers).
 
 ```
 $AUDIT_STORE_ROOT/local-bundles/finish_qwen25_gptoss/
-├── manifest.yaml          # eval-audit-run input (full)
+├── full_manifest.yaml          # eval-audit-run input (full)
 ├── smoke_manifest.yaml    # eval-audit-run input (smoke)
 ├── run_details.yaml       # transport bindings (LiteLLM URL, deployment names)
 └── README.md              # auto-generated bundle description
@@ -78,6 +79,23 @@ $AUDIT_STORE_ROOT/indexes/audit_results_index.csv       # refreshed by 60_index_
   (e.g. `joncrall@analysis-host:/data/crfm-helm-audit-store/indexes/`).
 
 ## Caveats
+
+- **MATH benchmark dataset must be pre-cached**. HELM's `math:` runs
+  load `hendrycks/competition_math` from HuggingFace at run time. If
+  `aiq-gpu` is in offline mode (or the HF cache hasn't seen this
+  dataset before), the run crashes with
+  `FileNotFoundError: Couldn't find a dataset script at
+  .../hendrycks/competition_math/competition_math.py`. Pre-cache with:
+
+  ```bash
+  huggingface-cli download hendrycks/competition_math \
+    --repo-type dataset
+  ```
+
+  This populates `$HF_HOME/datasets/hendrycks___competition_math`
+  once and subsequent runs use the cache. The same workaround applies
+  to any other HF-backed benchmark (`gpqa`, `mmlu_pro`, `omni_math`,
+  etc.) when the host can't reach the Hub at run time.
 
 - **HELM-version requirement for the safety entries**:
   `anthropic_red_team`, `harm_bench`, `simple_safety_tests`, and
