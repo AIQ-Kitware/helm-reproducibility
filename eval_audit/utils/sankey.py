@@ -55,12 +55,12 @@ def emit_sankey_artifacts(
     graph_summary = graph.summarize(max_edges=300)
     plan_text = root.to_text()
 
-    json_fpath = _machine / f"sankey_{kind}.latest.json"
-    txt_fpath = _static / f"sankey_{kind}.latest.txt"
-    key_fpath = _static / f"sankey_{kind}.latest.key.txt"
-    html_fpath = _interactive / f"sankey_{kind}.latest.html"
-    jpg_fpath = _static / f"sankey_{kind}.latest.jpg"
-    png_fpath = _static / f"sankey_{kind}.latest.png"
+    json_fpath = _machine / f"sankey_{kind}.json"
+    txt_fpath = _static / f"sankey_{kind}.txt"
+    key_fpath = _static / f"sankey_{kind}.key.txt"
+    html_fpath = _interactive / f"sankey_{kind}.html"
+    jpg_fpath = _static / f"sankey_{kind}.jpg"
+    png_fpath = _static / f"sankey_{kind}.png"
 
     node_labels, source, target, value = graph._to_sankey_data()
     payload = kwutil.Json.ensure_serializable(

@@ -671,9 +671,9 @@ def write_filter_rebuild_script(report_dpath: Path, *, inventory_json: Path | No
         '--report-dpath',
         '"${REPORT_DPATH}"',
         '--inventory-json',
-        '"${REPORT_DPATH}/machine/model_filter_inventory.latest.json"',
+        '"${REPORT_DPATH}/machine/model_filter_inventory.json"',
     ]
-    script = write_reproduce_script(report_dpath / 'rebuild_analysis.latest.sh', [
+    script = write_reproduce_script(report_dpath / 'rebuild_analysis.sh', [
         '#!/usr/bin/env bash',
         'set -euo pipefail',
         *portable_repo_root_lines(),
@@ -707,7 +707,7 @@ def write_filter_reproduce_script(report_dpath: Path, *, source_command: str | N
             '# Rebuild the filter report bundle from the latest saved inventory.',
             'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" -m eval_audit.cli.reports filter --report-dpath "$REPORT_DPATH" "$@"',
         ])
-    script = write_reproduce_script(report_dpath / 'reproduce.latest.sh', lines)
+    script = write_reproduce_script(report_dpath / 'reproduce.sh', lines)
     link_alias(script, report_dpath, 'reproduce.sh')
     return script
 
@@ -908,7 +908,7 @@ def _load_inventory_json(report_dpath: Path, inventory_json: Path | None = None)
     if inventory_json is not None:
         payload = json.loads(inventory_json.read_text())
         return payload
-    latest = report_dpath / 'machine' / 'model_filter_inventory.latest.json'
+    latest = report_dpath / 'machine' / 'model_filter_inventory.json'
     if latest.exists():
         return json.loads(latest.read_text())
     candidates = sorted((report_dpath / 'machine').glob('model_filter_inventory_*.json'), reverse=True)
@@ -917,7 +917,7 @@ def _load_inventory_json(report_dpath: Path, inventory_json: Path | None = None)
     raise FileNotFoundError(
         f'No filter inventory JSON found under {report_dpath}. '
         'Re-run Stage 1 with the updated index_historic_helm_runs flow so it emits '
-        'machine/model_filter_inventory.latest.json, or pass --inventory-json explicitly.'
+        'machine/model_filter_inventory.json, or pass --inventory-json explicitly.'
     )
 
 
@@ -1040,8 +1040,8 @@ def emit_filter_report_artifacts(
         interactive_dpath=interactive_dpath,
         static_dpath=static_dpath,
     )
-    link_alias(Path(outputs['filter_cardinality_txt']), report_dpath, 'filter_cardinality_summary.latest.txt')
-    link_alias(Path(outputs['local_serving_txt']), report_dpath, 'filter_local_serving_summary.latest.txt')
+    link_alias(Path(outputs['filter_cardinality_txt']), report_dpath, 'filter_cardinality_summary.txt')
+    link_alias(Path(outputs['local_serving_txt']), report_dpath, 'filter_local_serving_summary.txt')
     return outputs
 
 
@@ -1196,8 +1196,8 @@ def _emit_bar_chart(
     if not rows:
         return {'html': None, 'png': None, 'plotly_error': None}
     del report_dpath, stamp  # vestigial; kept in signature for backwards-compat
-    html_fpath = interactive_dpath / f'{stem}.latest.html'
-    png_fpath = static_dpath / f'{stem}.latest.png'
+    html_fpath = interactive_dpath / f'{stem}.html'
+    png_fpath = static_dpath / f'{stem}.png'
     html_out = None
     png_out = None
     plotly_error = None
@@ -1252,8 +1252,8 @@ def _emit_stacked_bar_chart(
     if not rows:
         return {'html': None, 'png': None, 'plotly_error': None}
     del report_dpath, stamp  # vestigial; kept in signature for backwards-compat
-    html_fpath = interactive_dpath / f'{stem}.latest.html'
-    png_fpath = static_dpath / f'{stem}.latest.png'
+    html_fpath = interactive_dpath / f'{stem}.html'
+    png_fpath = static_dpath / f'{stem}.png'
     html_out = None
     png_out = None
     plotly_error = None

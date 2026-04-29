@@ -34,7 +34,7 @@ def _agreement_at_zero(curve: list[dict]) -> float | None:
 
 
 def _load_pairs(packet_dir: Path) -> list[dict]:
-    payload = json.loads((packet_dir / "core_metric_report.latest.json").read_text())
+    payload = json.loads((packet_dir / "core_metric_report.json").read_text())
     return payload.get("pairs") or []
 
 
@@ -71,8 +71,8 @@ def demo_output(tmp_path_factory) -> Path:
 
 def test_index_csvs_written(demo_output: Path) -> None:
     """Both synthesized indexes should land where the planner expects them."""
-    assert (demo_output / "official_public_index.latest.csv").is_file()
-    assert (demo_output / "audit_results_index.latest.csv").is_file()
+    assert (demo_output / "official_public_index.csv").is_file()
+    assert (demo_output / "audit_results_index.csv").is_file()
 
 
 def test_planner_packet_and_pair_counts(demo_output: Path) -> None:
@@ -163,7 +163,7 @@ def test_eee_only_components_are_eee(demo_output: Path) -> None:
     """
     for packet_dir in (demo_output / "eee_only_local" / "core-reports").iterdir():
         manifest = json.loads(
-            (packet_dir / "components_manifest.latest.json").read_text()
+            (packet_dir / "components_manifest.json").read_text()
         )
         for component in manifest.get("components") or []:
             assert component.get("artifact_format") == "eee", component
@@ -182,7 +182,7 @@ def test_aggregate_summary_buckets_match_fixture_drift(demo_output: Path) -> Non
     summary_root = demo_output / "aggregate-summary" / "all-results"
     if not summary_root.exists():
         pytest.skip("aggregate summary not built; --build-aggregate-summary missing?")
-    bucket_csv = summary_root / "reproducibility_rows.latest.csv"
+    bucket_csv = summary_root / "reproducibility_rows.csv"
     assert bucket_csv.is_file(), bucket_csv
     rows = list(__import__("csv").DictReader(bucket_csv.open()))
     assert len(rows) == 9, [r.get("packet_id") for r in rows]
@@ -205,7 +205,7 @@ def test_aggregate_summary_no_canonical_leak(demo_output: Path) -> None:
     if not summary_root.exists():
         pytest.skip("aggregate summary not built")
     csv_module = __import__("csv")
-    rows = list(csv_module.DictReader((summary_root / "reproducibility_rows.latest.csv").open()))
+    rows = list(csv_module.DictReader((summary_root / "reproducibility_rows.csv").open()))
     for row in rows:
         report_dir = row.get("report_dir") or ""
         # Every report dir referenced by the aggregate summary must live

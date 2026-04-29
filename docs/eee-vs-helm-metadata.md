@@ -13,7 +13,7 @@
 Both routes go through the same comparison-intent planner
 (`eval_audit/planning/core_report_planner.py`) and the same core-metric
 renderer (`eval_audit/reports/core_metrics.py`). They produce the same
-`core_metric_report.latest.{txt,json,png}` shape. **The difference is in
+`core_metric_report.{txt,json,png}` shape. **The difference is in
 the comparability-fact metadata each side can substantiate.**
 
 This document catalogues what HELM has that EEE doesn't, what that means
@@ -144,7 +144,7 @@ EEE side rather than the eval_audit side.
 
 If your pipeline genuinely doesn't have HELM provenance, the right move
 is *not* to fabricate it. Run the EEE-only comparison; the report's
-`comparability_unknown:*` warnings + `eee_metadata_caveats.latest.txt`
+`comparability_unknown:*` warnings + `eee_metadata_caveats.txt`
 file accurately tell the reader "we couldn't verify these identity
 claims." That's better than a `same_deployment=yes` that quietly
 asserts equivalence the data doesn't support.

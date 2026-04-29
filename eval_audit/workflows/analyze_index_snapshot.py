@@ -10,7 +10,7 @@ or make deduplication decisions.
 Usage:
 
     python -m eval_audit.workflows.analyze_index_snapshot \\
-        --index_fpath /data/my-store/indexes/my_index.latest.csv \\
+        --index_fpath /data/my-store/indexes/my_index.csv \\
         --out_dpath   /data/my-store/analysis/index-snapshot/
 """
 
@@ -68,7 +68,7 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
     when absent so that all downstream groupby calls succeed.  Breakdowns on
     absent columns produce empty tables and trivially-empty figures.
 
-    The returned dict mirrors ``index_snapshot_summary.latest.json`` exactly —
+    The returned dict mirrors ``index_snapshot_summary.json`` exactly —
     it contains complete (non-truncated) arrays.  Only the TXT summary
     truncates long lists for human readability.
 
@@ -77,7 +77,7 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
         out_dpath: Directory where analysis artifacts will be written.
 
     Returns:
-        Summary dict (same content as ``index_snapshot_summary.latest.json``).
+        Summary dict (same content as ``index_snapshot_summary.json``).
     """
     logger.info('Loading index snapshot from {}', index_fpath)
     df = pd.read_csv(index_fpath, low_memory=False)
@@ -227,45 +227,45 @@ def analyze_index_snapshot(index_fpath: Path, out_dpath: Path) -> dict:
     summary_text = _format_summary_text(
         summary, df, tracks, suite_versions, by_model, by_benchmark,
     )
-    _write_txt(summary_text, 'index_snapshot_summary.latest.txt')
-    _write_json(summary, 'index_snapshot_summary.latest.json')
+    _write_txt(summary_text, 'index_snapshot_summary.txt')
+    _write_json(summary, 'index_snapshot_summary.json')
 
-    _write_csv(by_track, 'index_snapshot_by_track.latest.csv')
-    _write_csv(by_suite, 'index_snapshot_by_suite_version.latest.csv')
-    _write_csv(by_model, 'index_snapshot_by_model.latest.csv')
-    _write_csv(by_benchmark, 'index_snapshot_by_benchmark.latest.csv')
-    _write_csv(by_entry_kind, 'index_snapshot_by_entry_kind.latest.csv')
+    _write_csv(by_track, 'index_snapshot_by_track.csv')
+    _write_csv(by_suite, 'index_snapshot_by_suite_version.csv')
+    _write_csv(by_model, 'index_snapshot_by_model.csv')
+    _write_csv(by_benchmark, 'index_snapshot_by_benchmark.csv')
+    _write_csv(by_entry_kind, 'index_snapshot_by_entry_kind.csv')
 
     # HTML + JPG figures
     _write_plotly_figure_bundle(
         by_track, y_col='public_track', x_col='total_rows',
         title='HELM Index Snapshot — Rows by Track',
-        html_fpath=out_dpath / 'index_snapshot_tracks.latest.html',
-        jpg_fpath=out_dpath / 'index_snapshot_tracks.latest.jpg',
+        html_fpath=out_dpath / 'index_snapshot_tracks.html',
+        jpg_fpath=out_dpath / 'index_snapshot_tracks.jpg',
     )
     _write_plotly_figure_bundle(
         by_suite, y_col='suite_version', x_col='total_rows',
         title='HELM Index Snapshot — Rows by Suite Version',
-        html_fpath=out_dpath / 'index_snapshot_suite_versions.latest.html',
-        jpg_fpath=out_dpath / 'index_snapshot_suite_versions.latest.jpg',
+        html_fpath=out_dpath / 'index_snapshot_suite_versions.html',
+        jpg_fpath=out_dpath / 'index_snapshot_suite_versions.jpg',
     )
     _write_plotly_figure_bundle(
         by_model, y_col='model', x_col='total_runs',
         title='HELM Index Snapshot — Runs by Model',
-        html_fpath=out_dpath / 'index_snapshot_models.latest.html',
-        jpg_fpath=out_dpath / 'index_snapshot_models.latest.jpg',
+        html_fpath=out_dpath / 'index_snapshot_models.html',
+        jpg_fpath=out_dpath / 'index_snapshot_models.jpg',
     )
     _write_plotly_figure_bundle(
         by_benchmark, y_col='benchmark_group', x_col='total_runs',
         title='HELM Index Snapshot — Runs by Benchmark Group',
-        html_fpath=out_dpath / 'index_snapshot_benchmarks.latest.html',
-        jpg_fpath=out_dpath / 'index_snapshot_benchmarks.latest.jpg',
+        html_fpath=out_dpath / 'index_snapshot_benchmarks.html',
+        jpg_fpath=out_dpath / 'index_snapshot_benchmarks.jpg',
     )
     _write_plotly_figure_bundle(
         by_entry_kind, y_col='entry_kind', x_col='total_rows',
         title='HELM Index Snapshot — Rows by Entry Kind',
-        html_fpath=out_dpath / 'index_snapshot_entry_kinds.latest.html',
-        jpg_fpath=out_dpath / 'index_snapshot_entry_kinds.latest.jpg',
+        html_fpath=out_dpath / 'index_snapshot_entry_kinds.html',
+        jpg_fpath=out_dpath / 'index_snapshot_entry_kinds.jpg',
     )
 
     print(summary_text)

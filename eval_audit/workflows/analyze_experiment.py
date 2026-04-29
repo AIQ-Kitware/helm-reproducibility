@@ -97,12 +97,12 @@ def _latest_matching_aiq_gpu_row(
 
 
 def _latest_pair_report(report_dpath: Path) -> tuple[Path | None, Path | None]:
-    # pair_report.py writes directly to pair_report.latest.{json,txt} since
+    # pair_report.py writes directly to pair_report.{json,txt} since
     # the history retirement (2026-04-28). Old stamped pair_report_<stamp>.*
     # files may still exist as orphans; we still pick those up as a fallback
     # so reports built on top of orphan data keep loading.
-    json_fpath = report_dpath / "pair_report.latest.json"
-    txt_fpath = report_dpath / "pair_report.latest.txt"
+    json_fpath = report_dpath / "pair_report.json"
+    txt_fpath = report_dpath / "pair_report.txt"
     if not json_fpath.exists():
         cands = sorted(report_dpath.glob("pair_report_*.json"), reverse=True)
         json_fpath = cands[0] if cands else None
@@ -115,22 +115,22 @@ def _latest_pair_report(report_dpath: Path) -> tuple[Path | None, Path | None]:
 def _write_latest_pair_aliases(report_dpath: Path) -> dict[str, str]:
     """Return paths to the canonical pair_report artifacts under
     ``report_dpath``. Since pair_report.py writes directly to
-    ``pair_report.latest.{json,txt}`` (history layer retired) this function
+    ``pair_report.{json,txt}`` (history layer retired) this function
     is now mostly a path-resolver; it only creates a symlink alias when the
     canonical name doesn't already exist (i.e. only the orphaned stamped
     file is on disk)."""
     json_fpath, txt_fpath = _latest_pair_report(report_dpath)
     created: dict[str, str] = {}
     if json_fpath is not None:
-        canonical = report_dpath / "pair_report.latest.json"
+        canonical = report_dpath / "pair_report.json"
         if json_fpath != canonical and not canonical.exists():
-            link_alias(json_fpath, report_dpath, "pair_report.latest.json")
-        created["pair_report.latest.json"] = str(canonical)
+            link_alias(json_fpath, report_dpath, "pair_report.json")
+        created["pair_report.json"] = str(canonical)
     if txt_fpath is not None:
-        canonical = report_dpath / "pair_report.latest.txt"
+        canonical = report_dpath / "pair_report.txt"
         if txt_fpath != canonical and not canonical.exists():
-            link_alias(txt_fpath, report_dpath, "pair_report.latest.txt")
-        created["pair_report.latest.txt"] = str(canonical)
+            link_alias(txt_fpath, report_dpath, "pair_report.txt")
+        created["pair_report.txt"] = str(canonical)
     return created
 
 
@@ -350,7 +350,7 @@ def main(argv: list[str] | None = None) -> None:
                 'error': str(ex),
             })
             continue
-        built_report_paths.append(report_dpath / 'core_metric_report.latest.json')
+        built_report_paths.append(report_dpath / 'core_metric_report.json')
 
     summary_rows = []
     for report_json in built_report_paths:
@@ -401,8 +401,8 @@ def main(argv: list[str] | None = None) -> None:
             '--report-dpath', str(cross_report_dpath),
         ])
         latest_links = _write_latest_pair_aliases(cross_report_dpath)
-        cross_json_fpath = cross_report_dpath / 'pair_report.latest.json'
-        cross_txt_fpath = cross_report_dpath / 'pair_report.latest.txt'
+        cross_json_fpath = cross_report_dpath / 'pair_report.json'
+        cross_txt_fpath = cross_report_dpath / 'pair_report.txt'
         cross_payload = _load_json(cross_json_fpath) if cross_json_fpath.exists() else {}
         strict = cross_payload.get('strict_summary', {}) or {}
         cross_diag = (strict.get('diagnosis', {}) or {})
@@ -437,9 +437,9 @@ def main(argv: list[str] | None = None) -> None:
     table = pd.DataFrame(summary_rows)
     if 'run_spec_name' in table.columns:
         table = table.sort_values('run_spec_name')
-    json_fpath = out_dpath / 'experiment_summary.latest.json'
-    csv_fpath = out_dpath / 'experiment_summary.latest.csv'
-    txt_fpath = out_dpath / 'experiment_summary.latest.txt'
+    json_fpath = out_dpath / 'experiment_summary.json'
+    csv_fpath = out_dpath / 'experiment_summary.csv'
+    txt_fpath = out_dpath / 'experiment_summary.txt'
 
     payload = {
         'generated_utc': stamp,
@@ -569,7 +569,7 @@ def main(argv: list[str] | None = None) -> None:
         *( ['--ensure-local-eee'] if planning_artifact.get('ensure_local_eee') else [] ),
         *( ['--allow-single-repeat'] if args.allow_single_repeat else [] ),
     ]
-    reproduce_fpath = write_reproduce_script(out_dpath / 'reproduce.latest.sh', [
+    reproduce_fpath = write_reproduce_script(out_dpath / 'reproduce.sh', [
         '#!/usr/bin/env bash',
         'set -euo pipefail',
         *portable_repo_root_lines(),
@@ -578,7 +578,7 @@ def main(argv: list[str] | None = None) -> None:
         + ' '.join(shlex.quote(part) for part in cmd_parts)
         + ' "$@"',
     ])
-    # reproduce.sh is a navigation alias to the canonical reproduce.latest.sh
+    # reproduce.sh is a navigation alias to the canonical reproduce.sh
     # so the legacy path keeps working.
     link_alias(reproduce_fpath, out_dpath, 'reproduce.sh')
 

@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> None:
     out_dpath = Path(args.out_dpath).expanduser().resolve() if args.out_dpath else (report_root / 'overall-reproducibility')
     out_dpath.mkdir(parents=True, exist_ok=True)
 
-    report_paths = sorted(glob.glob(str(report_root / 'core-metrics-*' / 'core_metric_report.latest.json')))
+    report_paths = sorted(glob.glob(str(report_root / 'core-metrics-*' / 'core_metric_report.json')))
     rows = []
     for p in report_paths:
         fpath = Path(p)
@@ -124,10 +124,10 @@ def main(argv: list[str] | None = None) -> None:
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
     out_dpath.mkdir(parents=True, exist_ok=True)
 
-    json_fpath = out_dpath / 'overall_reproducibility_summary.latest.json'
-    csv_fpath = out_dpath / 'overall_reproducibility_summary.latest.csv'
-    txt_fpath = out_dpath / 'overall_reproducibility_summary.latest.txt'
-    md_fpath = out_dpath / 'overall_reproducibility_summary.latest.md'
+    json_fpath = out_dpath / 'overall_reproducibility_summary.json'
+    csv_fpath = out_dpath / 'overall_reproducibility_summary.csv'
+    txt_fpath = out_dpath / 'overall_reproducibility_summary.txt'
+    md_fpath = out_dpath / 'overall_reproducibility_summary.md'
 
     summary = {
         'generated_utc': stamp,

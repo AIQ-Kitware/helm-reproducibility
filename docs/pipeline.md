@@ -193,10 +193,10 @@ diagnosis (`deployment_drift`, `execution_spec_drift`,
 
 ```
 $AUDIT_STORE_ROOT/analysis/core-reports/<packet-slug>/
-├── components_manifest.latest.json
-├── core_metric_management_summary.latest.txt
-├── core_metric_ecdfs.latest.png         # per-metric agreement ECDF
-├── *.latest.json                         # comparability facts, etc.
+├── components_manifest.json
+├── core_metric_management_summary.txt
+├── core_metric_ecdfs.png         # per-metric agreement ECDF
+├── *.json                         # comparability facts, etc.
 └── .history/                             # stamped past runs
 ```
 
@@ -216,7 +216,7 @@ $AUDIT_STORE_ROOT/analysis/core-reports/<packet-slug>/
    to logical match → recipe-canonical match → analyzed packet → agreement
    bucket.
 3. **Coverage funnel summary:** the three-level table from Stage 2,
-   formatted as `coverage_funnel_summary.latest.txt`.
+   formatted as `coverage_funnel_summary.txt`.
 4. **Prioritized examples:** quantile-bucketed example packets
    (`score_ge_95`, `best`, `mid`, `worst`, `score_lt_80`, `flagged`).
 5. **Aggregate README:** narrative report combining the above.
@@ -230,20 +230,20 @@ $AUDIT_STORE_ROOT/virtual-experiments/<name>/
 ├── scoped_filter_inventory.json
 ├── reports/
 │   ├── aggregate-summary/all-results/
-│   │   ├── README.latest.txt
-│   │   ├── sankey_a_universe_to_scope.latest.html
-│   │   ├── sankey_b_scope_to_analyzed.latest.html
+│   │   ├── README.txt
+│   │   ├── sankey_a_universe_to_scope.html
+│   │   ├── sankey_b_scope_to_analyzed.html
 │   │   └── prioritized_examples.latest/{score_ge_95,best,mid,worst,score_lt_80,flagged}/
 │   └── scoped_funnel/
-│       ├── coverage_funnel_summary.latest.txt
-│       └── missing_targets.latest.csv
+│       ├── coverage_funnel_summary.txt
+│       └── missing_targets.csv
 └── REPRODUCIBILITY_REPORT.md           # hand-written narrative
 ```
 
 ## Filesystem-as-interface
 
-`*.latest.<ext>` are symlinks to the most recent stamped run; the stamps
-live under `.history/`. Many directories also carry a `reproduce.latest.sh`
+`*.<ext>` are symlinks to the most recent stamped run; the stamps
+live under `.history/`. Many directories also carry a `reproduce.sh`
 that re-runs the computation that produced that directory. ADRs 4 ("the
 filesystem is part of the interface") and 5 ("every meaningful generated
 output gets a reproduce script") in

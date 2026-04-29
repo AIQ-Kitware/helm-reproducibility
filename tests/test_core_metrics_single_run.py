@@ -244,8 +244,8 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
             }
         ],
     }
-    components_fpath = report_dpath / "components_manifest.latest.json"
-    comparisons_fpath = report_dpath / "comparisons_manifest.latest.json"
+    components_fpath = report_dpath / "components_manifest.json"
+    comparisons_fpath = report_dpath / "comparisons_manifest.json"
     _write_manifest(components_fpath, components_manifest)
     _write_manifest(comparisons_fpath, comparisons_manifest)
 
@@ -318,26 +318,26 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
 
     # Canonical lightweight outputs are always present
     for name in [
-        "core_metric_report.latest.png",
-        "core_metric_management_summary.latest.txt",
-        "core_runlevel_table.latest.csv",
-        "warnings.latest.json",
-        "warnings.latest.txt",
+        "core_metric_report.png",
+        "core_metric_management_summary.txt",
+        "core_runlevel_table.csv",
+        "warnings.json",
+        "warnings.txt",
     ]:
         assert (report_dpath / name).exists(), f"canonical output missing: {name}"
 
     # Heavy pairwise PNG plots are NOT rendered by default
     for name in [
-        "core_metric_distributions.latest.png",
-        "core_metric_overlay_distributions.latest.png",
-        "core_metric_ecdfs.latest.png",
-        "core_metric_per_metric_agreement.latest.png",
+        "core_metric_distributions.png",
+        "core_metric_overlay_distributions.png",
+        "core_metric_ecdfs.png",
+        "core_metric_per_metric_agreement.png",
     ]:
         assert not (report_dpath / name).exists(), f"heavy artifact should not be auto-rendered: {name}"
 
-    assert not (report_dpath / "core_metric_three_run_distributions.latest.png").exists()
+    assert not (report_dpath / "core_metric_three_run_distributions.png").exists()
 
-    text = (report_dpath / "core_metric_management_summary.latest.txt").read_text()
+    text = (report_dpath / "core_metric_management_summary.txt").read_text()
     assert f"report_dpath: {report_dpath}" in text
     assert f"components_manifest: {components_fpath}" in text
     assert f"comparisons_manifest: {comparisons_fpath}" in text
@@ -347,48 +347,48 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
     assert "comparability:" in text
     assert "on_demand_heavy_pairwise_plots" in text, "management summary must note on-demand rendering"
     assert "render_heavy_pairwise_plots.sh" in text
-    warnings_payload = json.loads((report_dpath / "warnings.latest.json").read_text())
+    warnings_payload = json.loads((report_dpath / "warnings.json").read_text())
     assert warnings_payload["packet_warnings"] == ["comparability_drift:same_deployment"]
 
     # With --render-heavy-pairwise-plots flag, heavy outputs ARE written
     core_metrics.main(base_argv + ["--render-heavy-pairwise-plots"])
 
     for name in [
-        "core_metric_distributions.latest.png",
-        "core_metric_overlay_distributions.latest.png",
-        "core_metric_ecdfs.latest.png",
-        "core_metric_per_metric_agreement.latest.png",
+        "core_metric_distributions.png",
+        "core_metric_overlay_distributions.png",
+        "core_metric_ecdfs.png",
+        "core_metric_per_metric_agreement.png",
     ]:
         assert (report_dpath / name).exists(), f"heavy PNG plot missing with --render-heavy-pairwise-plots: {name}"
 
     # Sidecar legend artifacts (short alias -> long display_name) ride along
     # with the ECDF and overlay distribution plots so the legend stays legible.
     for name in [
-        "core_metric_ecdfs_label_legend.latest.png",
-        "core_metric_ecdfs_label_legend.latest.txt",
-        "core_metric_overlay_distributions_label_legend.latest.png",
-        "core_metric_overlay_distributions_label_legend.latest.txt",
+        "core_metric_ecdfs_label_legend.png",
+        "core_metric_ecdfs_label_legend.txt",
+        "core_metric_overlay_distributions_label_legend.png",
+        "core_metric_overlay_distributions_label_legend.txt",
     ]:
         assert (report_dpath / name).exists(), f"sidecar label legend missing: {name}"
 
     # Snapshot canonical (non-plot) latest-alias content + mtime before the
     # plots-only redraw so we can verify they are not modified. After the
-    # history retirement (2026-04-28) the *.latest.* paths are the actual
+    # history retirement (2026-04-28) the *.* paths are the actual
     # files (not symlinks into .history/), so the right "did this change?"
     # signal is mtime, not symlink target divergence.
     pre_redraw_canonical = {
         name: (report_dpath / name).stat().st_mtime_ns
         for name in [
-            "core_metric_report.latest.json",
-            "core_metric_report.latest.txt",
-            "core_metric_management_summary.latest.txt",
-            "warnings.latest.json",
-            "warnings.latest.txt",
-            "core_runlevel_table.latest.csv",
+            "core_metric_report.json",
+            "core_metric_report.txt",
+            "core_metric_management_summary.txt",
+            "warnings.json",
+            "warnings.txt",
+            "core_runlevel_table.csv",
         ]
         if (report_dpath / name).exists()
     }
-    pre_redraw_ecdf_mtime = (report_dpath / "core_metric_ecdfs.latest.png").stat().st_mtime_ns
+    pre_redraw_ecdf_mtime = (report_dpath / "core_metric_ecdfs.png").stat().st_mtime_ns
 
     with monkeypatch.context() as m:
         def fail_heavy_plot(*args, **kwargs):
@@ -406,7 +406,7 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
         )
 
     # --plot_target=core_metric_report must NOT touch the ecdfs plot.
-    assert (report_dpath / "core_metric_ecdfs.latest.png").stat().st_mtime_ns == pre_redraw_ecdf_mtime
+    assert (report_dpath / "core_metric_ecdfs.png").stat().st_mtime_ns == pre_redraw_ecdf_mtime
 
     # --plots-only (no --plot_target) must refresh plot files but leave
     # canonical (non-plot) artifacts exactly as they were. Fast iteration on
@@ -429,9 +429,9 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
         assert (report_dpath / name).stat().st_mtime_ns == prior_mtime, (
             f"--plots-only must not modify canonical artifact: {name}"
         )
-    new_ecdf_mtime = (report_dpath / "core_metric_ecdfs.latest.png").stat().st_mtime_ns
+    new_ecdf_mtime = (report_dpath / "core_metric_ecdfs.png").stat().st_mtime_ns
     assert new_ecdf_mtime != pre_redraw_ecdf_mtime, "--plots-only must rewrite the ecdfs plot"
-    assert (report_dpath / "core_metric_ecdfs_label_legend.latest.png").exists()
+    assert (report_dpath / "core_metric_ecdfs_label_legend.png").exists()
 
 
 def test_diagnostic_flags_use_manifest_semantics_not_component_order():

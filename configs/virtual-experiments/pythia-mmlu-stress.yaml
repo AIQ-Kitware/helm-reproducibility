@@ -14,7 +14,7 @@ scope:
 
 sources:
   - kind: audit_index
-    fpath: /data/crfm-helm-audit-store/indexes/audit_results_index.latest.csv
+    fpath: /data/crfm-helm-audit-store/indexes/audit_results_index.csv
     include_experiments:
       - audit-mmlu-usfp-pythia-r1
       - audit-mmlu-usfp-pythia-r2
@@ -22,7 +22,7 @@ sources:
       - audit-pythia-12b-mmlu-smoke  # 2026-04-28: pythia-12b-v0 × abstract_algebra, run on aiq-gpu via the eval-audit-run / kwdagger / magnet / helm-run chain (the dormant execution path; this run was the first end-to-end exercise of it in months)
 
   - kind: official_public_index
-    fpath: /data/crfm-helm-audit-store/indexes/official_public_index.latest.csv
+    fpath: /data/crfm-helm-audit-store/indexes/official_public_index.csv
     # Stage-1 eligibility filter: which public HELM runs we even consider for
     # local reproduction (open-weight, runnable deployment, structurally
     # complete, etc.). When attached here, the composer re-stamps the

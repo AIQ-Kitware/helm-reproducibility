@@ -24,12 +24,12 @@ scope:
 
 sources:
   - kind: audit_index
-    fpath: /data/crfm-helm-audit-store/indexes/audit_results_index.latest.csv
+    fpath: /data/crfm-helm-audit-store/indexes/audit_results_index.csv
     # Empty include_experiments = include all 25 audit experiments. The
     # manifest scope (model regex) does the narrowing.
 
   - kind: official_public_index
-    fpath: /data/crfm-helm-audit-store/indexes/official_public_index.latest.csv
+    fpath: /data/crfm-helm-audit-store/indexes/official_public_index.csv
     pre_filter:
       kind: helm_stage1
       inventory_fpath: /data/crfm-helm-audit-store/analysis/filter_inventory.json

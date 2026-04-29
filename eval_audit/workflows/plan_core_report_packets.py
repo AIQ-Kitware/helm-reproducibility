@@ -48,13 +48,13 @@ def write_planning_outputs(*, artifact: dict[str, Any], out_dpath: Path) -> dict
     out_dpath = out_dpath.expanduser().resolve()
     out_dpath.mkdir(parents=True, exist_ok=True)
 
-    json_fpath = out_dpath / "comparison_intents.latest.json"
-    txt_fpath = out_dpath / "comparison_intents.latest.txt"
-    packet_csv_fpath = out_dpath / "comparison_intent_packets.latest.csv"
-    component_csv_fpath = out_dpath / "comparison_intent_components.latest.csv"
-    comparison_csv_fpath = out_dpath / "comparison_intent_comparisons.latest.csv"
-    warnings_json_fpath = out_dpath / "warnings.latest.json"
-    warnings_txt_fpath = out_dpath / "warnings.latest.txt"
+    json_fpath = out_dpath / "comparison_intents.json"
+    txt_fpath = out_dpath / "comparison_intents.txt"
+    packet_csv_fpath = out_dpath / "comparison_intent_packets.csv"
+    component_csv_fpath = out_dpath / "comparison_intent_components.csv"
+    comparison_csv_fpath = out_dpath / "comparison_intent_comparisons.csv"
+    warnings_json_fpath = out_dpath / "warnings.json"
+    warnings_txt_fpath = out_dpath / "warnings.txt"
 
     _write_json(artifact, json_fpath)
     _write_text(planning_summary_lines(artifact), txt_fpath)

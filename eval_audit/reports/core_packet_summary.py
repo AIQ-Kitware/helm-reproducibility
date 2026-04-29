@@ -26,7 +26,7 @@ def load_core_report_packet(report_dpath: str | Path) -> dict[str, Any]:
         for component in components
         if component.get("component_id")
     }
-    warnings_manifest_path = report_dpath / "warnings.latest.json"
+    warnings_manifest_path = report_dpath / "warnings.json"
     warnings_manifest = {}
     if warnings_manifest_path.exists():
         try:
@@ -119,12 +119,12 @@ def packet_sample_artifact_names(packet: dict[str, Any]) -> list[str]:
 
 def prioritized_example_artifact_names(packet: dict[str, Any]) -> list[str]:
     return [
-        "core_metric_report.latest.png",
-        "core_metric_management_summary.latest.txt",
-        "components_manifest.latest.json",
-        "comparisons_manifest.latest.json",
-        "warnings.latest.json",
-        "warnings.latest.txt",
+        "core_metric_report.png",
+        "core_metric_management_summary.txt",
+        "components_manifest.json",
+        "comparisons_manifest.json",
+        "warnings.json",
+        "warnings.txt",
         *packet_sample_artifact_names(packet),
     ]
 

@@ -195,7 +195,7 @@ their own useful finding but a different paper.
 
 ## Coverage funnel summary
 
-`reports/scoped_funnel/coverage_funnel_summary.latest.txt` shows the
+`reports/scoped_funnel/coverage_funnel_summary.txt` shows the
 full three-level breakdown. Key counts:
 
 | stage                                   |   count |
@@ -213,16 +213,16 @@ should *either* run with corrected prompts *or* call out as
 
 ## Reading order for a referee
 
-1. `reports/aggregate-summary/.../README.latest.txt`
-2. `reports/scoped_funnel/coverage_funnel_summary.latest.txt` — the
+1. `reports/aggregate-summary/.../README.txt`
+2. `reports/scoped_funnel/coverage_funnel_summary.txt` — the
    three-level coverage funnel.
-3. `reports/aggregate-summary/.../sankey_a_universe_to_scope.latest.html`
+3. `reports/aggregate-summary/.../sankey_a_universe_to_scope.html`
    — Stage A: how 13,579 universe rows narrow to 295 in-scope.
-4. `reports/aggregate-summary/.../sankey_b_scope_to_analyzed.latest.html`
+4. `reports/aggregate-summary/.../sankey_b_scope_to_analyzed.html`
    — Stage B: in-scope → reproduced → analyzed → agreement bucket.
 5. `reports/aggregate-summary/.../prioritized_examples.latest/best/`
    and `.../worst/` — exemplary high- and low-agreement packets.
-6. `reports/scoped_funnel/missing_targets.latest.csv` — 129 public
+6. `reports/scoped_funnel/missing_targets.csv` — 129 public
    rows in scope without a local repro.
 7. `docs/helm-gotchas.md` — running ledger of HELM-specific behaviors
    we hit; useful for the paper's appendix.

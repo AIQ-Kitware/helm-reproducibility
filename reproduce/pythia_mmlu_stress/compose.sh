@@ -11,8 +11,8 @@ PYTHON_BIN="${PYTHON_BIN:-python}"
 
 # Sanity checks: error early instead of producing an empty composition.
 required_inputs=(
-    "$AUDIT_STORE_ROOT/indexes/audit_results_index.latest.csv"
-    "$AUDIT_STORE_ROOT/indexes/official_public_index.latest.csv"
+    "$AUDIT_STORE_ROOT/indexes/audit_results_index.csv"
+    "$AUDIT_STORE_ROOT/indexes/official_public_index.csv"
     "$MANIFEST_FPATH"
 )
 for path in "${required_inputs[@]}"; do

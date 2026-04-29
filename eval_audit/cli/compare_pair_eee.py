@@ -4,7 +4,7 @@ The EEE-format analogue of :mod:`eval_audit.reports.pair_report`
 (``eval-audit-compare-pair``). Takes one **official** EEE artifact and
 one **local** EEE artifact, runs the comparison-intent planner + core
 metrics, and writes the same shape of report ``eval-audit-from-eee``
-produces per pair (``core_metric_report.latest.{txt,json,png}`` plus
+produces per pair (``core_metric_report.{txt,json,png}`` plus
 the standard sidecar manifests / scripts) into ``--out-dpath``.
 
 What the EEE-only path can answer:
@@ -142,11 +142,11 @@ def _write_caveats_file(
 ) -> Path:
     """Emit a plain-text explainer of EEE-only metadata limitations.
 
-    Sits next to ``core_metric_report.latest.txt`` so a reader of the
+    Sits next to ``core_metric_report.txt`` so a reader of the
     report can see what the EEE-only path could and couldn't answer
     *without* having to read the warnings manifest.
     """
-    fpath = report_dpath / "eee_metadata_caveats.latest.txt"
+    fpath = report_dpath / "eee_metadata_caveats.txt"
     sidecar_block = "\n".join(
         f"  {side:<8} run_spec.json: {status}"
         for side, status in sidecar_status.items()
@@ -180,7 +180,7 @@ def _write_caveats_file(
 
     Without a sidecar ``run_spec.json``, those collapse to
     ``status=unknown`` and surface as ``comparability_unknown:*``
-    warnings in ``warnings.latest.json``. With a sidecar, they evaluate
+    warnings in ``warnings.json``. With a sidecar, they evaluate
     normally.
 
     What is *not* affected by the EEE-only constraint
@@ -308,10 +308,10 @@ def main(argv: list[str] | None = None) -> None:
     indexes_dir = out_dir / "_indexes"
     indexes_dir.mkdir(parents=True, exist_ok=True)
     official_index_fpath = _write_index_csv(
-        [official_row], indexes_dir / "official_public_index.latest.csv"
+        [official_row], indexes_dir / "official_public_index.csv"
     )
     local_index_fpath = _write_index_csv(
-        [local_row], indexes_dir / "audit_results_index.latest.csv"
+        [local_row], indexes_dir / "audit_results_index.csv"
     )
 
     planning_artifact = build_planning_artifact(
@@ -342,19 +342,19 @@ def main(argv: list[str] | None = None) -> None:
     packet = packets[0]
 
     # Write the planner manifests directly into out_dir so the report
-    # surface lives at <out_dir>/core_metric_report.latest.{txt,json,png}.
-    (out_dir / "components_manifest.latest.json").write_text(
+    # surface lives at <out_dir>/core_metric_report.{txt,json,png}.
+    (out_dir / "components_manifest.json").write_text(
         json.dumps(packet["components_manifest"], indent=2) + "\n"
     )
-    (out_dir / "comparisons_manifest.latest.json").write_text(
+    (out_dir / "comparisons_manifest.json").write_text(
         json.dumps(packet["comparisons_manifest"], indent=2) + "\n"
     )
 
     cmd: list[str] = [
         sys.executable, "-m", "eval_audit.reports.core_metrics",
         "--report-dpath", str(out_dir),
-        "--components-manifest", str(out_dir / "components_manifest.latest.json"),
-        "--comparisons-manifest", str(out_dir / "comparisons_manifest.latest.json"),
+        "--components-manifest", str(out_dir / "components_manifest.json"),
+        "--comparisons-manifest", str(out_dir / "comparisons_manifest.json"),
     ]
     if args.render_heavy_pairwise_plots:
         cmd.append("--render-heavy-pairwise-plots")
@@ -372,7 +372,7 @@ def main(argv: list[str] | None = None) -> None:
         sidecar_status=sidecar_status,
     )
 
-    print(f"\nDONE: report at {out_dir}/core_metric_report.latest.txt")
+    print(f"\nDONE: report at {out_dir}/core_metric_report.txt")
     print(f"      caveats at {caveats_fpath}")
 
 

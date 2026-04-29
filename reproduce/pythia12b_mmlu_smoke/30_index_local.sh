@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Re-index the local audit results so the new pythia-12b-v0 run shows up
-# in $AUDIT_STORE_ROOT/indexes/audit_results_index.latest.csv. Done on
+# in $AUDIT_STORE_ROOT/indexes/audit_results_index.csv. Done on
 # aiq-gpu before rsync so the index travels with the run data.
 set -euo pipefail
 
@@ -27,5 +27,5 @@ eval-audit-index \
   --report-dpath "$STORE_ROOT/indexes"
 
 echo
-echo "OK: index refreshed. Latest CSV: $STORE_ROOT/indexes/audit_results_index.latest.csv"
+echo "OK: index refreshed. Latest CSV: $STORE_ROOT/indexes/audit_results_index.csv"
 echo "Now rsync /data/crfm-helm-audit/$EXP and /data/crfm-helm-audit-store/indexes back."

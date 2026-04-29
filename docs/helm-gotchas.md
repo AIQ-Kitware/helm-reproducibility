@@ -118,7 +118,7 @@ This is a *real* recipe drift, not schema evolution. The model sees a
 different prompt and produces measurably different output.
 
 **Workaround.** None — this is genuine recipe disagreement. Surface it
-in the per-packet `core_metric_management_summary.latest.txt` (already
+in the per-packet `core_metric_management_summary.txt` (already
 done via the `same_instructions` comparability fact); enumerate
 affected scenarios in the report.
 

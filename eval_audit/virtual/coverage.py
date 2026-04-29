@@ -233,14 +233,14 @@ class CoverageReport:
 def _analyzed_logical_keys(analysis_root: Path) -> tuple[set[str], dict[str, list[str]]]:
     """Walk the experiment's analysis tree and return (analyzed_logical_keys, key->report_dirs).
 
-    Reads each per-packet ``components_manifest.latest.json`` to get the
+    Reads each per-packet ``components_manifest.json`` to get the
     ``run_entry`` (which doubles as the logical key for local rows).
     """
     analyzed: set[str] = set()
     examples: dict[str, list[str]] = defaultdict(list)
     if not analysis_root.is_dir():
         return analyzed, examples
-    for components_fpath in analysis_root.rglob("core-reports/*/components_manifest.latest.json"):
+    for components_fpath in analysis_root.rglob("core-reports/*/components_manifest.json"):
         try:
             data = json.loads(components_fpath.read_text())
         except Exception:
@@ -515,7 +515,7 @@ def _format_summary(coverage: CoverageReport) -> list[str]:
         lines.append("")
     if coverage.missing:
         lines.append(f"Missing targets (no local repro): {len(coverage.missing)}")
-        lines.append("  See missing_targets.latest.csv for the full list.")
+        lines.append("  See missing_targets.csv for the full list.")
         lines.append("")
     if coverage.extra_local_keys:
         lines.append(f"Local logical_run_keys not in target scope: {len(coverage.extra_local_keys)}")
@@ -623,11 +623,11 @@ def write_coverage_artifacts(
     Layout (all latest-aliased)::
 
         out_dpath/
-          coverage_funnel_summary.latest.txt
-          coverage_funnel.latest.json
-          missing_targets.latest.csv
-          coverage_by_<dim>.latest.csv      (one per breakdown_dim)
-          sankey_b_scope_to_analyzed.latest.{html,jpg,txt}   (when plotly+chrome available)
+          coverage_funnel_summary.txt
+          coverage_funnel.json
+          missing_targets.csv
+          coverage_by_<dim>.csv      (one per breakdown_dim)
+          sankey_b_scope_to_analyzed.{html,jpg,txt}   (when plotly+chrome available)
     """
     out_dpath = Path(out_dpath).expanduser().resolve()
     out_dpath.mkdir(parents=True, exist_ok=True)
@@ -635,29 +635,29 @@ def write_coverage_artifacts(
     # Pre-clean any stale aliases we own so an empty re-run doesn't leave
     # dangling files from a richer prior run.
     for alias_name in [
-        "coverage_funnel_summary.latest.txt",
-        "coverage_funnel.latest.json",
-        "missing_targets.latest.csv",
-        "missing_targets.latest.txt",
-        "sankey_b_scope_to_analyzed.latest.html",
-        "sankey_b_scope_to_analyzed.latest.jpg",
-        "sankey_b_scope_to_analyzed.latest.txt",
-        "sankey_b_scope_to_analyzed.latest.json",
+        "coverage_funnel_summary.txt",
+        "coverage_funnel.json",
+        "missing_targets.csv",
+        "missing_targets.txt",
+        "sankey_b_scope_to_analyzed.html",
+        "sankey_b_scope_to_analyzed.jpg",
+        "sankey_b_scope_to_analyzed.txt",
+        "sankey_b_scope_to_analyzed.json",
     ]:
         safe_unlink(out_dpath / alias_name)
     for dim in coverage.by_dim:
-        safe_unlink(out_dpath / f"coverage_by_{dim}.latest.csv")
+        safe_unlink(out_dpath / f"coverage_by_{dim}.csv")
 
-    summary_fpath = out_dpath / "coverage_funnel_summary.latest.txt"
+    summary_fpath = out_dpath / "coverage_funnel_summary.txt"
     _write_text(summary_fpath, _format_summary(coverage))
 
-    json_fpath = out_dpath / "coverage_funnel.latest.json"
+    json_fpath = out_dpath / "coverage_funnel.json"
     _write_json(json_fpath, _coverage_payload(coverage))
 
-    missing_csv_fpath = out_dpath / "missing_targets.latest.csv"
+    missing_csv_fpath = out_dpath / "missing_targets.csv"
     _write_csv(missing_csv_fpath, _missing_csv_rows(coverage))
 
-    missing_txt_fpath = out_dpath / "missing_targets.latest.txt"
+    missing_txt_fpath = out_dpath / "missing_targets.txt"
     _write_text(
         missing_txt_fpath,
         [f"Missing targets ({len(coverage.missing)}):"]
@@ -668,7 +668,7 @@ def write_coverage_artifacts(
     )
 
     for dim in coverage.by_dim:
-        _write_csv(out_dpath / f"coverage_by_{dim}.latest.csv", _by_dim_csv_rows(coverage, dim))
+        _write_csv(out_dpath / f"coverage_by_{dim}.csv", _by_dim_csv_rows(coverage, dim))
 
     # Sankey: rows split by model -> outcome. Same shape as build_reports_summary's
     # operational sankeys so a future Stage-A sankey can sit alongside.
@@ -691,11 +691,11 @@ def write_coverage_artifacts(
     )
 
     paths: dict[str, Path] = {
-        "summary_txt": out_dpath / "coverage_funnel_summary.latest.txt",
-        "json": out_dpath / "coverage_funnel.latest.json",
-        "missing_csv": out_dpath / "missing_targets.latest.csv",
-        "missing_txt": out_dpath / "missing_targets.latest.txt",
+        "summary_txt": out_dpath / "coverage_funnel_summary.txt",
+        "json": out_dpath / "coverage_funnel.json",
+        "missing_csv": out_dpath / "missing_targets.csv",
+        "missing_txt": out_dpath / "missing_targets.txt",
     }
     for dim in coverage.by_dim:
-        paths[f"by_{dim}_csv"] = out_dpath / f"coverage_by_{dim}.latest.csv"
+        paths[f"by_{dim}_csv"] = out_dpath / f"coverage_by_{dim}.csv"
     return paths

@@ -64,14 +64,14 @@ $OUT_ROOT/
 │   ├── official/<benchmark>/<dev>/<model>/<uuid>.{json,_samples.jsonl}
 │   └── local/<experiment>/<benchmark>/<dev>/<model>/<uuid>.{json,_samples.jsonl}
 └── from_eee_out/                        # analysis outputs (20_run.sh)
-    ├── audit_results_index.latest.csv
-    ├── official_public_index.latest.csv
+    ├── audit_results_index.csv
+    ├── official_public_index.csv
     ├── planning/
-    ├── <experiment>/core-reports/<packet>/core_metric_report.latest.{txt,json,png}
+    ├── <experiment>/core-reports/<packet>/core_metric_report.{txt,json,png}
     └── aggregate-summary/all-results/
-        ├── README.latest.txt
-        ├── agreement_curve.latest.{html,jpg}
-        └── reproducibility_buckets.latest.{html,jpg}
+        ├── README.txt
+        ├── agreement_curve.{html,jpg}
+        └── reproducibility_buckets.{html,jpg}
 ```
 
 ## What's *not* answered, and why
@@ -87,7 +87,7 @@ For EEE-only inputs, several comparability facts collapse to
 
 These need HELM `run_spec.json`, which is not part of the EEE artifact
 shape. They surface as `comparability_unknown:*` warnings in
-`warnings.latest.json` per packet. Agreement metrics (run-level and
+`warnings.json` per packet. Agreement metrics (run-level and
 instance-level abs-delta, agreement curves, per-metric breakdowns) are
 unaffected — those come from the EEE artifacts themselves.
 

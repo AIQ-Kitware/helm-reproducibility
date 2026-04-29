@@ -203,8 +203,8 @@ def main(argv: list[str] | None = None) -> None:
         run_tolerances_yaml=args.run_tolerances_yaml,
         instance_tolerances_yaml=args.instance_tolerances_yaml,
     )
-    json_fpath = report_dpath / 'pair_report.latest.json'
-    txt_fpath = report_dpath / 'pair_report.latest.txt'
+    json_fpath = report_dpath / 'pair_report.json'
+    txt_fpath = report_dpath / 'pair_report.txt'
     report = kwutil.Json.ensure_serializable(report)
     write_text_atomic(json_fpath, json.dumps(report, indent=2, ensure_ascii=False))
     write_text_report(report, txt_fpath)

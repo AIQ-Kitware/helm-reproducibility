@@ -418,8 +418,8 @@ def test_warnings_emitted_for_suspicious_conditions_and_written_as_artifacts(tmp
         ]
     )
 
-    warnings_payload = json.loads((out_dpath / "warnings.latest.json").read_text())
-    warnings_text = (out_dpath / "warnings.latest.txt").read_text()
+    warnings_payload = json.loads((out_dpath / "warnings.json").read_text())
+    warnings_text = (out_dpath / "warnings.txt").read_text()
 
     warning_values = [row["warning"] for row in warnings_payload["warnings"]]
     assert any("multiple_official_tracks_after_latest_per_track" in item for item in warning_values)
@@ -443,10 +443,10 @@ def test_planner_outputs_are_human_inspectable_and_declared(tmp_path):
         ]
     )
 
-    artifact = json.loads((out_dpath / "comparison_intents.latest.json").read_text())
-    summary_text = (out_dpath / "comparison_intents.latest.txt").read_text()
-    components_csv = (out_dpath / "comparison_intent_components.latest.csv").read_text()
-    comparisons_csv = (out_dpath / "comparison_intent_comparisons.latest.csv").read_text()
+    artifact = json.loads((out_dpath / "comparison_intents.json").read_text())
+    summary_text = (out_dpath / "comparison_intents.txt").read_text()
+    components_csv = (out_dpath / "comparison_intent_components.csv").read_text()
+    comparisons_csv = (out_dpath / "comparison_intent_comparisons.csv").read_text()
 
     assert artifact["packet_count"] == 1
     assert "components:" in summary_text

@@ -52,13 +52,13 @@ def _run_pair(*, official: Path, local: Path, out_dir: Path) -> None:
 
 
 def _comparability_facts(out_dir: Path) -> dict[str, dict]:
-    payload = json.loads((out_dir / "core_metric_report.latest.json").read_text())
+    payload = json.loads((out_dir / "core_metric_report.json").read_text())
     pair = (payload.get("pairs") or [{}])[0]
     return pair.get("comparability_facts") or {}
 
 
 def _agreement_at_zero(out_dir: Path) -> tuple[float | None, float | None]:
-    payload = json.loads((out_dir / "core_metric_report.latest.json").read_text())
+    payload = json.loads((out_dir / "core_metric_report.json").read_text())
     pair = (payload.get("pairs") or [{}])[0]
     run_curve = (pair.get("run_level") or {}).get("agreement_vs_abs_tol") or []
     inst_curve = (pair.get("instance_level") or {}).get("agreement_vs_abs_tol") or []
@@ -109,15 +109,15 @@ def pair_with_sidecar(tmp_path: Path) -> Path:
 def test_report_artifacts_present_no_sidecar(pair_no_sidecar: Path) -> None:
     """The CLI should land the standard core-metrics report shape."""
     for name in [
-        "core_metric_report.latest.txt",
-        "core_metric_report.latest.json",
-        "core_metric_report.latest.png",
-        "core_metric_management_summary.latest.txt",
-        "warnings.latest.json",
-        "warnings.latest.txt",
-        "components_manifest.latest.json",
-        "comparisons_manifest.latest.json",
-        "eee_metadata_caveats.latest.txt",
+        "core_metric_report.txt",
+        "core_metric_report.json",
+        "core_metric_report.png",
+        "core_metric_management_summary.txt",
+        "warnings.json",
+        "warnings.txt",
+        "components_manifest.json",
+        "comparisons_manifest.json",
+        "eee_metadata_caveats.txt",
     ]:
         assert (pair_no_sidecar / name).is_file(), name
 
@@ -141,8 +141,8 @@ def test_facts_known_with_sidecar(pair_with_sidecar: Path) -> None:
 
 def test_caveats_file_describes_sidecar_status(pair_no_sidecar: Path, pair_with_sidecar: Path) -> None:
     """The caveats file should record sidecar absence / presence accurately."""
-    no_caveats = (pair_no_sidecar / "eee_metadata_caveats.latest.txt").read_text()
-    with_caveats = (pair_with_sidecar / "eee_metadata_caveats.latest.txt").read_text()
+    no_caveats = (pair_no_sidecar / "eee_metadata_caveats.txt").read_text()
+    with_caveats = (pair_with_sidecar / "eee_metadata_caveats.txt").read_text()
     assert "official run_spec.json: absent" in no_caveats, no_caveats
     assert "local    run_spec.json: absent" in no_caveats, no_caveats
     assert "official run_spec.json: present" in with_caveats, with_caveats

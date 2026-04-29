@@ -29,7 +29,7 @@ consistent with 6.9b's `abstract_algebra` row (also 1.000 / 0.0).
 
 ## Stage A — context establishment (Universe → Scope)
 
-Sankey at `reports/aggregate-summary/.../sankey_a_universe_to_scope.latest.html`.
+Sankey at `reports/aggregate-summary/.../sankey_a_universe_to_scope.html`.
 
 | stage                                              | survivors | dropped here |
 |----------------------------------------------------|----------:|-------------:|
@@ -49,7 +49,7 @@ econometrics, us_foreign_policy).
 
 ## Stage B — coverage (Scope → Reproduced → Analyzed)
 
-Sankey at `reports/aggregate-summary/.../sankey_b_scope_to_analyzed.latest.html`,
+Sankey at `reports/aggregate-summary/.../sankey_b_scope_to_analyzed.html`,
 plus a complementary scope-aware funnel at `reports/scoped_funnel/`:
 
 | stage                                                               | count | % of target |
@@ -68,7 +68,7 @@ issue:
   `audit-pythia-12b-mmlu-smoke` run on aiq-gpu, 2026-04-28. The other 8
   (4 subjects × 2 versions) are still missing locally.
 
-`reports/scoped_funnel/missing_targets.latest.csv` enumerates the 8
+`reports/scoped_funnel/missing_targets.csv` enumerates the 8
 remaining missing pythia-12b rows. The smoke run also confirmed that
 the dormant `eval-audit-run` → kwdagger → magnet → helm-run chain
 still works end-to-end; running the other 4 subjects to fill the table
@@ -124,7 +124,7 @@ recorded across all 5 packets). Per-packet `cross-machine-aiq-gpu/`
 directories carry the pair-report between repeated executions. All 5
 packets show `repeat_diagnosis: stable` (no aiq-gpu repeat drift).
 Reproducibility-vs-repeatability sankey at
-`reports/aggregate-summary/.../sankey_s05_reproducibility.latest.html`.
+`reports/aggregate-summary/.../sankey_s05_reproducibility.html`.
 
 ## Drilldowns
 
@@ -133,11 +133,11 @@ Reproducibility-vs-repeatability sankey at
   (sections: `score_ge_95`, `best`, `mid`, `worst`, `score_lt_80`,
   `flagged`)
 - **What does the per-instance score distribution look like for one packet?**
-  `analysis/core-reports/<packet>/core_metric_ecdfs.latest.png`
+  `analysis/core-reports/<packet>/core_metric_ecdfs.png`
   (legend uses short aliases; full labels in the sidecar
-  `*_label_legend.latest.{png,txt}`)
+  `*_label_legend.{png,txt}`)
 - **Which run-specs aren't reproduced yet?**
-  `reports/scoped_funnel/missing_targets.latest.csv`
+  `reports/scoped_funnel/missing_targets.csv`
 - **What was the manifest scope and how was it composed?**
   `manifest.yaml`, `provenance.json`, `scoped_filter_inventory.json`
 

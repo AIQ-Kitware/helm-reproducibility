@@ -61,7 +61,7 @@ def test_coverage_funnel_counts_target_reproduced_analyzed(tmp_path):
         "run_entry": "mmlu:subject=foo,model=eleutherai_pythia-6.9b,data_augmentation=canonical",
         "logical_run_key": "mmlu:subject=foo,model=eleutherai_pythia-6.9b,data_augmentation=canonical",
     }
-    (packet_dpath / "components_manifest.latest.json").write_text(json.dumps(components_manifest))
+    (packet_dpath / "components_manifest.json").write_text(json.dumps(components_manifest))
 
     coverage = compute_coverage(
         name="virt",
@@ -174,7 +174,7 @@ def test_coverage_artifacts_written_with_latest_aliases(tmp_path, monkeypatch):
     )
     out = tmp_path / "out"
     paths = write_coverage_artifacts(coverage, out_dpath=out)
-    # *.latest.* is the actual file now (history layer retired 2026-04-28),
+    # *.* is the actual file now (history layer retired 2026-04-28),
     # not a symlink into .history/.
     assert paths["summary_txt"].is_file()
     assert paths["json"].is_file()

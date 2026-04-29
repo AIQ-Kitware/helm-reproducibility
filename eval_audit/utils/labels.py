@@ -12,7 +12,7 @@ sidecar legend artifact:
   the default 6 chars happens to collide).
 
 * :func:`emit_label_legend_artifacts` writes a plain-text + matplotlib
-  table sidecar named ``<out_name>_label_legend.latest.{txt,png}`` so
+  table sidecar named ``<out_name>_label_legend.{txt,png}`` so
   readers can resolve any alias back to its full label. Optionally
   accepts a ``color_map`` mapping ``long_label -> matplotlib color``
   so each row can echo the color the corresponding line/marker has in
@@ -81,9 +81,9 @@ def emit_label_legend_artifacts(
 
     Emits two artifacts next to the main plot:
 
-    * ``<out_name>_label_legend.latest.txt`` — plain-text mapping
+    * ``<out_name>_label_legend.txt`` — plain-text mapping
       (``<short>  <full>`` per row) for easy grep/diff.
-    * ``<out_name>_label_legend.latest.png`` — image with the same
+    * ``<out_name>_label_legend.png`` — image with the same
       mapping. Long labels wrap at ``label_wrap_chars``; figure height
       auto-grows to fit. If ``color_map`` is provided
       (``long_label -> matplotlib color``) the row text uses that color,
@@ -101,7 +101,7 @@ def emit_label_legend_artifacts(
     color_map = color_map or {}
 
     # ---- text sidecar (unchanged shape) ----
-    txt_fpath = fig_dpath / f"{out_name}_label_legend.latest.txt"
+    txt_fpath = fig_dpath / f"{out_name}_label_legend.txt"
     txt_lines = [
         f"{title}",
         f"Generated: {stamp}",
@@ -201,7 +201,7 @@ def emit_label_legend_artifacts(
             cursor_in += line_h_in
         cursor_in += inter_row_h_in
 
-    png_fpath = fig_dpath / f"{out_name}_label_legend.latest.png"
+    png_fpath = fig_dpath / f"{out_name}_label_legend.png"
     suffix = png_fpath.suffix.lstrip(".") or "png"
     with safer.open(png_fpath, "wb", make_parents=True) as fp:
         fig.savefig(fp, format=suffix, dpi=180, bbox_inches="tight")

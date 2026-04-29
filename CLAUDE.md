@@ -90,7 +90,7 @@ and the runbook at
 For a single-pair comparison (analogous to `eval-audit-compare-pair`
 but EEE-only), use
 [`eval-audit-compare-pair-eee`](eval_audit/cli/compare_pair_eee.py) —
-it produces the same `core_metric_report.latest.{txt,json,png}` shape
+it produces the same `core_metric_report.{txt,json,png}` shape
 the per-packet reports use. For a *slice* across many EEE artifacts
 (filtered by a YAML scope and optionally combined with HELM-driven
 sources), use

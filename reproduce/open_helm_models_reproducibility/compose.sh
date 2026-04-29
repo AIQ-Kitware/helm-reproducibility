@@ -9,8 +9,8 @@ MANIFEST_FPATH="${MANIFEST_FPATH:-$ROOT/configs/virtual-experiments/open-helm-mo
 PYTHON_BIN="${PYTHON_BIN:-python}"
 
 required_inputs=(
-    "$AUDIT_STORE_ROOT/indexes/audit_results_index.latest.csv"
-    "$AUDIT_STORE_ROOT/indexes/official_public_index.latest.csv"
+    "$AUDIT_STORE_ROOT/indexes/audit_results_index.csv"
+    "$AUDIT_STORE_ROOT/indexes/official_public_index.csv"
     "$AUDIT_STORE_ROOT/analysis/filter_inventory.json"
     "$MANIFEST_FPATH"
 )

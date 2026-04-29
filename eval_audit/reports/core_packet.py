@@ -28,7 +28,7 @@ def comparison_artifact_stem(comparison_id: str, *, max_slug_len: int = 48, hash
 
 
 def comparison_sample_latest_name(comparison_id: str) -> str:
-    return f"instance_samples_{comparison_artifact_stem(comparison_id)}.latest.txt"
+    return f"instance_samples_{comparison_artifact_stem(comparison_id)}.txt"
 
 
 def comparison_sample_history_name(comparison_id: str, stamp: str) -> str:
@@ -68,12 +68,12 @@ def load_packet_manifests(
     components_fpath = (
         Path(components_manifest).expanduser().resolve()
         if components_manifest is not None
-        else (report_dpath / "components_manifest.latest.json").resolve()
+        else (report_dpath / "components_manifest.json").resolve()
     )
     comparisons_fpath = (
         Path(comparisons_manifest).expanduser().resolve()
         if comparisons_manifest is not None
-        else (report_dpath / "comparisons_manifest.latest.json").resolve()
+        else (report_dpath / "comparisons_manifest.json").resolve()
     )
     return (
         components_fpath,

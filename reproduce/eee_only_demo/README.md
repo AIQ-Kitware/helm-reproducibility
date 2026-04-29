@@ -39,7 +39,7 @@ can assert on the agreement curves.
    JSONs (each next to a `<uuid>_samples.jsonl` of instance-level rows).
 2. Synthesizes in-memory index rows with `artifact_format=eee` and an
    `eee_artifact_path` pointer, then writes them out as
-   `official_public_index.latest.csv` + `audit_results_index.latest.csv` so
+   `official_public_index.csv` + `audit_results_index.csv` so
    the rest of the pipeline (which is index-driven) sees the same shape it
    does for the HELM-based path.
 3. Calls `core_report_planner.build_planning_artifact` to pair up official
@@ -73,7 +73,7 @@ with the checked-in copy.
 `10_run_analysis.sh` runs `eval-audit-from-eee` against the fixture and writes:
 
 - per-packet reports under
-  `/tmp/eee_only_demo_out/<experiment_name>/core-reports/<packet>/core_metric_report.latest.{txt,json,png}`
+  `/tmp/eee_only_demo_out/<experiment_name>/core-reports/<packet>/core_metric_report.{txt,json,png}`
 - an aggregate cross-packet summary under
   `/tmp/eee_only_demo_out/aggregate-summary/all-results/` with the README,
   agreement-curve plot, reproducibility-buckets bar chart, sankeys, and
@@ -122,13 +122,13 @@ investigating before treating the report as trustworthy.
    ```
 
 3. Inspect
-   `<my-output-dir>/<experiment_name>/core-reports/<packet>/core_metric_report.latest.txt`
+   `<my-output-dir>/<experiment_name>/core-reports/<packet>/core_metric_report.txt`
    for the per-pair agreement curves and comparability facts. The
-   `redraw_plots.latest.sh` sibling lets you iterate on plot styling
+   `redraw_plots.sh` sibling lets you iterate on plot styling
    without re-running the analysis. Drop `--build-aggregate-summary` if
    you only want the per-packet reports.
 
-4. Inspect `<my-output-dir>/aggregate-summary/all-results/README.latest.txt`
+4. Inspect `<my-output-dir>/aggregate-summary/all-results/README.txt`
    for the cross-packet roll-up: agreement-bucket counts, per-metric
    curves, drill-down tables by model/benchmark/experiment, and a
    prioritized-examples tree that links straight to the per-packet

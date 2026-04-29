@@ -1,22 +1,25 @@
 """Filesystem-publishing helpers.
 
-Post-history-retirement (2026-04-28) and the follow-on simplification
-(2026-04-28b) the publishing model is intentionally tiny:
+Post-history-retirement (2026-04-28), the follow-on simplification
+(2026-04-28b), and the ``.latest`` cleanup (2026-04-29) the publishing
+model is intentionally tiny:
 
 * Callers write the canonical artifact directly to its visible path
-  (``<root>/<stem>.latest.<ext>``); no stamped intermediate is created.
-  Crash safety is handled by :func:`write_text_atomic` /
-  :func:`write_bytes_atomic`, which use ``safer.open`` to write to a temp
-  file and ``os.replace`` it onto the target on successful close.
-* :func:`link_alias` creates cross-tree navigation symlinks (e.g.
-  ``summary_root/level_001.latest -> summary_root/level_001/``). It is
-  the only "alias" concept that remains; there is no longer a
-  same-directory rename branch because there is no longer a stamped
-  intermediate to rename.
+  (``<root>/<stem>.<ext>``). Crash safety is handled by
+  :func:`write_text_atomic` / :func:`write_bytes_atomic`, which use
+  ``safer.open`` to write to a temp file and ``os.replace`` it onto the
+  target on successful close. There is no stamped intermediate, no
+  ``.latest`` suffix, and no version-history layer — every successful
+  write replaces the previous content at the canonical path.
+* :func:`link_alias` creates cross-tree navigation symlinks for cases
+  where the canonical artifact lives at one path and a sibling tree
+  needs a stable entry point at a different path (e.g. the aggregate
+  summary linking back to ``level_001/README.txt``). It is a no-op
+  when ``src == alias`` (same path → nothing to do).
 * The functions ``stamped_history_dir``, ``history_publish_root``, and
-  ``write_latest_alias`` were removed in this pass. ``stamp`` strings are
-  still useful as JSON-content metadata (``generated_utc``); callers that
-  need them compute one inline.
+  ``write_latest_alias`` were removed in earlier passes. ``stamp``
+  strings are still useful as JSON-content metadata (``generated_utc``);
+  callers that need them compute one inline.
 """
 from __future__ import annotations
 
@@ -51,12 +54,12 @@ def link_alias(src: Path, alias_root: Path, alias_name: str) -> Path:
     """Create a navigation symlink ``alias_root/alias_name -> src``.
 
     Used for cross-tree aliases like
-    ``summary_root/README.latest.txt -> level_001/README.latest.txt`` and
-    ``summary_root/level_001.latest -> summary_root/level_001/`` — cases
-    where the canonical artifact lives at a different path and we want a
-    stable navigation entry point. For the canonical artifact itself,
-    write directly to its target via :func:`write_text_atomic` /
-    :func:`write_bytes_atomic`; no alias step is required.
+    ``summary_root/README.txt -> level_001/README.txt`` — cases where
+    the canonical artifact lives at a different path and we want a
+    stable navigation entry point in a sibling tree. For the canonical
+    artifact itself, write directly to its target via
+    :func:`write_text_atomic` / :func:`write_bytes_atomic`; no alias
+    step is required.
     """
     alias_fpath = alias_root / alias_name
     if src == alias_fpath:

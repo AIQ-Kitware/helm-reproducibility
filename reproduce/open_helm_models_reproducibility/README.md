@@ -29,8 +29,8 @@ Total potential reproducibility cases: 39 (model, benchmark) pairs over
 
 ## What this assumes
 
-- The local audit-results index at `$AUDIT_STORE_ROOT/indexes/audit_results_index.latest.csv`
-- The official-public-HELM index at `$AUDIT_STORE_ROOT/indexes/official_public_index.latest.csv`
+- The local audit-results index at `$AUDIT_STORE_ROOT/indexes/audit_results_index.csv`
+- The official-public-HELM index at `$AUDIT_STORE_ROOT/indexes/official_public_index.csv`
 - The Stage-1 filter inventory at `$AUDIT_STORE_ROOT/analysis/filter_inventory.json`
 - All EEE conversions (official sweep + local on-demand) are produced
   on the fly via `--ensure-local-eee`.
@@ -55,21 +55,21 @@ $AUDIT_STORE_ROOT/virtual-experiments/open-helm-models-reproducibility/
 ├── analysis/
 │   ├── planning/
 │   ├── core-reports/<one per packet>/
-│   ├── experiment_summary.latest.{json,csv,txt}
-│   └── reproduce.latest.sh
+│   ├── experiment_summary.{json,csv,txt}
+│   └── reproduce.sh
 └── reports/
     ├── scoped_funnel/                       (Stage-B coverage funnel)
-    │   ├── coverage_funnel_summary.latest.txt
-    │   ├── coverage_funnel.latest.json
-    │   ├── missing_targets.latest.csv
-    │   ├── coverage_by_<dim>.latest.csv
-    │   └── sankey_b_scope_to_analyzed.latest.{html,jpg,txt}
+    │   ├── coverage_funnel_summary.txt
+    │   ├── coverage_funnel.json
+    │   ├── missing_targets.csv
+    │   ├── coverage_by_<dim>.csv
+    │   └── sankey_b_scope_to_analyzed.{html,jpg,txt}
     └── aggregate-summary/<scope>/           (publication surface)
-        ├── sankey_a_universe_to_scope.latest.{html,jpg,txt}
-        ├── sankey_b_scope_to_analyzed.latest.{html,jpg,txt}
-        ├── sankey_s05_reproducibility.latest.{html,jpg,txt}
+        ├── sankey_a_universe_to_scope.{html,jpg,txt}
+        ├── sankey_b_scope_to_analyzed.{html,jpg,txt}
+        ├── sankey_s05_reproducibility.{html,jpg,txt}
         ├── prioritized_examples.latest/{score_ge_95,best,mid,worst,score_lt_80,flagged}/
-        ├── agreement_curve.latest.html
-        ├── coverage_matrix.latest.html
-        └── README.latest.txt
+        ├── agreement_curve.html
+        ├── coverage_matrix.html
+        └── README.txt
 ```

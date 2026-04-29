@@ -222,7 +222,7 @@ def _load_json(fpath: Path) -> Any:
 
 
 def _load_optional_cross_machine_pair(report_dpath: Path) -> dict[str, Any] | None:
-    pair_fpath = report_dpath / 'cross-machine-aiq-gpu' / 'pair_report.latest.json'
+    pair_fpath = report_dpath / 'cross-machine-aiq-gpu' / 'pair_report.json'
     if not pair_fpath.exists():
         return None
     data = _load_json(pair_fpath)
@@ -850,7 +850,7 @@ def _plot_per_metric_agreement(
     adjust_kwargs['hspace'] = max(adjust_kwargs.get('hspace', 0.40), 0.40)
     adjust_kwargs['wspace'] = max(adjust_kwargs.get('wspace', 0.18), 0.18)
     fig.subplots_adjust(**adjust_kwargs)
-    fig_fpath = fig_dpath / f'core_metric_per_metric_agreement.latest.png'
+    fig_fpath = fig_dpath / f'core_metric_per_metric_agreement.png'
     _atomic_savefig(fig, fig_fpath, dpi=180)
     plt.close(fig)
     emit_label_legend_artifacts(
@@ -981,7 +981,7 @@ def _plot_pair_metric_distributions(
     # so y-axis labels and tick labels have breathing room.
     adjust_kwargs['wspace'] = max(adjust_kwargs.get('wspace', 0.30), 0.30)
     fig.subplots_adjust(**adjust_kwargs)
-    out_fpath = fig_dpath / f'core_metric_distributions.latest.png'
+    out_fpath = fig_dpath / f'core_metric_distributions.png'
     _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
     emit_label_legend_artifacts(
@@ -1105,7 +1105,7 @@ def _plot_run_metric_distributions(
     adjust_kwargs = _subplot_adjust_kwargs(fig, layout, top=top_fraction, bottom=0.05)
     adjust_kwargs['hspace'] = max(adjust_kwargs.get('hspace', 0.35), 0.35)
     fig.subplots_adjust(**adjust_kwargs)
-    out_fpath = fig_dpath / f'{out_name}.latest.png'
+    out_fpath = fig_dpath / f'{out_name}.png'
     _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
     legend_png_fpath, legend_txt_fpath = emit_label_legend_artifacts(
@@ -1220,7 +1220,7 @@ def _plot_three_run_metric_distributions(
         fontsize=16,
         plot_layout=plot_layout,
     )
-    out_fpath = fig_dpath / f'core_metric_three_run_distributions.latest.png'
+    out_fpath = fig_dpath / f'core_metric_three_run_distributions.png'
     _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
     return out_fpath
@@ -1342,8 +1342,8 @@ def _write_three_run_runlevel_table(
             'delta_kwdagger_a_vs_kwdagger_b': None if a.mean is None or b.mean is None else abs(a.mean - b.mean),
         })
     table = pd.DataFrame(rows)
-    csv_fpath = out_dpath / f'core_runlevel_table.latest.csv'
-    md_fpath = out_dpath / f'core_runlevel_table.latest.md'
+    csv_fpath = out_dpath / f'core_runlevel_table.csv'
+    md_fpath = out_dpath / f'core_runlevel_table.md'
     table.to_csv(csv_fpath, index=False)
     try:
         write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
@@ -1373,8 +1373,8 @@ def _write_two_run_runlevel_table(
             'delta_official_vs_kwdagger': None if kw.mean is None or off.mean is None else abs(off.mean - kw.mean),
         })
     table = pd.DataFrame(rows)
-    csv_fpath = out_dpath / f'core_runlevel_table.latest.csv'
-    md_fpath = out_dpath / f'core_runlevel_table.latest.md'
+    csv_fpath = out_dpath / f'core_runlevel_table.csv'
+    md_fpath = out_dpath / f'core_runlevel_table.md'
     table.to_csv(csv_fpath, index=False)
     try:
         write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
@@ -1433,7 +1433,7 @@ def _plot_single_pair_summary(
     adjust_kwargs['right'] = min(adjust_kwargs.get('right', 0.97), 0.97)
     adjust_kwargs['wspace'] = max(adjust_kwargs.get('wspace', 0.25), 0.25)
     fig.subplots_adjust(**adjust_kwargs)
-    fig_fpath = fig_dpath / f'core_metric_report.latest.png'
+    fig_fpath = fig_dpath / f'core_metric_report.png'
     _atomic_savefig(fig, fig_fpath, dpi=180)
     plt.close(fig)
     emit_label_legend_artifacts(
@@ -1638,8 +1638,8 @@ def _write_comparison_runlevel_table(
                 'abs_delta': None if left.mean is None or right.mean is None else abs(left.mean - right.mean),
             })
     table = pd.DataFrame(rows)
-    csv_fpath = out_dpath / f'core_runlevel_table.latest.csv'
-    md_fpath = out_dpath / f'core_runlevel_table.latest.md'
+    csv_fpath = out_dpath / f'core_runlevel_table.csv'
+    md_fpath = out_dpath / f'core_runlevel_table.md'
     table.to_csv(csv_fpath, index=False)
     try:
         write_text_atomic(md_fpath, table.to_markdown(index=False) + '\n')
@@ -1848,7 +1848,7 @@ def _write_management_summary(report: dict[str, Any], out_fpath: Path) -> None:
 
 def _write_latest_alias(src: Path | None, latest_root: Path, latest_name: str) -> Path | None:
     """Tolerates ``src is None``. After the simplification (2026-04-28b)
-    the canonical artifact is written directly to ``<root>/<name>.latest.<ext>``,
+    the canonical artifact is written directly to ``<root>/<name>.<ext>``,
     so callers passing ``src`` already at that target make this a no-op.
     The fallback is :func:`link_alias` for cross-tree navigation aliases."""
     if src is None:
@@ -2056,7 +2056,7 @@ def main(argv: list[str] | None = None) -> None:
     report_dpath.mkdir(parents=True, exist_ok=True)
     stamp = datetime_mod.datetime.now(datetime_mod.UTC).strftime('%Y%m%dT%H%M%SZ')
     # History layer retired 2026-04-28: write stamped intermediates next to
-    # the visible *.latest.* targets and let write_latest_alias rename them
+    # the visible *.* targets and let write_latest_alias rename them
     # in place. No .history/ subdir is created.
     history_dpath = report_dpath
     (
@@ -2140,7 +2140,7 @@ def main(argv: list[str] | None = None) -> None:
         'planner_version': components_manifest.get('planner_version'),
         'components_manifest_path': str(components_manifest_fpath),
         'comparisons_manifest_path': str(comparisons_manifest_fpath),
-        'warnings_manifest_path': str(report_dpath / 'warnings.latest.json'),
+        'warnings_manifest_path': str(report_dpath / 'warnings.json'),
         'thresholds': thresholds,
         'components': components,
         'comparisons': all_comparisons,
@@ -2154,11 +2154,11 @@ def main(argv: list[str] | None = None) -> None:
         'official_selection': components_manifest.get('official_selection') or {},
     }
 
-    json_fpath = history_dpath / f'core_metric_report.latest.json'
-    txt_fpath = history_dpath / f'core_metric_report.latest.txt'
-    mgmt_fpath = history_dpath / f'core_metric_management_summary.latest.txt'
-    warnings_json_fpath = history_dpath / f'warnings.latest.json'
-    warnings_txt_fpath = history_dpath / f'warnings.latest.txt'
+    json_fpath = history_dpath / f'core_metric_report.json'
+    txt_fpath = history_dpath / f'core_metric_report.txt'
+    mgmt_fpath = history_dpath / f'core_metric_management_summary.txt'
+    warnings_json_fpath = history_dpath / f'warnings.json'
+    warnings_txt_fpath = history_dpath / f'warnings.txt'
     official_vs_local = _find_pair(report, 'official_vs_local') or (pairs[-1] if pairs else None)
     local_repeat = _find_pair(report, 'local_repeat')
 
@@ -2175,7 +2175,7 @@ def main(argv: list[str] | None = None) -> None:
             plot_layout=plot_layout,
         )
     elif render_core_metric_report:
-        fig_fpath = history_dpath / f'core_metric_report.latest.png'
+        fig_fpath = history_dpath / f'core_metric_report.png'
         extra_pair = _load_optional_cross_machine_pair(report_dpath)
         paper_labels = load_paper_label_manager(style='paper_short')
         all_pairs = pairs + ([extra_pair] if extra_pair is not None else [])
@@ -2330,38 +2330,38 @@ def main(argv: list[str] | None = None) -> None:
     # report stays consistent while we iterate on plot styling.
     plot_latest_map: dict[Path, str] = {}
     if fig_fpath is not None:
-        plot_latest_map[fig_fpath] = 'core_metric_report.latest.png'
+        plot_latest_map[fig_fpath] = 'core_metric_report.png'
     if dist_fig_fpath is not None:
-        plot_latest_map[dist_fig_fpath] = 'core_metric_distributions.latest.png'
+        plot_latest_map[dist_fig_fpath] = 'core_metric_distributions.png'
     if overlay_dist_fpath is not None:
-        plot_latest_map[overlay_dist_fpath] = 'core_metric_overlay_distributions.latest.png'
+        plot_latest_map[overlay_dist_fpath] = 'core_metric_overlay_distributions.png'
     if overlay_dist_legend_png is not None:
-        plot_latest_map[overlay_dist_legend_png] = 'core_metric_overlay_distributions_label_legend.latest.png'
+        plot_latest_map[overlay_dist_legend_png] = 'core_metric_overlay_distributions_label_legend.png'
     if overlay_dist_legend_txt is not None:
-        plot_latest_map[overlay_dist_legend_txt] = 'core_metric_overlay_distributions_label_legend.latest.txt'
+        plot_latest_map[overlay_dist_legend_txt] = 'core_metric_overlay_distributions_label_legend.txt'
     if ecdf_fig_fpath is not None:
-        plot_latest_map[ecdf_fig_fpath] = 'core_metric_ecdfs.latest.png'
+        plot_latest_map[ecdf_fig_fpath] = 'core_metric_ecdfs.png'
     if ecdf_legend_png is not None:
-        plot_latest_map[ecdf_legend_png] = 'core_metric_ecdfs_label_legend.latest.png'
+        plot_latest_map[ecdf_legend_png] = 'core_metric_ecdfs_label_legend.png'
     if ecdf_legend_txt is not None:
-        plot_latest_map[ecdf_legend_txt] = 'core_metric_ecdfs_label_legend.latest.txt'
+        plot_latest_map[ecdf_legend_txt] = 'core_metric_ecdfs_label_legend.txt'
     if per_metric_agree_fpath is not None:
-        plot_latest_map[per_metric_agree_fpath] = 'core_metric_per_metric_agreement.latest.png'
+        plot_latest_map[per_metric_agree_fpath] = 'core_metric_per_metric_agreement.png'
 
     if plots_only:
         latest_map = plot_latest_map
     else:
         latest_map = {
-            json_fpath: 'core_metric_report.latest.json',
-            txt_fpath: 'core_metric_report.latest.txt',
-            mgmt_fpath: 'core_metric_management_summary.latest.txt',
-            warnings_json_fpath: 'warnings.latest.json',
-            warnings_txt_fpath: 'warnings.latest.txt',
-            runlevel_csv_fpath: 'core_runlevel_table.latest.csv',
+            json_fpath: 'core_metric_report.json',
+            txt_fpath: 'core_metric_report.txt',
+            mgmt_fpath: 'core_metric_management_summary.txt',
+            warnings_json_fpath: 'warnings.json',
+            warnings_txt_fpath: 'warnings.txt',
+            runlevel_csv_fpath: 'core_runlevel_table.csv',
             **plot_latest_map,
         }
         if runlevel_md_fpath is not None:
-            latest_map[runlevel_md_fpath] = 'core_runlevel_table.latest.md'
+            latest_map[runlevel_md_fpath] = 'core_runlevel_table.md'
     for src, latest_name in latest_map.items():
         _write_latest_alias(src, report_dpath, latest_name)
     if not plots_only:
@@ -2369,23 +2369,23 @@ def main(argv: list[str] | None = None) -> None:
         # plots_only mode the other artifacts (JSON/text/runlevel/...) are
         # deliberately not in latest_map, so blanket cleanup would erase them.
         known_latest_names = {
-            'core_metric_report.latest.json',
-            'core_metric_report.latest.txt',
-            'core_metric_management_summary.latest.txt',
-            'warnings.latest.json',
-            'warnings.latest.txt',
-            'core_metric_report.latest.png',
-            'core_metric_distributions.latest.png',
-            'core_metric_three_run_distributions.latest.png',
-            'core_metric_overlay_distributions.latest.png',
-            'core_metric_overlay_distributions_label_legend.latest.png',
-            'core_metric_overlay_distributions_label_legend.latest.txt',
-            'core_metric_ecdfs.latest.png',
-            'core_metric_ecdfs_label_legend.latest.png',
-            'core_metric_ecdfs_label_legend.latest.txt',
-            'core_metric_per_metric_agreement.latest.png',
-            'core_runlevel_table.latest.csv',
-            'core_runlevel_table.latest.md',
+            'core_metric_report.json',
+            'core_metric_report.txt',
+            'core_metric_management_summary.txt',
+            'warnings.json',
+            'warnings.txt',
+            'core_metric_report.png',
+            'core_metric_distributions.png',
+            'core_metric_three_run_distributions.png',
+            'core_metric_overlay_distributions.png',
+            'core_metric_overlay_distributions_label_legend.png',
+            'core_metric_overlay_distributions_label_legend.txt',
+            'core_metric_ecdfs.png',
+            'core_metric_ecdfs_label_legend.png',
+            'core_metric_ecdfs_label_legend.txt',
+            'core_metric_per_metric_agreement.png',
+            'core_runlevel_table.csv',
+            'core_runlevel_table.md',
         }
         for latest_name in known_latest_names - set(latest_map.values()):
             safe_unlink(report_dpath / latest_name)

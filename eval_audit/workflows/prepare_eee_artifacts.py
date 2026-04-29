@@ -206,10 +206,10 @@ def main(argv: list[str] | None = None) -> None:
         "local_rows": prepared_local,
     }
 
-    json_fpath = out_dpath / "eee_readiness.latest.json"
-    txt_fpath = out_dpath / "eee_readiness.latest.txt"
-    local_csv_fpath = out_dpath / "eee_local_rows.latest.csv"
-    official_csv_fpath = out_dpath / "eee_official_rows.latest.csv"
+    json_fpath = out_dpath / "eee_readiness.json"
+    txt_fpath = out_dpath / "eee_readiness.txt"
+    local_csv_fpath = out_dpath / "eee_local_rows.csv"
+    official_csv_fpath = out_dpath / "eee_official_rows.csv"
 
     write_text_atomic(json_fpath, json.dumps(payload, indent=2) + "\n")
     write_text_atomic(txt_fpath, "\n".join(_summary_lines(payload)) + "\n")

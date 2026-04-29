@@ -17,10 +17,10 @@ Schema (version 1, illustrative)::
       benchmarks: ["mmlu"]
     sources:
       - kind: audit_index
-        fpath: /data/.../audit_results_index.latest.csv
+        fpath: /data/.../audit_results_index.csv
         include_experiments: [audit-mmlu-usfp-pythia-r1, audit-historic-grid]
       - kind: official_public_index
-        fpath: /data/.../official_public_index.latest.csv
+        fpath: /data/.../official_public_index.csv
       - kind: external_eee
         components:
           - id: inspectai-pythia-mmlu-2026-04

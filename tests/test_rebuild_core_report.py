@@ -155,7 +155,7 @@ def _write_planner_artifact(tmp_path: Path, *, single_run: bool) -> tuple[Path, 
         experiment_name="exp",
         run_entry="bench:model=test",
     )
-    planner_fpath = tmp_path / "comparison_intents.latest.json"
+    planner_fpath = tmp_path / "comparison_intents.json"
     planner_fpath.write_text(json.dumps(artifact, indent=2) + "\n")
     return planner_fpath, artifact
 
@@ -171,8 +171,8 @@ def test_single_run_core_report_uses_planner_packet_and_cleans_repeat_artifacts(
     (stale_components_dir / "old-repeat.run").symlink_to(tmp_path / "local")
     (report_dir / "kwdagger_b.run").symlink_to(tmp_path / "local")
     (report_dir / comparison_sample_latest_name("local_repeat")).write_text("stale\n")
-    (report_dir / "instance_samples_official_vs_kwdagger.latest.txt").write_text("stale\n")
-    (report_dir / "core_metric_three_run_distributions.latest.png").write_text("stale\n")
+    (report_dir / "instance_samples_official_vs_kwdagger.txt").write_text("stale\n")
+    (report_dir / "core_metric_three_run_distributions.png").write_text("stale\n")
 
     core_metric_calls: list[list[str]] = []
     pair_sample_calls: list[dict] = []
@@ -191,15 +191,15 @@ def test_single_run_core_report_uses_planner_packet_and_cleans_repeat_artifacts(
         ]
     )
 
-    components_manifest = _read_json(report_dir / "components_manifest.latest.json")
-    comparisons_manifest = _read_json(report_dir / "comparisons_manifest.latest.json")
+    components_manifest = _read_json(report_dir / "components_manifest.json")
+    comparisons_manifest = _read_json(report_dir / "comparisons_manifest.json")
     assert components_manifest["packet_id"] == packet["packet_id"]
     assert components_manifest["warnings"] == packet["warnings"]
     assert comparisons_manifest["comparisons"] == packet["comparisons"]
     assert [comparison["comparison_kind"] for comparison in comparisons_manifest["comparisons"]] == ["official_vs_local"]
     assert not (report_dir / comparison_sample_latest_name("local_repeat")).exists()
-    assert not (report_dir / "instance_samples_official_vs_kwdagger.latest.txt").exists()
-    assert not (report_dir / "core_metric_three_run_distributions.latest.png").exists()
+    assert not (report_dir / "instance_samples_official_vs_kwdagger.txt").exists()
+    assert not (report_dir / "core_metric_three_run_distributions.png").exists()
     assert not (report_dir / "kwdagger_b.run").exists()
     assert len(core_metric_calls) == 1
     assert len(pair_sample_calls) == 1
@@ -208,24 +208,24 @@ def test_single_run_core_report_uses_planner_packet_and_cleans_repeat_artifacts(
     # Canonical heavy artifacts are NOT auto-rendered; --render-heavy-pairwise-plots absent
     assert "--render-heavy-pairwise-plots" not in core_metric_calls[0]
 
-    # render_heavy_pairwise_plots.latest.sh is written
-    render_script = report_dir / "render_heavy_pairwise_plots.latest.sh"
+    # render_heavy_pairwise_plots.sh is written
+    render_script = report_dir / "render_heavy_pairwise_plots.sh"
     assert render_script.exists(), "render script must be written"
     script_text = render_script.read_text()
     assert "--render-heavy-pairwise-plots" in script_text
     assert "eval_audit.reports.core_metrics" in script_text
-    assert "components_manifest.latest.json" in script_text
-    assert "comparisons_manifest.latest.json" in script_text
+    assert "components_manifest.json" in script_text
+    assert "comparisons_manifest.json" in script_text
     assert "--plots-only" not in script_text, "render script must NOT skip non-plot writes"
 
-    # redraw_plots.latest.sh is written for narrow plot-styling iteration
-    redraw_script = report_dir / "redraw_plots.latest.sh"
+    # redraw_plots.sh is written for narrow plot-styling iteration
+    redraw_script = report_dir / "redraw_plots.sh"
     assert redraw_script.exists(), "redraw_plots.sh must be written"
     redraw_text = redraw_script.read_text()
     assert "--plots-only" in redraw_text, "redraw_plots.sh must use --plots-only"
     assert "--render-heavy-pairwise-plots" in redraw_text
-    assert "components_manifest.latest.json" in redraw_text
-    assert "comparisons_manifest.latest.json" in redraw_text
+    assert "components_manifest.json" in redraw_text
+    assert "comparisons_manifest.json" in redraw_text
     assert "--plot_target core_metric_report" in redraw_text
 
 
@@ -260,8 +260,8 @@ def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_pat
         ]
     )
 
-    components_manifest = _read_json(report_dir / "components_manifest.latest.json")
-    comparisons_manifest = _read_json(report_dir / "comparisons_manifest.latest.json")
+    components_manifest = _read_json(report_dir / "components_manifest.json")
+    comparisons_manifest = _read_json(report_dir / "comparisons_manifest.json")
     local_components = [
         component for component in components_manifest["components"]
         if component["source_kind"] == "local"
@@ -275,18 +275,18 @@ def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_pat
     # Heavy pairwise interactives not auto-rendered by default
     assert "--render-heavy-pairwise-plots" not in core_metric_calls[0]
 
-    # render_heavy_pairwise_plots.latest.sh written and references canonical manifests
-    render_script = report_dir / "render_heavy_pairwise_plots.latest.sh"
+    # render_heavy_pairwise_plots.sh written and references canonical manifests
+    render_script = report_dir / "render_heavy_pairwise_plots.sh"
     assert render_script.exists(), "render script must be written"
     script_text = render_script.read_text()
     assert "--render-heavy-pairwise-plots" in script_text
     assert "eval_audit.reports.core_metrics" in script_text
-    assert "components_manifest.latest.json" in script_text
-    assert "comparisons_manifest.latest.json" in script_text
+    assert "components_manifest.json" in script_text
+    assert "comparisons_manifest.json" in script_text
     assert "--plots-only" not in script_text
 
-    # redraw_plots.latest.sh emitted for narrow plot-styling iteration
-    redraw_script = report_dir / "redraw_plots.latest.sh"
+    # redraw_plots.sh emitted for narrow plot-styling iteration
+    redraw_script = report_dir / "redraw_plots.sh"
     assert redraw_script.exists()
     redraw_text = redraw_script.read_text()
     assert "--plots-only" in redraw_text

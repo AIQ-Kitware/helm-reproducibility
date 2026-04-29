@@ -207,21 +207,21 @@ def test_choose_repro_row_for_run_entry_prefers_latest_manifest_then_stable_tieb
             "run_entry": run_entry,
             "packet_id": "packet-zzz",
             "report_dir": "/reports/z",
-            "report_json": "/reports/z/core_metric_report.latest.json",
+            "report_json": "/reports/z/core_metric_report.json",
         },
         {
             "experiment_name": "exp-new",
             "run_entry": run_entry,
             "packet_id": "packet-same",
             "report_dir": "/reports/a",
-            "report_json": "/reports/a/core_metric_report.latest.json",
+            "report_json": "/reports/a/core_metric_report.json",
         },
         {
             "experiment_name": "exp-new",
             "run_entry": run_entry,
             "packet_id": "packet-same",
             "report_dir": "/reports/b",
-            "report_json": "/reports/b/core_metric_report.latest.json",
+            "report_json": "/reports/b/core_metric_report.json",
         },
     ]
 
@@ -735,9 +735,9 @@ def test_prioritized_example_symlink_tree_is_created_and_points_to_real_targets(
     report_dir = tmp_path / "reports" / "good"
     report_dir.mkdir(parents=True)
     for name in [
-        "core_metric_report.latest.png",
-        "core_metric_management_summary.latest.txt",
-        "warnings.latest.txt",
+        "core_metric_report.png",
+        "core_metric_management_summary.txt",
+        "warnings.txt",
         comparison_sample_latest_name("official_vs_local"),
     ]:
         (report_dir / name).write_text(name)
@@ -777,7 +777,7 @@ def test_prioritized_example_symlink_tree_is_created_and_points_to_real_targets(
         repair_results=[],
     )
 
-    assert (level_002 / "prioritized_examples.latest").is_symlink()
+    assert (level_002 / "prioritized_examples").is_dir()
     rec_dir = tree_root / "score_ge_95" / "01-benchmark-bench-good"
     example_dir = rec_dir / "example_01-bench-good-model-a"
     assert rec_dir.exists()
@@ -785,7 +785,7 @@ def test_prioritized_example_symlink_tree_is_created_and_points_to_real_targets(
     assert (rec_dir / "breakdown_dir").resolve() == breakdown_dir.resolve()
     assert (rec_dir / "breakdown_index_dir").resolve() == breakdown_index_dir.resolve()
     assert (example_dir / "report_dir").resolve() == report_dir.resolve()
-    assert (example_dir / "core_metric_report.latest.png").resolve() == (report_dir / "core_metric_report.latest.png").resolve()
+    assert (example_dir / "core_metric_report.png").resolve() == (report_dir / "core_metric_report.png").resolve()
 
 
 def test_prioritized_example_repairs_missing_latest_artifacts(tmp_path, monkeypatch):
@@ -824,12 +824,12 @@ def test_prioritized_example_repairs_missing_latest_artifacts(tmp_path, monkeypa
     def _fake_rebuild(argv):
         calls.append(argv)
         for name in [
-            "core_metric_report.latest.png",
-            "core_metric_management_summary.latest.txt",
-            "components_manifest.latest.json",
-            "comparisons_manifest.latest.json",
-            "warnings.latest.json",
-            "warnings.latest.txt",
+            "core_metric_report.png",
+            "core_metric_management_summary.txt",
+            "components_manifest.json",
+            "comparisons_manifest.json",
+            "warnings.json",
+            "warnings.txt",
             comparison_sample_latest_name("official_vs_local"),
         ]:
             (report_dir / name).write_text("repaired")

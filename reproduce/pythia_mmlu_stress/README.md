@@ -11,9 +11,9 @@ The manifest is checked in at
 ## What this assumes
 
 - The local audit-results index exists at
-  `$AUDIT_STORE_ROOT/indexes/audit_results_index.latest.csv`.
+  `$AUDIT_STORE_ROOT/indexes/audit_results_index.csv`.
 - The official-public-HELM index exists at
-  `$AUDIT_STORE_ROOT/indexes/official_public_index.latest.csv`.
+  `$AUDIT_STORE_ROOT/indexes/official_public_index.csv`.
 - The source experiments listed in the manifest's
   `sources[].include_experiments` (`audit-mmlu-usfp-pythia-r1`,
   `audit-mmlu-usfp-pythia-r2`, `audit-historic-grid`) have actually
@@ -56,8 +56,8 @@ place this runbook writes:
 ├── analysis/
 │   ├── planning/                       (comparison_intents, packets, components, warnings)
 │   ├── core-reports/<one per packet>/  (per-packet core_metric report)
-│   ├── experiment_summary.latest.{json,csv,txt}
-│   └── reproduce.latest.sh
+│   ├── experiment_summary.{json,csv,txt}
+│   └── reproduce.sh
 └── reports/
     └── aggregate-summary/<scope>/      (story-arc sankeys, agreement curve, prioritized examples, README)
 ```

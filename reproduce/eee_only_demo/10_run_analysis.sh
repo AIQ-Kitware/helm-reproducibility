@@ -6,14 +6,14 @@
 #
 # Outputs:
 #   ${OUT_DPATH:-/tmp/eee_only_demo_out}/
-#     official_public_index.latest.csv
-#     audit_results_index.latest.csv
+#     official_public_index.csv
+#     audit_results_index.csv
 #     planning/
-#     <experiment_name>/core-reports/<packet>/core_metric_report.latest.{txt,json,png}
+#     <experiment_name>/core-reports/<packet>/core_metric_report.{txt,json,png}
 #     aggregate-summary/all-results/                 (with --build-aggregate-summary)
-#       README.latest.txt
-#       agreement_curve.latest.{html,jpg}
-#       reproducibility_buckets.latest.{html,jpg}
+#       README.txt
+#       agreement_curve.{html,jpg}
+#       reproducibility_buckets.{html,jpg}
 #       sankey_*.html, prioritized_examples.latest/, ...
 #
 # Override OUT_DPATH to write somewhere else, or BUILD_AGGREGATE=0 to skip the
@@ -50,8 +50,8 @@ find "$OUT_DPATH" -mindepth 3 -maxdepth 3 -type d -path '*/core-reports/*' -prin
 if [ "$BUILD_AGGREGATE" != "0" ]; then
   echo
   echo "Aggregate summary:"
-  echo "  $OUT_DPATH/aggregate-summary/all-results/README.latest.txt"
+  echo "  $OUT_DPATH/aggregate-summary/all-results/README.txt"
 fi
 echo
 echo "Quick read (per-packet):"
-echo "  $OUT_DPATH/<experiment>/core-reports/<packet>/core_metric_report.latest.txt"
+echo "  $OUT_DPATH/<experiment>/core-reports/<packet>/core_metric_report.txt"

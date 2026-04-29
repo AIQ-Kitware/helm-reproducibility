@@ -1052,16 +1052,16 @@ def _load_all_repro_rows(
         publication_root_link_dir = publication_experiments_root()
         legacy_repo_root = legacy_repo_publication_root()
         canonical_paths = (
-            list(canonical_root.glob("*/core-reports/*/core_metric_report.latest.json"))
-            + list(publication_root_link_dir.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
-            + list(legacy_repo_root.glob("experiment-analysis-*/core-reports/*/core_metric_report.latest.json"))
+            list(canonical_root.glob("*/core-reports/*/core_metric_report.json"))
+            + list(publication_root_link_dir.glob("experiment-analysis-*/core-reports/*/core_metric_report.json"))
+            + list(legacy_repo_root.glob("experiment-analysis-*/core-reports/*/core_metric_report.json"))
         )
     report_jsons = sorted(
         canonical_paths
         + [
             p
             for root in extra_roots
-            for p in root.glob("*/core-reports/*/core_metric_report.latest.json")
+            for p in root.glob("*/core-reports/*/core_metric_report.json")
         ]
     )
     deduped: dict[tuple[str | None, str | None], dict[str, Any]] = {}
@@ -2586,15 +2586,15 @@ def _iter_prioritized_example_rows(summary: dict[str, Any]) -> list[dict[str, An
 
 def _prioritized_example_artifact_names(report_dir: Path) -> list[str]:
     try:
-        packet = load_core_report_bundle(report_dir / "core_metric_report.latest.json")["packet"]
+        packet = load_core_report_bundle(report_dir / "core_metric_report.json")["packet"]
     except Exception:
         return [
-            "core_metric_report.latest.png",
-            "core_metric_management_summary.latest.txt",
-            "components_manifest.latest.json",
-            "comparisons_manifest.latest.json",
-            "warnings.latest.json",
-            "warnings.latest.txt",
+            "core_metric_report.png",
+            "core_metric_management_summary.txt",
+            "components_manifest.json",
+            "comparisons_manifest.json",
+            "warnings.json",
+            "warnings.txt",
         ]
     return prioritized_example_artifact_names(packet)
 
@@ -2673,7 +2673,7 @@ def _publish_prioritized_examples_tree(
     summary: dict[str, Any],
     repair_results: list[dict[str, Any]] | None = None,
 ) -> Path:
-    tree_root = level_002 / f"prioritized_examples_{generated_utc}"
+    tree_root = level_002 / "prioritized_examples"
     tree_root.mkdir(parents=True, exist_ok=True)
     repairs_by_dir = {
         str(item.get("report_dir") or ""): item
@@ -2729,8 +2729,6 @@ def _publish_prioritized_examples_tree(
         "Each recommendation directory links to the selected breakdown, its parent index, and example report dirs with key latest artifacts.",
     ]
     _write_text(readme_lines, tree_root / "README.txt")
-    link_alias(tree_root / "README.txt", tree_root, "README.latest.txt")
-    link_alias(tree_root, level_002, "prioritized_examples.latest")
     return tree_root
 
 
@@ -3119,42 +3117,42 @@ def _build_high_level_readme(
         [
             "",
             "start_here:",
-            "  story_index.latest.txt — canonical 5-step reading order for the sankey visualizations",
-            "  cardinality_summary.latest.txt — run/model/benchmark counts at each stage of the funnel",
-            "  off_story_summary.latest.txt — off-story local-extension models with selected/attempted/completed/analyzed counts",
-            "  run_multiplicity_summary.latest.txt — repeated attempts, machine spread, experiment spread, and UUID/fallback identity coverage",
-            "  prioritized_breakdowns.latest.txt — shortlist of benchmark/model/machine/experiment breakdowns to inspect next",
+            "  story_index.txt — canonical 5-step reading order for the sankey visualizations",
+            "  cardinality_summary.txt — run/model/benchmark counts at each stage of the funnel",
+            "  off_story_summary.txt — off-story local-extension models with selected/attempted/completed/analyzed counts",
+            "  run_multiplicity_summary.txt — repeated attempts, machine spread, experiment spread, and UUID/fallback identity coverage",
+            "  prioritized_breakdowns.txt — shortlist of benchmark/model/machine/experiment breakdowns to inspect next",
             "",
             "  understand_upstream_filtering:",
             "    1. What runs were excluded at Stage 1 (discovery)? See reports/filtering/ which contains",
-            "       sankey_model_filter.latest.html and filter_cardinality_summary.latest.txt.",
+            "       sankey_model_filter.html and filter_cardinality_summary.txt.",
             "    2. Read docs/pipeline.md for the full end-to-end workflow (stages 1-6).",
             "",
             "  explore_execution_coverage (read sankeys in order):",
-            "    s01: sankey_s01_operational.latest.html — all attempted runs: benchmark → lifecycle → outcome",
-            "    a:   sankey_a_universe_to_scope.latest.html — Stage A: Universe → Scope (filter funnel)",
-            "    b:   sankey_b_scope_to_analyzed.latest.html — Stage B: Scope → Attempt → Execution → Analysis → Reproduction (abs_tol=0)",
-            "    s05: sankey_s05_reproducibility.latest.html — detailed group → repeatability → agreement → diagnosis",
-            "    sup: sankey_repro_by_metric.latest.html — per-metric drift (run-level max |official - local|)",
-            "    sup: filter_selection_by_model.latest.html — selected vs excluded run-specs by model",
-            "    sup: benchmark_status.latest.html and coverage_matrix.latest.html",
+            "    s01: sankey_s01_operational.html — all attempted runs: benchmark → lifecycle → outcome",
+            "    a:   sankey_a_universe_to_scope.html — Stage A: Universe → Scope (filter funnel)",
+            "    b:   sankey_b_scope_to_analyzed.html — Stage B: Scope → Attempt → Execution → Analysis → Reproduction (abs_tol=0)",
+            "    s05: sankey_s05_reproducibility.html — detailed group → repeatability → agreement → diagnosis",
+            "    sup: sankey_repro_by_metric.html — per-metric drift (run-level max |official - local|)",
+            "    sup: filter_selection_by_model.html — selected vs excluded run-specs by model",
+            "    sup: benchmark_status.html and coverage_matrix.html",
             "    alt: alt_tolerances/ — tolerance sweep variants (tol001, tol010, tol050) for s03/s04/s05",
             "",
             "  understand_reproducibility:",
-            "    1. open agreement_curve.latest.html to see how agreement changes across tolerance thresholds",
-            "    2. open agreement_curve_per_metric.latest.html for per-metric agreement curves",
-            "    3. open reproducibility_buckets.latest.html to see agreement distribution",
+            "    1. open agreement_curve.html to see how agreement changes across tolerance thresholds",
+            "    2. open agreement_curve_per_metric.html for per-metric agreement curves",
+            "    3. open reproducibility_buckets.html to see agreement distribution",
             "    4. for relaxed tolerances, see alt_tolerances/ subdirectory",
             "",
             "  diagnose_failures:",
-            "    1. read failure_reasons.latest.txt to see why incomplete jobs failed",
-            "    2. open failure_taxonomy.latest.html to see root-cause breakdown (hardware/data/infra)",
+            "    1. read failure_reasons.txt to see why incomplete jobs failed",
+            "    2. open failure_taxonomy.html to see root-cause breakdown (hardware/data/infra)",
             "",
             "  drill_down_by_dimension:",
             "    - follow next_level/ for breakdown tables by benchmark, model, suite, machine, experiment",
-            "    - use prioritized_breakdowns.latest.* for a triage-first shortlist with direct breakdown paths",
-            "    - use off_story_summary.latest.* and run_multiplicity_summary.latest.* for storyline/attempt identity tables",
-            "    - run reproduce.latest.sh to regenerate this report from current data",
+            "    - use prioritized_breakdowns.* for a triage-first shortlist with direct breakdown paths",
+            "    - use off_story_summary.* and run_multiplicity_summary.* for storyline/attempt identity tables",
+            "    - run reproduce.sh to regenerate this report from current data",
             "",
             "default_breakdowns:",
         ]
@@ -3165,91 +3163,87 @@ def _build_high_level_readme(
 
 
 def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: Path) -> None:
-    link_alias(level_001 / "README.latest.txt", summary_root, "README.latest.txt")
-    link_alias(level_001 / "story_index.latest.txt", summary_root, "story_index.latest.txt")
-    link_alias(level_001, summary_root, "level_001.latest")
-    link_alias(level_002, summary_root, "level_002.latest")
+    link_alias(level_001 / "README.txt", summary_root, "README.txt")
+    link_alias(level_001 / "story_index.txt", summary_root, "story_index.txt")
     level_001_interactive = level_001 / "interactive"
     level_001_static = level_001 / "static"
     level_002_static = level_002 / "static"
     for src_name in [
-        "sankey_s01_operational.latest.html",
-        "sankey_a_universe_to_scope.latest.html",
-        "sankey_b_scope_to_analyzed.latest.html",
-        "sankey_s05_reproducibility.latest.html",
-        "sankey_repro_by_metric.latest.html",
-        "benchmark_status.latest.html",
-        "reproducibility_buckets.latest.html",
-        "agreement_curve.latest.html",
-        "agreement_curve_per_metric.latest.html",
-        "coverage_matrix.latest.html",
-        "failure_taxonomy.latest.html",
-        "filter_selection_by_model.latest.html",
+        "sankey_s01_operational.html",
+        "sankey_a_universe_to_scope.html",
+        "sankey_b_scope_to_analyzed.html",
+        "sankey_s05_reproducibility.html",
+        "sankey_repro_by_metric.html",
+        "benchmark_status.html",
+        "reproducibility_buckets.html",
+        "agreement_curve.html",
+        "agreement_curve_per_metric.html",
+        "coverage_matrix.html",
+        "failure_taxonomy.html",
+        "filter_selection_by_model.html",
     ]:
         src = level_001_interactive / src_name
         if src.exists() or src.is_symlink():
             link_alias(src, summary_root, src_name)
     for src_name in [
-        "cardinality_summary.latest.txt",
-        "sankey_s01_operational.latest.jpg",
-        "sankey_s01_operational.latest.txt",
-        "sankey_a_universe_to_scope.latest.jpg",
-        "sankey_a_universe_to_scope.latest.txt",
-        "sankey_b_scope_to_analyzed.latest.jpg",
-        "sankey_b_scope_to_analyzed.latest.txt",
-        "sankey_s05_reproducibility.latest.jpg",
-        "sankey_s05_reproducibility.latest.txt",
-        "sankey_repro_by_metric.latest.jpg",
-        "sankey_repro_by_metric.latest.txt",
-        "benchmark_status.latest.jpg",
-        "reproducibility_buckets.latest.jpg",
-        "agreement_curve.latest.jpg",
-        "agreement_curve_per_metric.latest.jpg",
-        "coverage_matrix.latest.jpg",
-        "failure_taxonomy.latest.jpg",
-        "filter_selection_by_model.latest.jpg",
-        "failure_reasons.latest.txt",
-        "failure_runs.latest.csv",
+        "cardinality_summary.txt",
+        "sankey_s01_operational.jpg",
+        "sankey_s01_operational.txt",
+        "sankey_a_universe_to_scope.jpg",
+        "sankey_a_universe_to_scope.txt",
+        "sankey_b_scope_to_analyzed.jpg",
+        "sankey_b_scope_to_analyzed.txt",
+        "sankey_s05_reproducibility.jpg",
+        "sankey_s05_reproducibility.txt",
+        "sankey_repro_by_metric.jpg",
+        "sankey_repro_by_metric.txt",
+        "benchmark_status.jpg",
+        "reproducibility_buckets.jpg",
+        "agreement_curve.jpg",
+        "agreement_curve_per_metric.jpg",
+        "coverage_matrix.jpg",
+        "failure_taxonomy.jpg",
+        "filter_selection_by_model.jpg",
+        "failure_reasons.txt",
+        "failure_runs.csv",
     ]:
         src = level_001_static / src_name
         if src.exists() or src.is_symlink():
             link_alias(src, summary_root, src_name)
-    link_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.latest.sh")
-    link_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.sh")
-    link_alias(level_001 / "redraw_plots.latest.sh", summary_root, "redraw_plots.latest.sh")
-    link_alias(level_001 / "redraw_plots.latest.sh", summary_root, "redraw_plots.sh")
+    link_alias(level_001 / "reproduce.sh", summary_root, "reproduce.sh")
+    link_alias(level_001 / "redraw_plots.sh", summary_root, "redraw_plots.sh")
     for src_name in [
-        "benchmark_summary.latest.csv",
-        "run_inventory.latest.csv",
-        "reproducibility_rows.latest.csv",
-        "prioritized_breakdowns.latest.csv",
-        "off_story_summary.latest.csv",
-        "run_multiplicity_summary.latest.csv",
+        "benchmark_summary.csv",
+        "run_inventory.csv",
+        "reproducibility_rows.csv",
+        "prioritized_breakdowns.csv",
+        "off_story_summary.csv",
+        "run_multiplicity_summary.csv",
     ]:
         src = level_002_static / src_name
         if src.exists() or src.is_symlink():
             link_alias(src, summary_root, src_name)
     for src_name in [
-        "prioritized_breakdowns.latest.txt",
-        "prioritized_examples.latest",
-        "off_story_summary.latest.txt",
-        "run_multiplicity_summary.latest.txt",
+        "prioritized_breakdowns.txt",
+        "prioritized_examples",
+        "off_story_summary.txt",
+        "run_multiplicity_summary.txt",
     ]:
         src = level_002_static / src_name if src_name.endswith(".txt") else level_002 / src_name
         if src.exists() or src.is_symlink():
             link_alias(src, summary_root, src_name)
     for src_name in [
-        "prioritized_breakdowns.latest.json",
-        "off_story_summary.latest.json",
-        "run_multiplicity_summary.latest.json",
+        "prioritized_breakdowns.json",
+        "off_story_summary.json",
+        "run_multiplicity_summary.json",
     ]:
         src = level_002 / "machine" / src_name
         if src.exists() or src.is_symlink():
             link_alias(src, summary_root, src_name)
 
-    machine_csv = level_002 / "breakdowns" / "by_machine_host" / "index.latest.csv"
+    machine_csv = level_002 / "breakdowns" / "by_machine_host" / "index.csv"
     if machine_csv.exists() or machine_csv.is_symlink():
-        link_alias(machine_csv, summary_root, "machine_summary.latest.csv")
+        link_alias(machine_csv, summary_root, "machine_summary.csv")
 
 
 def _render_breakdown_scopes(
@@ -3286,7 +3280,7 @@ def _render_breakdown_scopes(
         summary_rows = _summarize_by_dimension(enriched_rows, dimension=dim, repro_keyed=repro_keyed)
         table_artifacts = _write_table_artifacts(summary_rows, dim_root / f"index_{slugify(dim)}")
         for kind in ["json", "csv", "txt"]:
-            link_alias(Path(table_artifacts[kind]), dim_root, f"index.latest.{kind}")
+            link_alias(Path(table_artifacts[kind]), dim_root, f"index.{kind}")
         for value in top_values:
             child_rows = [row for row in enriched_rows if str(row.get(dim) or "unknown") == value]
             child_repro = [
@@ -3320,7 +3314,7 @@ def _render_breakdown_scopes(
             )
     manifest_fpath = breakdowns_root / "manifest.json"
     _write_json(manifest_rows, manifest_fpath)
-    link_alias(manifest_fpath, breakdowns_root, "manifest.latest.json")
+    link_alias(manifest_fpath, breakdowns_root, "manifest.json")
 
 
 def _bucket_metric_delta(max_delta: float | None) -> str:
@@ -4757,8 +4751,8 @@ def _render_scope_summary(
     )
     cardinality_fpath = level_001_static / f"cardinality_summary_{generated_utc}.txt"
     _write_text(cardinality_lines, cardinality_fpath)
-    link_alias(cardinality_fpath, level_001_static, "cardinality_summary.latest.txt")
-    link_alias(cardinality_fpath, level_001, "cardinality_summary.latest.txt")
+    link_alias(cardinality_fpath, level_001_static, "cardinality_summary.txt")
+    link_alias(cardinality_fpath, level_001, "cardinality_summary.txt")
 
     level_002_lines = [
         "Drilldown Summary",
@@ -4767,49 +4761,49 @@ def _render_scope_summary(
         f"scope: {scope_title}",
         "",
         "contents:",
-        "  - benchmark_summary.latest.csv: benchmark-level counts and top failure reason",
-        "  - run_inventory.latest.csv: one row per scheduled job with completion, failure, repro, and attempt identity/provenance fields",
-        "  - reproducibility_rows.latest.csv: analyzed per-run reproducibility cases in this scope",
-        "  - prioritized_breakdowns.latest.{txt,csv,json}: ranked triage shortlist of breakdowns and example cases to inspect next",
-        "  - prioritized_examples.latest/: filesystem-first symlink tree for the shortlisted breakdowns and example report artifacts",
-        "  - off_story_summary.latest.{txt,csv,json}: off-story local extensions plus on-story context counts",
-        "  - run_multiplicity_summary.latest.{txt,csv,json}: logical-run multiplicity, attempt identity, machine spread, and experiment spread",
+        "  - benchmark_summary.csv: benchmark-level counts and top failure reason",
+        "  - run_inventory.csv: one row per scheduled job with completion, failure, repro, and attempt identity/provenance fields",
+        "  - reproducibility_rows.csv: analyzed per-run reproducibility cases in this scope",
+        "  - prioritized_breakdowns.{txt,csv,json}: ranked triage shortlist of breakdowns and example cases to inspect next",
+        "  - prioritized_examples/: filesystem-first symlink tree for the shortlisted breakdowns and example report artifacts",
+        "  - off_story_summary.{txt,csv,json}: off-story local extensions plus on-story context counts",
+        "  - run_multiplicity_summary.{txt,csv,json}: logical-run multiplicity, attempt identity, machine spread, and experiment spread",
     ]
     if breakdown_dims:
         level_002_lines.append("  - breakdowns/: reusable summaries for additional cuts of the same data")
     _write_text(level_002_lines, level_002 / f"README_{generated_utc}.txt")
 
     latest_pairs = [
-        (level_001 / f"README_{generated_utc}.txt", level_001, "README.latest.txt"),
-        (level_002 / f"README_{generated_utc}.txt", level_002, "README.latest.txt"),
-        (Path(failure_table["json"]), level_001_machine, "failure_runs.latest.json"),
-        (Path(failure_table["csv"]), level_001_static, "failure_runs.latest.csv"),
-        (Path(failure_table["txt"]), level_001_static, "failure_runs.latest.txt"),
-        (Path(failure_reason_table["json"]), level_001_machine, "failure_reasons.latest.json"),
-        (Path(failure_reason_table["csv"]), level_001_static, "failure_reasons.latest.csv"),
-        (Path(failure_reason_table["txt"]), level_001_static, "failure_reasons.latest.txt"),
-        (Path(benchmark_table["json"]), level_002_machine, "benchmark_summary.latest.json"),
-        (Path(benchmark_table["csv"]), level_002_static, "benchmark_summary.latest.csv"),
-        (Path(benchmark_table["txt"]), level_002_static, "benchmark_summary.latest.txt"),
-        (Path(run_inventory_table["json"]), level_002_machine, "run_inventory.latest.json"),
-        (Path(run_inventory_table["csv"]), level_002_static, "run_inventory.latest.csv"),
-        (Path(run_inventory_table["txt"]), level_002_static, "run_inventory.latest.txt"),
-        (Path(repro_table["json"]), level_002_machine, "reproducibility_rows.latest.json"),
-        (Path(repro_table["csv"]), level_002_static, "reproducibility_rows.latest.csv"),
-        (Path(repro_table["txt"]), level_002_static, "reproducibility_rows.latest.txt"),
-        (Path(prioritized_breakdowns_table["json"]), level_002_machine, "prioritized_breakdowns.latest.json"),
-        (Path(prioritized_breakdowns_table["csv"]), level_002_static, "prioritized_breakdowns.latest.csv"),
-        (Path(prioritized_breakdowns_table["txt"]), level_002_static, "prioritized_breakdowns.latest.txt"),
-        (Path(off_story_table["json"]), level_002_machine, "off_story_summary.latest.json"),
-        (Path(off_story_table["csv"]), level_002_static, "off_story_summary.latest.csv"),
-        (Path(off_story_table["txt"]), level_002_static, "off_story_summary.latest.txt"),
-        (Path(run_multiplicity_table["json"]), level_002_machine, "run_multiplicity_summary.latest.json"),
-        (Path(run_multiplicity_table["csv"]), level_002_static, "run_multiplicity_summary.latest.csv"),
-        (Path(run_multiplicity_table["txt"]), level_002_static, "run_multiplicity_summary.latest.txt"),
+        (level_001 / f"README_{generated_utc}.txt", level_001, "README.txt"),
+        (level_002 / f"README_{generated_utc}.txt", level_002, "README.txt"),
+        (Path(failure_table["json"]), level_001_machine, "failure_runs.json"),
+        (Path(failure_table["csv"]), level_001_static, "failure_runs.csv"),
+        (Path(failure_table["txt"]), level_001_static, "failure_runs.txt"),
+        (Path(failure_reason_table["json"]), level_001_machine, "failure_reasons.json"),
+        (Path(failure_reason_table["csv"]), level_001_static, "failure_reasons.csv"),
+        (Path(failure_reason_table["txt"]), level_001_static, "failure_reasons.txt"),
+        (Path(benchmark_table["json"]), level_002_machine, "benchmark_summary.json"),
+        (Path(benchmark_table["csv"]), level_002_static, "benchmark_summary.csv"),
+        (Path(benchmark_table["txt"]), level_002_static, "benchmark_summary.txt"),
+        (Path(run_inventory_table["json"]), level_002_machine, "run_inventory.json"),
+        (Path(run_inventory_table["csv"]), level_002_static, "run_inventory.csv"),
+        (Path(run_inventory_table["txt"]), level_002_static, "run_inventory.txt"),
+        (Path(repro_table["json"]), level_002_machine, "reproducibility_rows.json"),
+        (Path(repro_table["csv"]), level_002_static, "reproducibility_rows.csv"),
+        (Path(repro_table["txt"]), level_002_static, "reproducibility_rows.txt"),
+        (Path(prioritized_breakdowns_table["json"]), level_002_machine, "prioritized_breakdowns.json"),
+        (Path(prioritized_breakdowns_table["csv"]), level_002_static, "prioritized_breakdowns.csv"),
+        (Path(prioritized_breakdowns_table["txt"]), level_002_static, "prioritized_breakdowns.txt"),
+        (Path(off_story_table["json"]), level_002_machine, "off_story_summary.json"),
+        (Path(off_story_table["csv"]), level_002_static, "off_story_summary.csv"),
+        (Path(off_story_table["txt"]), level_002_static, "off_story_summary.txt"),
+        (Path(run_multiplicity_table["json"]), level_002_machine, "run_multiplicity_summary.json"),
+        (Path(run_multiplicity_table["csv"]), level_002_static, "run_multiplicity_summary.csv"),
+        (Path(run_multiplicity_table["txt"]), level_002_static, "run_multiplicity_summary.txt"),
     ]
     for src, root, name in latest_pairs:
         link_alias(src, root, name)
-    link_alias(prioritized_examples_tree, level_002, "prioritized_examples.latest")
+    link_alias(prioritized_examples_tree, level_002, "prioritized_examples")
 
     if include_visuals:
         for base_name, artifact in [
@@ -4820,13 +4814,13 @@ def _render_scope_summary(
             ("failure_taxonomy", failure_taxonomy_plot),
             ("filter_selection_by_model", filter_selection_by_model_plot),
         ]:
-            link_alias(Path(artifact["json"]), level_001_machine, f"{base_name}.latest.json")
+            link_alias(Path(artifact["json"]), level_001_machine, f"{base_name}.json")
             if artifact.get("html"):
-                link_alias(Path(str(artifact["html"])), level_001_interactive, f"{base_name}.latest.html")
+                link_alias(Path(str(artifact["html"])), level_001_interactive, f"{base_name}.html")
             if artifact.get("png"):
-                link_alias(Path(str(artifact["png"])), level_001_static, f"{base_name}.latest.png")
+                link_alias(Path(str(artifact["png"])), level_001_static, f"{base_name}.png")
             if artifact.get("jpg"):
-                link_alias(Path(str(artifact["jpg"])), level_001_static, f"{base_name}.latest.jpg")
+                link_alias(Path(str(artifact["jpg"])), level_001_static, f"{base_name}.jpg")
 
     manifest = {
         "generated_utc": generated_utc,
@@ -4877,7 +4871,7 @@ def _render_scope_summary(
     }
     manifest_fpath = level_001_machine / f"summary_manifest_{generated_utc}.json"
     _write_json(manifest, manifest_fpath)
-    link_alias(manifest_fpath, level_001_machine, "summary_manifest.latest.json")
+    link_alias(manifest_fpath, level_001_machine, "summary_manifest.json")
 
     reproduce_sh_fpath = level_001 / f"reproduce_{generated_utc}.sh"
     _write_reproduce_sh(
@@ -4887,7 +4881,7 @@ def _render_scope_summary(
         index_path=index_fpath,
         filter_inventory_json=filter_inventory_json,
     )
-    link_alias(reproduce_sh_fpath, level_001, "reproduce.latest.sh")
+    link_alias(reproduce_sh_fpath, level_001, "reproduce.sh")
     link_alias(reproduce_sh_fpath, level_001, "reproduce.sh")
 
     redraw_plots_fpath = level_001 / f"redraw_plots_{generated_utc}.sh"
@@ -4898,7 +4892,7 @@ def _render_scope_summary(
         index_path=index_fpath,
         filter_inventory_json=filter_inventory_json,
     )
-    link_alias(redraw_plots_fpath, level_001, "redraw_plots.latest.sh")
+    link_alias(redraw_plots_fpath, level_001, "redraw_plots.sh")
     link_alias(redraw_plots_fpath, level_001, "redraw_plots.sh")
 
     symlink_to(level_002, level_001 / "next_level")
@@ -4931,39 +4925,39 @@ def _render_scope_summary(
         "",
         "s01 — Executive Operational Summary",
         "  All attempted runs: benchmark group → lifecycle status → outcome/failure reason.",
-        "  File: sankey_s01_operational.latest.{html,jpg,txt}",
+        "  File: sankey_s01_operational.{html,jpg,txt}",
         "",
         "Stage A — Universe → Scope (filter funnel)",
         "  How the source universe gets narrowed to the in-scope set. Every filter gate",
         "  (structural, model metadata, open-weight, tag/modality, deployment, size,",
         "  selection) is a stage; terminal nodes are 'selected' (in scope) or",
         "  'excluded: <reason>'. This is the context-establishment view.",
-        "  File: sankey_a_universe_to_scope.latest.{html,jpg,txt}",
+        "  File: sankey_a_universe_to_scope.{html,jpg,txt}",
         "",
         "Stage B — Scope → Attempt → Execution → Analysis → Reproduction",
         "  Of the in-scope rows, how many we attempted, completed, analyzed, and at",
         "  what agreement bucket they landed (abs_tol=0). This is the coverage view.",
-        "  File: sankey_b_scope_to_analyzed.latest.{html,jpg,txt}",
+        "  File: sankey_b_scope_to_analyzed.{html,jpg,txt}",
         "  Tolerance variants live under alt_tolerances/ as",
         "  sankey_b_scope_to_analyzed_tol{001,010,050}.",
         "",
         "s05 — Detailed Reproducibility Breakdown",
         "  Group → local repeatability → official-vs-local agreement → diagnosis.",
-        "  File: sankey_s05_reproducibility.latest.{html,jpg,txt}",
+        "  File: sankey_s05_reproducibility.{html,jpg,txt}",
         "",
         "Supplementary",
-        "  prioritized_breakdowns.latest.txt: triage-first shortlist with direct paths",
-        "  prioritized_examples.latest/: filesystem-first symlink tree for shortlisted examples",
-        "  off_story_summary.latest.txt: off-story local extensions with stage counts",
-        "  run_multiplicity_summary.latest.txt: logical-result identity, repeats, machines",
+        "  prioritized_breakdowns.txt: triage-first shortlist with direct paths",
+        "  prioritized_examples/: filesystem-first symlink tree for shortlisted examples",
+        "  off_story_summary.txt: off-story local extensions with stage counts",
+        "  run_multiplicity_summary.txt: logical-result identity, repeats, machines",
         "  sankey_repro_by_metric: per-metric drift (max |official - local| across runs)",
         "  alt_tolerances/: tolerance sweep variants for Stage B and s05",
-        "  agreement_curve.latest.html: agreement-rate vs tolerance curve",
-        "  coverage_matrix.latest.html: model × benchmark reproducibility heat-map",
+        "  agreement_curve.html: agreement-rate vs tolerance curve",
+        "  coverage_matrix.html: model × benchmark reproducibility heat-map",
     ]
     story_index_fpath = level_001 / f"story_index_{generated_utc}.txt"
     _write_text(story_index_lines, story_index_fpath)
-    link_alias(story_index_fpath, level_001, "story_index.latest.txt")
+    link_alias(story_index_fpath, level_001, "story_index.txt")
 
     _write_scope_level_aliases(level_001, level_002, summary_root)
 
@@ -4986,41 +4980,41 @@ def _render_scope_summary(
 
 
 _FILTER_ARTIFACT_ALIAS_NAMES = (
-    "filter_selection_by_model.latest.json",
-    "filter_selection_by_model.latest.html",
-    "filter_selection_by_model.latest.jpg",
-    "filter_selection_by_model.latest.png",
+    "filter_selection_by_model.json",
+    "filter_selection_by_model.html",
+    "filter_selection_by_model.jpg",
+    "filter_selection_by_model.png",
     # Stage-A funnel (new) — only meaningful when filter inventory is loaded.
-    "sankey_a_universe_to_scope.latest.html",
-    "sankey_a_universe_to_scope.latest.jpg",
-    "sankey_a_universe_to_scope.latest.txt",
-    "sankey_a_universe_to_scope.latest.json",
+    "sankey_a_universe_to_scope.html",
+    "sankey_a_universe_to_scope.jpg",
+    "sankey_a_universe_to_scope.txt",
+    "sankey_a_universe_to_scope.json",
     # Legacy filter sankeys (s02 / s04) — kept here so historic builds get
     # their stale aliases cleaned up when re-run with --no-filter-inventory.
-    "sankey_s02_filter_to_attempt.latest.html",
-    "sankey_s02_filter_to_attempt.latest.jpg",
-    "sankey_s02_filter_to_attempt.latest.txt",
-    "sankey_s02_filter_to_attempt.latest.json",
-    "sankey_s04_end_to_end.latest.html",
-    "sankey_s04_end_to_end.latest.jpg",
-    "sankey_s04_end_to_end.latest.txt",
-    "sankey_s04_end_to_end.latest.json",
+    "sankey_s02_filter_to_attempt.html",
+    "sankey_s02_filter_to_attempt.jpg",
+    "sankey_s02_filter_to_attempt.txt",
+    "sankey_s02_filter_to_attempt.json",
+    "sankey_s04_end_to_end.html",
+    "sankey_s04_end_to_end.jpg",
+    "sankey_s04_end_to_end.txt",
+    "sankey_s04_end_to_end.json",
 )
 
 
 _LEGACY_SANKEY_ALIAS_NAMES = (
-    "sankey_s02_filter_to_attempt.latest.html",
-    "sankey_s02_filter_to_attempt.latest.jpg",
-    "sankey_s02_filter_to_attempt.latest.txt",
-    "sankey_s02_filter_to_attempt.latest.json",
-    "sankey_s03_attempted_to_repro.latest.html",
-    "sankey_s03_attempted_to_repro.latest.jpg",
-    "sankey_s03_attempted_to_repro.latest.txt",
-    "sankey_s03_attempted_to_repro.latest.json",
-    "sankey_s04_end_to_end.latest.html",
-    "sankey_s04_end_to_end.latest.jpg",
-    "sankey_s04_end_to_end.latest.txt",
-    "sankey_s04_end_to_end.latest.json",
+    "sankey_s02_filter_to_attempt.html",
+    "sankey_s02_filter_to_attempt.jpg",
+    "sankey_s02_filter_to_attempt.txt",
+    "sankey_s02_filter_to_attempt.json",
+    "sankey_s03_attempted_to_repro.html",
+    "sankey_s03_attempted_to_repro.jpg",
+    "sankey_s03_attempted_to_repro.txt",
+    "sankey_s03_attempted_to_repro.json",
+    "sankey_s04_end_to_end.html",
+    "sankey_s04_end_to_end.jpg",
+    "sankey_s04_end_to_end.txt",
+    "sankey_s04_end_to_end.json",
 )
 
 
@@ -5082,7 +5076,7 @@ def main(argv: list[str] | None = None) -> None:
             "Repeatable. Used for virtual experiments whose analysis lives "
             "under a custom output.root and would otherwise be invisible "
             "to the canonical/publication/legacy scan. Each root is globbed "
-            "as <root>/*/core-reports/*/core_metric_report.latest.json."
+            "as <root>/*/core-reports/*/core_metric_report.json."
         ),
     )
     parser.add_argument(

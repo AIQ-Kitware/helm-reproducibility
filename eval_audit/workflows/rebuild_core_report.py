@@ -47,7 +47,7 @@ def load_rows(index_fpath: Path) -> list[dict[str, Any]]:
 
 
 def latest_official_index_csv(index_dpath: Path) -> Path:
-    latest_alias = index_dpath / "official_public_index.latest.csv"
+    latest_alias = index_dpath / "official_public_index.csv"
     if latest_alias.exists():
         return latest_alias.resolve()
     cands = sorted(index_dpath.glob("official_public_index_*.csv"), reverse=True)
@@ -326,10 +326,10 @@ def _cleanup_legacy_report_surfaces(report_dpath: Path, enabled_comparison_ids: 
         "official.run",
         "kwdagger_a.job",
         "kwdagger_b.job",
-        "report_selection.latest.json",
-        "core_metric_three_run_distributions.latest.png",
+        "report_selection.json",
+        "core_metric_three_run_distributions.png",
         # Renamed: was render_pairwise_interactives.* before the heavy-plots rename
-        "render_pairwise_interactives.latest.sh",
+        "render_pairwise_interactives.sh",
         "render_pairwise_interactives.sh",
     ]:
         safe_unlink(report_dpath / name)
@@ -337,7 +337,7 @@ def _cleanup_legacy_report_surfaces(report_dpath: Path, enabled_comparison_ids: 
         comparison_sample_latest_name(comparison_id)
         for comparison_id in enabled_comparison_ids
     }
-    for path in report_dpath.glob("instance_samples_*.latest.txt"):
+    for path in report_dpath.glob("instance_samples_*.txt"):
         if path.name not in keep_names:
             safe_unlink(path)
 
@@ -427,13 +427,13 @@ def main(argv: list[str] | None = None) -> None:
     components_fpath = write_manifest(
         report_dpath,
         stem="components_manifest",
-        latest_name="components_manifest.latest.json",
+        latest_name="components_manifest.json",
         payload=components_manifest,
     )
     comparisons_fpath = write_manifest(
         report_dpath,
         stem="comparisons_manifest",
-        latest_name="comparisons_manifest.latest.json",
+        latest_name="comparisons_manifest.json",
         payload=comparisons_manifest,
     )
 
@@ -487,13 +487,13 @@ def main(argv: list[str] | None = None) -> None:
         "--report-dpath",
         str(report_dpath),
         "--components-manifest",
-        str(report_dpath / "components_manifest.latest.json"),
+        str(report_dpath / "components_manifest.json"),
         "--comparisons-manifest",
-        str(report_dpath / "comparisons_manifest.latest.json"),
+        str(report_dpath / "comparisons_manifest.json"),
         "--render-heavy-pairwise-plots",
     ]
     heavy_plots_render_fpath = write_reproduce_script(
-        report_dpath / "render_heavy_pairwise_plots.latest.sh",
+        report_dpath / "render_heavy_pairwise_plots.sh",
         [
             "#!/usr/bin/env bash",
             "set -euo pipefail",
@@ -515,7 +515,7 @@ def main(argv: list[str] | None = None) -> None:
     # while you re-render figures.
     redraw_plots_cmd_parts = [*heavy_plots_cmd_parts, "--plots-only"]
     redraw_plots_fpath = write_reproduce_script(
-        report_dpath / "redraw_plots.latest.sh",
+        report_dpath / "redraw_plots.sh",
         [
             "#!/usr/bin/env bash",
             "set -euo pipefail",
@@ -550,7 +550,7 @@ def main(argv: list[str] | None = None) -> None:
         *(["--allow-single-repeat"] if args.allow_single_repeat else []),
     ]
     reproduce_fpath = write_reproduce_script(
-        report_dpath / "reproduce.latest.sh",
+        report_dpath / "reproduce.sh",
         [
             "#!/usr/bin/env bash",
             "set -euo pipefail",

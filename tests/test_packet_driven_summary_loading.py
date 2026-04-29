@@ -91,7 +91,7 @@ def _write_core_report_packet(
         )
 
     _write_json(
-        report_dir / "components_manifest.latest.json",
+        report_dir / "components_manifest.json",
         {
             "report_dpath": str(report_dir),
             "run_entry": run_entry,
@@ -100,7 +100,7 @@ def _write_core_report_packet(
         },
     )
     _write_json(
-        report_dir / "comparisons_manifest.latest.json",
+        report_dir / "comparisons_manifest.json",
         {
             "report_dpath": str(report_dir),
             "run_entry": run_entry,
@@ -156,9 +156,9 @@ def _write_core_report_packet(
             ),
         ],
     }
-    _write_json(report_dir / "core_metric_report.latest.json", report_payload)
+    _write_json(report_dir / "core_metric_report.json", report_payload)
     _write_json(
-        report_dir / "warnings.latest.json",
+        report_dir / "warnings.json",
         {
             "packet_warnings": ["suspicious_case"] if single_run else ["suspicious_case", "repeat_case"],
             "packet_caveats": [],
@@ -174,7 +174,7 @@ def _write_core_report_packet(
             ],
         },
     )
-    (report_dir / "warnings.latest.txt").write_text("packet_warnings:\n  - suspicious_case\n")
+    (report_dir / "warnings.txt").write_text("packet_warnings:\n  - suspicious_case\n")
 
 
 def test_analyze_experiment_summary_uses_packet_manifests_for_single_and_multi_run(tmp_path):
@@ -184,19 +184,19 @@ def test_analyze_experiment_summary_uses_packet_manifests_for_single_and_multi_r
     _write_core_report_packet(multi_report, experiment_name="exp-multi", run_entry="bench:model=multi", single_run=False)
 
     single_summary = analyze_experiment._summarize_core_report(
-        single_report / "core_metric_report.latest.json",
+        single_report / "core_metric_report.json",
         experiment_name="exp-single",
     )
     multi_summary = analyze_experiment._summarize_core_report(
-        multi_report / "core_metric_report.latest.json",
+        multi_report / "core_metric_report.json",
         experiment_name="exp-multi",
     )
 
     assert single_summary["run_entry"] == "bench:model=single"
     assert single_summary["analysis_single_run"] is True
-    assert single_summary["components_manifest"].endswith("components_manifest.latest.json")
-    assert single_summary["comparisons_manifest"].endswith("comparisons_manifest.latest.json")
-    assert single_summary["warnings_manifest"].endswith("warnings.latest.json")
+    assert single_summary["components_manifest"].endswith("components_manifest.json")
+    assert single_summary["comparisons_manifest"].endswith("comparisons_manifest.json")
+    assert single_summary["warnings_manifest"].endswith("warnings.json")
     assert multi_summary["run_entry"] == "bench:model=multi"
     assert multi_summary["analysis_single_run"] is False
     assert multi_summary["repeat_instance_agree_0"] == 1.0
@@ -226,8 +226,8 @@ def test_build_reports_summary_loads_rows_from_packet_manifests_without_selectio
     assert row["analysis_single_run"] is False
     assert row["official_diagnosis"] == "core_metric_drift"
     assert row["repeat_diagnosis"] == "stable"
-    assert row["components_manifest"].endswith("components_manifest.latest.json")
-    assert row["comparisons_manifest"].endswith("comparisons_manifest.latest.json")
+    assert row["components_manifest"].endswith("components_manifest.json")
+    assert row["comparisons_manifest"].endswith("comparisons_manifest.json")
 
 
 def test_sample_artifact_lookup_is_derived_from_packet_comparison_ids(tmp_path):
@@ -236,13 +236,13 @@ def test_sample_artifact_lookup_is_derived_from_packet_comparison_ids(tmp_path):
 
     artifact_names = build_reports_summary._prioritized_example_artifact_names(report_dir)
 
-    assert "components_manifest.latest.json" in artifact_names
-    assert "comparisons_manifest.latest.json" in artifact_names
-    assert "warnings.latest.json" in artifact_names
-    assert "warnings.latest.txt" in artifact_names
+    assert "components_manifest.json" in artifact_names
+    assert "comparisons_manifest.json" in artifact_names
+    assert "warnings.json" in artifact_names
+    assert "warnings.txt" in artifact_names
     assert comparison_sample_latest_name("official_vs_local") in artifact_names
     assert comparison_sample_latest_name("local_repeat") in artifact_names
-    assert "instance_samples_official_vs_kwdagger.latest.txt" not in artifact_names
+    assert "instance_samples_official_vs_kwdagger.txt" not in artifact_names
 
 
 def test_prioritized_breakdown_text_uses_plain_paths():

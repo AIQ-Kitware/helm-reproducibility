@@ -27,8 +27,8 @@ The CLI:
      on each packet to render per-pair core-metric reports + comparability
      facts.
 
-Each packet's report dir gets the standard ``redraw_plots.latest.sh`` /
-``reproduce.latest.sh`` siblings so the user can iterate on plot styling
+Each packet's report dir gets the standard ``redraw_plots.sh`` /
+``reproduce.sh`` siblings so the user can iterate on plot styling
 without re-running the analysis.
 """
 from __future__ import annotations
@@ -290,18 +290,18 @@ def _render_packet(
     report_dpath = out_root / experiment_name / "core-reports" / packet_id
     report_dpath.mkdir(parents=True, exist_ok=True)
 
-    (report_dpath / "components_manifest.latest.json").write_text(
+    (report_dpath / "components_manifest.json").write_text(
         json.dumps(packet["components_manifest"], indent=2) + "\n"
     )
-    (report_dpath / "comparisons_manifest.latest.json").write_text(
+    (report_dpath / "comparisons_manifest.json").write_text(
         json.dumps(packet["comparisons_manifest"], indent=2) + "\n"
     )
 
     cmd: list[str] = [
         sys.executable, "-m", "eval_audit.reports.core_metrics",
         "--report-dpath", str(report_dpath),
-        "--components-manifest", str(report_dpath / "components_manifest.latest.json"),
-        "--comparisons-manifest", str(report_dpath / "comparisons_manifest.latest.json"),
+        "--components-manifest", str(report_dpath / "components_manifest.json"),
+        "--comparisons-manifest", str(report_dpath / "comparisons_manifest.json"),
     ]
     if render_heavy_plots:
         cmd.append("--render-heavy-pairwise-plots")
@@ -397,10 +397,10 @@ def _build_indexes(
 
     out_dir.mkdir(parents=True, exist_ok=True)
     official_index_fpath = _write_index_csv(
-        official_rows, out_dir / "official_public_index.latest.csv"
+        official_rows, out_dir / "official_public_index.csv"
     )
     local_index_fpath = _write_index_csv(
-        local_rows, out_dir / "audit_results_index.latest.csv"
+        local_rows, out_dir / "audit_results_index.csv"
     )
     return local_index_fpath, official_index_fpath, local_rows, official_rows
 

@@ -129,7 +129,7 @@ def test_per_packet_reports_built(virtual_experiment_output: Path) -> None:
     packets = sorted(p.name for p in reports_dpath.iterdir() if p.is_dir())
     assert len(packets) == 9
     for packet in packets:
-        for name in ("core_metric_report.latest.json", "core_metric_report.latest.txt"):
+        for name in ("core_metric_report.json", "core_metric_report.txt"):
             assert (reports_dpath / packet / name).is_file(), (packet, name)
 
 
@@ -150,7 +150,7 @@ def test_aggregate_summary_buckets_match_drift_map(virtual_experiment_output: Pa
     ]
     subprocess.run(cmd, check=True, cwd=REPO_ROOT)
 
-    rows_csv = summary_root / "experiment_name-eee-only-demo-virtual-test" / "reproducibility_rows.latest.csv"
+    rows_csv = summary_root / "experiment_name-eee-only-demo-virtual-test" / "reproducibility_rows.csv"
     assert rows_csv.is_file()
     bucket_counts: dict[str, int] = {}
     for row in csv.DictReader(rows_csv.open()):

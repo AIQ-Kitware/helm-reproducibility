@@ -30,39 +30,39 @@ pytestmark = pytest.mark.slow
 # ---------------------------------------------------------------------------
 
 REQUIRED_CSV_ARTIFACTS = [
-    'index_snapshot_by_track.latest.csv',
-    'index_snapshot_by_suite_version.latest.csv',
-    'index_snapshot_by_model.latest.csv',
-    'index_snapshot_by_benchmark.latest.csv',
-    'index_snapshot_by_entry_kind.latest.csv',
+    'index_snapshot_by_track.csv',
+    'index_snapshot_by_suite_version.csv',
+    'index_snapshot_by_model.csv',
+    'index_snapshot_by_benchmark.csv',
+    'index_snapshot_by_entry_kind.csv',
 ]
 
 REQUIRED_TXT_JSON_ARTIFACTS = [
-    'index_snapshot_summary.latest.txt',
-    'index_snapshot_summary.latest.json',
+    'index_snapshot_summary.txt',
+    'index_snapshot_summary.json',
 ]
 
 REQUIRED_HTML_ARTIFACTS = [
-    'index_snapshot_tracks.latest.html',
-    'index_snapshot_suite_versions.latest.html',
-    'index_snapshot_models.latest.html',
-    'index_snapshot_benchmarks.latest.html',
-    'index_snapshot_entry_kinds.latest.html',
+    'index_snapshot_tracks.html',
+    'index_snapshot_suite_versions.html',
+    'index_snapshot_models.html',
+    'index_snapshot_benchmarks.html',
+    'index_snapshot_entry_kinds.html',
 ]
 
 REQUIRED_JPG_ARTIFACTS = [
-    'index_snapshot_tracks.latest.jpg',
-    'index_snapshot_suite_versions.latest.jpg',
-    'index_snapshot_models.latest.jpg',
-    'index_snapshot_benchmarks.latest.jpg',
-    'index_snapshot_entry_kinds.latest.jpg',
+    'index_snapshot_tracks.jpg',
+    'index_snapshot_suite_versions.jpg',
+    'index_snapshot_models.jpg',
+    'index_snapshot_benchmarks.jpg',
+    'index_snapshot_entry_kinds.jpg',
 ]
 
 REQUIRED_ARTIFACTS = REQUIRED_TXT_JSON_ARTIFACTS + REQUIRED_CSV_ARTIFACTS + REQUIRED_HTML_ARTIFACTS
 
 REMOVED_ARTIFACTS = [
-    'index_snapshot_version_drift.latest.csv',
-    'index_snapshot_duplicates_by_run_name.latest.csv',
+    'index_snapshot_version_drift.csv',
+    'index_snapshot_duplicates_by_run_name.csv',
 ]
 
 
@@ -169,7 +169,7 @@ def test_json_contains_all_models_not_top_k(tmp_path):
 
     # Verify the JSON file on disk also has all 15
     import json as _json
-    data = _json.loads((out_dpath / 'index_snapshot_summary.latest.json').read_text())
+    data = _json.loads((out_dpath / 'index_snapshot_summary.json').read_text())
     assert len(data['counts_by_model']) == 15
 
 
@@ -240,7 +240,7 @@ def test_txt_shows_top_10_not_all_when_many_models(tmp_path):
         for i in range(15)
     ]
     out_dpath, _ = _run_analysis(rows, tmp_path)
-    txt = (out_dpath / 'index_snapshot_summary.latest.txt').read_text()
+    txt = (out_dpath / 'index_snapshot_summary.txt').read_text()
     # TXT should mention "Top 10 models"
     assert 'Top 10 models' in txt
     # Should NOT contain more than 10 model lines in the models section
@@ -254,7 +254,7 @@ def test_txt_does_not_mention_drift(tmp_path):
         _row('boolq:model=foo', 'v0.3.0', 'h2'),
     ]
     out_dpath, _ = _run_analysis(rows, tmp_path)
-    txt = (out_dpath / 'index_snapshot_summary.latest.txt').read_text()
+    txt = (out_dpath / 'index_snapshot_summary.txt').read_text()
     assert 'drift' not in txt.lower()
     assert 'overlap' not in txt.lower()
 
@@ -271,7 +271,7 @@ def test_entry_kind_csv_correct(tmp_path):
         {**_row('mystery_dir', 'v0.2.2', None), 'entry_kind': 'unknown'},
     ]
     out_dpath, _ = _run_analysis(rows, tmp_path)
-    ek = pd.read_csv(out_dpath / 'index_snapshot_by_entry_kind.latest.csv')
+    ek = pd.read_csv(out_dpath / 'index_snapshot_by_entry_kind.csv')
     counts = dict(zip(ek['entry_kind'], ek['total_rows']))
     assert counts['benchmark_run'] == 2
     assert counts['structural_non_run'] == 1
@@ -346,7 +346,7 @@ def test_html_model_plot_not_truncated(tmp_path):
         for i in range(35)
     ]
     out_dpath, _ = _run_analysis(rows, tmp_path)
-    html = (out_dpath / 'index_snapshot_models.latest.html').read_text()
+    html = (out_dpath / 'index_snapshot_models.html').read_text()
     for i in range(35):
         assert f'model_{i:03d}' in html, f'model_{i:03d} missing from HTML'
     assert 'top 30' not in html.lower()
@@ -359,7 +359,7 @@ def test_html_benchmark_plot_not_truncated(tmp_path):
         for i in range(35)
     ]
     out_dpath, _ = _run_analysis(rows, tmp_path)
-    html = (out_dpath / 'index_snapshot_benchmarks.latest.html').read_text()
+    html = (out_dpath / 'index_snapshot_benchmarks.html').read_text()
     for i in range(35):
         assert f'bench_{i:03d}' in html, f'bench_{i:03d} missing from HTML'
     assert 'top 30' not in html.lower()
@@ -471,7 +471,7 @@ def test_degrades_without_suite_version_and_track(tmp_path):
     assert summary['row_counts']['benchmark_runs'] == 3
     assert summary['cardinality']['run_names'] == 2
 
-    txt = (out_dpath / 'index_snapshot_summary.latest.txt').read_text()
+    txt = (out_dpath / 'index_snapshot_summary.txt').read_text()
     assert 'no suite_version' in txt
 
 

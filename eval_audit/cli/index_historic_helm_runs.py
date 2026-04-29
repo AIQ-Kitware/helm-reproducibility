@@ -146,7 +146,7 @@ class CompileHelmReproListConfig(scfg.DataConfig):
         None,
         help=(
             "If provided, emit the canonical official/public index as a timestamped CSV "
-            "plus a .latest.csv symlink in this directory.  This index captures ALL "
+            "plus a .csv symlink in this directory.  This index captures ALL "
             "public HELM run entries (including structural junk) with explicit "
             "public_track and suite_version provenance. "
             "It is separate from Stage 1 selected-run artifacts."
@@ -966,7 +966,7 @@ def write_official_public_index(
     del timestamp  # currently unused; preserved as an arg for callers
 
     out_dpath.mkdir(parents=True, exist_ok=True)
-    latest_fpath = out_dpath / 'official_public_index.latest.csv'
+    latest_fpath = out_dpath / 'official_public_index.csv'
 
     df = pd.DataFrame(rows)
     for col in OFFICIAL_COMPONENT_COLUMNS:
@@ -974,7 +974,7 @@ def write_official_public_index(
             df[col] = None
     df = df[OFFICIAL_COMPONENT_COLUMNS]
     # pandas .to_csv accepts a file-like; use safer.open so a crash mid-write
-    # leaves the previous official_public_index.latest.csv intact.
+    # leaves the previous official_public_index.csv intact.
     buf = io.StringIO()
     df.to_csv(buf, index=False)
     with safer.open(latest_fpath, 'w', make_parents=True) as fp:

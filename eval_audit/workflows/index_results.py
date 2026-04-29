@@ -380,9 +380,9 @@ def main(argv: list[str] | None = None) -> None:
             })
 
     del stamp  # vestigial after the simplification (2026-04-28b)
-    jsonl_fpath = report_dpath / 'audit_results_index.latest.jsonl'
-    csv_fpath = report_dpath / 'audit_results_index.latest.csv'
-    summary_fpath = report_dpath / 'audit_results_index.latest.txt'
+    jsonl_fpath = report_dpath / 'audit_results_index.jsonl'
+    csv_fpath = report_dpath / 'audit_results_index.csv'
+    summary_fpath = report_dpath / 'audit_results_index.txt'
     logger.debug(f'Writing to: {rich_link(jsonl_fpath)}')
     with safer.open(jsonl_fpath, 'w', make_parents=True) as file:
         for row in rows:
@@ -416,11 +416,11 @@ def main(argv: list[str] | None = None) -> None:
     logger.info(f'Wrote jsonl index: {rich_link(jsonl_fpath)}')
     logger.info(f'Wrote csv index: {rich_link(csv_fpath)}')
     logger.info(f'Wrote summary: {rich_link(summary_fpath)}')
-    logger.info(f'Latest alias: {rich_link(report_dpath / "audit_results_index.latest.csv")}')
+    logger.info(f'Latest alias: {rich_link(report_dpath / "audit_results_index.csv")}')
 
     if args.combined_with_official:
         official_fpath = Path(args.combined_with_official).expanduser().resolve()
-        combined_fpath = report_dpath / 'combined_component_index.latest.csv'
+        combined_fpath = report_dpath / 'combined_component_index.csv'
         write_combined_component_index(
             official_index_fpath=official_fpath,
             local_rows=rows,

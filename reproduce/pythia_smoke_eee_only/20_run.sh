@@ -4,14 +4,14 @@
 #
 # Outputs (all under $OUT_ROOT, default $AUDIT_STORE_ROOT/eee-only-smoke):
 #   $OUT_ROOT/from_eee_out/
-#     audit_results_index.latest.csv
-#     official_public_index.latest.csv
+#     audit_results_index.csv
+#     official_public_index.csv
 #     planning/
-#     <experiment>/core-reports/<packet>/core_metric_report.latest.{txt,json,png}
+#     <experiment>/core-reports/<packet>/core_metric_report.{txt,json,png}
 #     aggregate-summary/all-results/                # cross-packet roll-up
-#       README.latest.txt
-#       agreement_curve.latest.{html,jpg}
-#       reproducibility_buckets.latest.{html,jpg}
+#       README.txt
+#       agreement_curve.{html,jpg}
+#       reproducibility_buckets.{html,jpg}
 #       sankey_*.html
 #       prioritized_examples.latest/
 set -euo pipefail
@@ -39,4 +39,4 @@ echo
 echo "Per-packet reports:"
 find "$FROM_EEE_OUT" -mindepth 3 -maxdepth 3 -type d -path '*/core-reports/*' -printf '  %p\n' | sort
 echo
-echo "Aggregate summary: $FROM_EEE_OUT/aggregate-summary/all-results/README.latest.txt"
+echo "Aggregate summary: $FROM_EEE_OUT/aggregate-summary/all-results/README.txt"
