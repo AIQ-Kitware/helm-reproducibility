@@ -1,38 +1,45 @@
-# pythia-12b-v0 × MMLU
+# pythia-12b-v0 grid
 
-Local audit run for `eleutherai/pythia-12b-v0` on the 5 MMLU subjects with
-public HELM reference data, scheduled through the `eval-audit-run` →
-`kwdagger` → `magnet` → `helm-run` execution chain on `aiq-gpu`. Results
-fold into the `pythia-mmlu-stress` virtual experiment alongside the
-existing `pythia-6.9b` runs.
+Local audit run for `eleutherai/pythia-12b-v0` on the pythia-12b-v0
+benchmark grid for which public HELM has reference data, scheduled through
+the `eval-audit-run` → `kwdagger` → `magnet` → `helm-run` execution chain
+on `aiq-gpu`. Results fold into the `pythia-mmlu-stress` virtual experiment
+(MMLU side) alongside the existing `pythia-6.9b` runs; the non-MMLU
+benchmarks land in the same experiment for now and can be split into a
+dedicated virtual experiment later.
 
 The runbook directory still says "smoke" because it started life as a
-1-subject smoke (`abstract_algebra`) on 2026-04-28 to verify the dormant
-execution chain still worked. That run reproduced the public HELM result
-exactly (`agree@0=1.000`, `max |Δ|=0.0`); the experiment is no longer a
-smoke. The directory name is preserved so the git history of the runbook
-stays continuous.
+1-subject smoke (`mmlu:abstract_algebra`) on 2026-04-28 to verify the
+dormant execution chain still worked. That run reproduced the public HELM
+result exactly (`agree@0=1.000`, `max |Δ|=0.0`); the experiment is no
+longer a smoke. The directory name is preserved so the git history of
+the runbook stays continuous.
 
 ## Scope
 
 - Model: `eleutherai/pythia-12b-v0`
-- 5 MMLU subjects (the same set that has public reference data for both
-  pythia-6.9b and pythia-12b-v0):
-  - `abstract_algebra`
-  - `college_chemistry`
-  - `computer_security`
-  - `econometrics`
-  - `us_foreign_policy`
-- Override via `HELM_MMLU_SUBJECTS=...` (space-separated). One subject
-  is fine if you want to redo a single packet.
+- Default benchmark grid (matched to scenarios with public pythia-12b-v0
+  reference data):
+  - **MMLU** × 5 subjects (`abstract_algebra`, `college_chemistry`,
+    `computer_security`, `econometrics`, `us_foreign_policy`)
+  - **BoolQ**
+  - **IMDB**
+  - **TruthfulQA** (`task=mc_single`, `multiple_choice_joint`)
+- Override via env vars:
+  - `HELM_MMLU_SUBJECTS=...` — space-separated MMLU subject names. Pass
+    an empty string (`HELM_MMLU_SUBJECTS=`) to skip MMLU entirely.
+  - `HELM_EXTRA_RUN_ENTRIES=...` — newline- or `;`-separated
+    additional run-entry strings. Pass an empty string to keep MMLU-only.
+  - `HELM_RUN_ENTRIES=...` — full override; if set, replaces both lists
+    above and is the only thing fed to HELM.
 - Suite version target: matches public HELM v0.2.4 / v0.3.0 rows under
   `/data/crfm-helm-public/classic/benchmark_output/runs/v{0.2.4,0.3.0}/...`
 - `max_eval_instances`: 1000 (matches the public reference; override via
   `MAX_EVAL_INSTANCES`)
 - Re-running is idempotent: `mode: compute_if_missing` skips run-specs
-  that already produced a `DONE` marker, so re-invoking after the
-  abstract_algebra smoke completes the remaining 4 subjects rather than
-  redoing the first one.
+  with a `DONE` marker. Step 20 prints a preflight listing exactly which
+  run-entries are already DONE locally vs. pending so you can see what
+  will be skipped before kicking off the long run.
 
 ## Hardware assumptions (aiq-gpu)
 
