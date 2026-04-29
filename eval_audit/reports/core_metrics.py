@@ -268,9 +268,31 @@ def _collect_stat_means(stats: list[dict[str, Any]], metric_name: str) -> dict[s
     return found
 
 
-def _run_diagnostics(run_path: str) -> dict[str, Any]:
+_EMPTY_RUN_DIAGNOSTICS: dict[str, Any] = {
+    'n_request_states': 0,
+    'n_with_completions': 0,
+    'empty_completion_count': 0,
+    'empty_completion_rate': None,
+    'output_token_count': {'mean': None, 'p50': None, 'p90': None, 'max': None},
+    'stats_means': {},
+}
+
+
+def _run_diagnostics(run_path: str | None) -> dict[str, Any]:
+    """HELM run-dir diagnostics; gracefully skipped for EEE-only components.
+
+    The diagnostics summary (empty-completion rate, prompt/completion token
+    counts) is computed from raw HELM ``scenario_state.json`` + ``stats.json``.
+    For pure-EEE components we don't have those files; return shape-correct
+    zeros instead of crashing so the per-pair report can render the
+    instance-level core-metric numbers (which are all the comparison core
+    actually consumes anyway)."""
+    if not run_path:
+        return dict(_EMPTY_RUN_DIAGNOSTICS)
     run_path = str(Path(run_path).expanduser().resolve())
     run_dpath = Path(run_path)
+    if not run_dpath.is_dir():
+        return dict(_EMPTY_RUN_DIAGNOSTICS)
     scenario_state = _load_json(run_dpath / 'scenario_state.json')
     stats = _load_json(run_dpath / 'stats.json')
     reqs = scenario_state.get('request_states', [])
@@ -1445,7 +1467,14 @@ def _find_pair(report: dict[str, Any], comparison_kind: str) -> dict[str, Any] |
 
 
 def _load_run_spec_json(component: dict[str, Any]) -> dict[str, Any] | None:
-    run_spec_fpath = Path(component['run_path']) / 'run_spec.json'
+    """Read raw HELM run_spec.json off the component's run_path.
+
+    Returns ``None`` for pure-EEE components (no HELM run_path on disk),
+    for components whose run_path is missing, and for unparseable files."""
+    run_path = component.get('run_path')
+    if not run_path:
+        return None
+    run_spec_fpath = Path(run_path) / 'run_spec.json'
     if not run_spec_fpath.exists():
         return None
     try:
@@ -1457,7 +1486,8 @@ def _load_run_spec_json(component: dict[str, Any]) -> dict[str, Any] | None:
 
 def _component_spec_metadata(component: dict[str, Any]) -> dict[str, Any]:
     run_spec = _load_run_spec_json(component) or {}
-    fields = extract_run_spec_fields(Path(component['run_path']) / 'run_spec.json')
+    run_path = component.get('run_path')
+    fields = extract_run_spec_fields(Path(run_path) / 'run_spec.json' if run_path else None)
     adapter = run_spec.get('adapter_spec') or {}
     return {
         'base_model': fields.get('model'),
@@ -2052,8 +2082,19 @@ def main(argv: list[str] | None = None) -> None:
             continue
         component_a = component_lookup[component_ids[0]]
         component_b = component_lookup[component_ids[1]]
-        run_a = component_a['run_path']
-        run_b = component_b['run_path']
+        # Pure-EEE components don't carry a HELM run_path; fall back to the
+        # eee_artifact_path or component_id so _build_pair has a non-None
+        # display anchor without also needing run_spec.json on disk.
+        run_a = (
+            component_a.get('run_path')
+            or component_a.get('eee_artifact_path')
+            or component_a['component_id']
+        )
+        run_b = (
+            component_b.get('run_path')
+            or component_b.get('eee_artifact_path')
+            or component_b['component_id']
+        )
         pair = _build_pair(
             run_a,
             run_b,

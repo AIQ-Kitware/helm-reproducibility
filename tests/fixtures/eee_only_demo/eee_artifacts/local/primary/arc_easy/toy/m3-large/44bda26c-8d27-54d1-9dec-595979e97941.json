@@ -1,0 +1,72 @@
+{
+  "schema_version": "0.2.2",
+  "evaluation_id": "arc_easy/toy/m3-large/44bda26c-8d27-54d1-9dec-595979e97941",
+  "evaluation_timestamp": "1700000000",
+  "retrieved_timestamp": "1700100000",
+  "source_metadata": {
+    "source_name": "eee_only_demo",
+    "source_type": "evaluation_run",
+    "source_organization_name": "eee_only_demo_local",
+    "evaluator_relationship": "third_party"
+  },
+  "eval_library": {
+    "name": "eee_only_demo",
+    "version": "0.0.1"
+  },
+  "model_info": {
+    "name": "toy/m3-large",
+    "id": "toy/m3-large",
+    "developer": "toy",
+    "inference_platform": "demo"
+  },
+  "evaluation_results": [
+    {
+      "evaluation_result_id": "exact_match",
+      "evaluation_name": "arc_easy",
+      "source_data": {
+        "dataset_name": "arc_easy",
+        "source_type": "hf_dataset",
+        "samples_number": 4,
+        "sample_ids": [
+          "arc_easy/0",
+          "arc_easy/1",
+          "arc_easy/2",
+          "arc_easy/3"
+        ]
+      },
+      "metric_config": {
+        "metric_id": "exact_match",
+        "metric_name": "exact_match",
+        "score_type": "binary",
+        "lower_is_better": false
+      },
+      "score_details": {
+        "score": 1.0
+      }
+    },
+    {
+      "evaluation_result_id": "quasi_exact_match",
+      "evaluation_name": "arc_easy",
+      "source_data": {
+        "dataset_name": "arc_easy",
+        "source_type": "hf_dataset",
+        "samples_number": 4,
+        "sample_ids": [
+          "arc_easy/0",
+          "arc_easy/1",
+          "arc_easy/2",
+          "arc_easy/3"
+        ]
+      },
+      "metric_config": {
+        "metric_id": "quasi_exact_match",
+        "metric_name": "quasi_exact_match",
+        "score_type": "binary",
+        "lower_is_better": false
+      },
+      "score_details": {
+        "score": 1.0
+      }
+    }
+  ]
+}

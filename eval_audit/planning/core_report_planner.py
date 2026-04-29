@@ -202,11 +202,14 @@ def _prefilter_index_rows(
             continue
         if run_entry is not None and run_entry not in _row_logical_keys(row):
             continue
-        # Drop rows that point at no executed run dir. These are scheduled-but-
-        # never-completed attempts (status='', has_run_spec=False, empty run_path);
-        # they have no instances to compare and would otherwise produce a packet
-        # with run_path=None that crashes downstream symlinking.
-        if not _clean_optional_text(row.get("run_path") or row.get("run_dir")):
+        # Drop rows that point at no executed evidence. The HELM-shaped
+        # path supplies a run_path / run_dir; the pure-EEE path supplies
+        # eee_artifact_path. Either one is acceptable; only when *both*
+        # are missing is the row a scheduled-but-never-completed attempt
+        # with nothing to compare.
+        has_helm_path = bool(_clean_optional_text(row.get("run_path") or row.get("run_dir")))
+        has_eee_path = bool(_clean_optional_text(row.get("eee_artifact_path") or row.get("eee_path")))
+        if not has_helm_path and not has_eee_path:
             continue
         scoped_local_rows.append(row)
 
@@ -524,14 +527,28 @@ def _component_instructions(component: NormalizedPlannerComponent) -> str | None
     return None
 
 
-def _component_suite_descriptor(component: NormalizedPlannerComponent) -> str | None:
+def _component_suite_descriptor(
+    component: NormalizedPlannerComponent,
+    *,
+    all_local: bool = False,
+) -> str | None:
     if component.source_kind == "local":
+        # Cross-kind comparisons (official_vs_local) deliberately return None
+        # for the local side because ``component.suite`` lives in a different
+        # namespace than ``public_track::suite_version`` and a string compare
+        # would fabricate spurious drift. For local-vs-local comparisons that
+        # concern is gone — fall back to ``experiment_name`` so two locals
+        # from the same experiment register as ``same_suite_or_track_version=yes``
+        # rather than ``unknown``.
+        if all_local:
+            return component.suite or component.experiment_name
         return component.suite
     parts = [part for part in [component.public_track, component.suite_version] if _clean_optional_text(part)]
     return "::".join(parts) if parts else None
 
 
 def build_comparability_facts(components: list[NormalizedPlannerComponent]) -> dict[str, Any]:
+    all_local = bool(components) and all(c.source_kind == "local" for c in components)
     facts = {
         "same_model": {},
         "same_scenario_class": {},
@@ -548,7 +565,7 @@ def build_comparability_facts(components: list[NormalizedPlannerComponent]) -> d
         "same_deployment": [component.model_deployment for component in components],
         "same_instructions": [_component_instructions(component) for component in components],
         "same_max_eval_instances": [component.max_eval_instances for component in components],
-        "same_suite_or_track_version": [_component_suite_descriptor(component) for component in components],
+        "same_suite_or_track_version": [_component_suite_descriptor(component, all_local=all_local) for component in components],
     }
     for name, values in fact_inputs.items():
         status, present_values = _fact_status(values)

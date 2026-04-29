@@ -57,6 +57,7 @@ eval-audit-portfolio-status = "eval_audit.cli.portfolio_status:main"
 eval-audit-analyze-index-snapshot = "eval_audit.workflows.analyze_index_snapshot:main"
 eval-audit-prepare-eee = "eval_audit.workflows.prepare_eee_artifacts:main"
 eval-audit-build-virtual-experiment = "eval_audit.cli.build_virtual_experiment:main"
+eval-audit-from-eee = "eval_audit.cli.from_eee:main"
 
 [tool.setuptools.packages.find]
 include = ["eval_audit*"]

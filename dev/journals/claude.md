@@ -661,3 +661,131 @@ Next step (for whoever picks this up): commit the staged changes, then
 either (a) attack the `|`-alternation parsing bug if reproducible-set
 should grow to include older bucket layouts, or (b) move on to verifying
 specific reproducibility findings against the 159 built reports.
+
+## 2026-04-29 02:55:00 -0000
+
+**Model:** claude-opus-4-7 (Claude Code CLI; SDK).
+
+**User intent.** Build a small e2e demo for the EEE-only analysis path: 3
+toy models × 3 toy benchmarks of synthetic EEE artifacts checked into the
+repo, including a multi-attempt scenario for `local_repeat`, framed as a
+product tutorial — *"do you have official evals in EEE format and want to
+compare against your local reproductions? Run `eval-audit-from-eee` and
+get pairwise reports."* Tailored to *only* the EEE flavor — no HELM
+metadata, no `run_spec.json`. Find and fix any HELM-coupling bugs along
+the way. Don't run in default tests; mark slow.
+
+**What landed.**
+
+1. *Fixture generator* — `tests/fixtures/eee_only_demo/build_fixture.py`:
+   uuid5-deterministic synthesizer for 9 (model, benchmark) pairs plus an
+   extra repeat for `m1×arc_easy`. A `DRIFT` map encodes the agreement
+   patterns we want to demonstrate (perfect; 1-of-4 instance flip;
+   full divergence). The generator writes each EEE artifact as
+   `<uuid>.json` + `<uuid>_samples.jsonl` matching the schema produced by
+   `every_eval_ever convert helm`. 19 artifacts, ~138 KB total.
+
+2. *EEE-only CLI* — new `eval-audit-from-eee`
+   (`eval_audit/cli/from_eee.py`). Walks `<eee-root>/{official,local}/`,
+   synthesizes in-memory index rows with `artifact_format=eee`, writes
+   `audit_results_index.latest.csv` + `official_public_index.latest.csv`,
+   calls the planner, and renders a per-pair core-metric report for each
+   resulting packet. Logical run key is `<benchmark>:model=<model_id>`.
+   Component IDs follow the existing
+   `official::eee_only::<model>::<benchmark>::<short_hash>` /
+   `local::<experiment>::<job_id>::<eval_id>` shapes.
+
+3. *Runbook* — `reproduce/eee_only_demo/` with `00_build_fixture.sh`,
+   `10_run_analysis.sh`, and a tutorial `README.md`. The README teaches
+   the user the EEE-only invocation, explains the engineered drift
+   patterns visible in the demo output, and clearly calls out which
+   comparability facts collapse to `unknown` for EEE-only inputs and why
+   that's the correct behavior.
+
+4. *Slow-marked test* — `tests/test_eee_only_demo.py`. 9 tests covering:
+   indexes written; planner produces 9 packets / 11 pairwise comparisons;
+   `arc_easy m1-small` packet contains `local_repeat` + 2× `official_vs_local`;
+   per-fixture agreement curve assertions for run-level and instance-level;
+   every component is genuinely EEE (no silent HELM fallback); HELM-side
+   facts are `unknown` not `yes`/`no`. Skipped by default; runs on
+   `pytest --run-slow`. Wall clock ~30s.
+
+**HELM-coupling bugs fixed along the way.**
+
+- *Planner prefilter* (`core_report_planner.py:_prefilter_index_rows`)
+  dropped any local row whose `run_path` was empty. EEE-only rows have an
+  `eee_artifact_path` and *no* `run_path`. Fix: accept either
+  `run_path/run_dir` *or* `eee_artifact_path/eee_path`.
+
+- *HelmRunDiff compat layer* (`eval_audit/normalized/helm_compat.py`)
+  raised `FileNotFoundError` when the comparison core asked for
+  `run_spec.json` on an EEE-only run. Fix: shape-correct empty defaults
+  (`{}`, `[]`) so the legacy HELM-shape consumers see "unknown" for the
+  fields they can't answer instead of crashing the comparison.
+
+- *`core_metrics._run_diagnostics(run_path)`* unconditionally `Path()`'d
+  its argument. Fix: early-return `_EMPTY_RUN_DIAGNOSTICS` if `run_path`
+  is None or the dir is missing. Same treatment for
+  `_load_run_spec_json` and `_component_spec_metadata`.
+
+- *`_build_pair` in `core_metrics.main`* required `run_path`. Fix:
+  cascade fallback `run_path → eee_artifact_path → component_id` for the
+  human anchor.
+
+**Comparability fact polish.** While verifying the demo, noticed
+`local_repeat` comparisons reported `same_suite_or_track_version: unknown`
+even though both locals come from the same experiment. Root cause:
+`_component_suite_descriptor` returned `component.suite` (None for
+EEE-only) for local components without falling back to
+`experiment_name`. The cross-kind case can't safely compare local-suite
+vs official-track (different namespaces), but the all-local case can.
+Fix: `build_comparability_facts` now passes an `all_local` flag when
+every component is local, in which case the descriptor uses
+`suite or experiment_name`. With this change, `local_repeat` for
+`m1×arc_easy` now reports `same_suite_or_track_version: yes
+[eee_only_local]`, while `official_vs_local` keeps its existing
+single-side-populated behavior.
+
+**Design insights.**
+
+- *EEE-only is a useful boundary test.* HELM coupling hides in places
+  that are easy to overlook — file-existence checks, `Path()` calls on
+  optional fields, JSON loaders that raise on missing artifacts. Driving
+  the pipeline with EEE-only inputs surfaces these as plain failures
+  rather than subtle "HELM identity asserted as yes when it should be
+  unknown" issues. Worth keeping the demo as a regression net.
+
+- *"Unknown" is a real status, not a degradation.* The HELM-coupling
+  fixes deliberately don't fabricate `yes`/`no` from absent evidence;
+  they emit `status=unknown` + a `comparability_unknown:*` warning. This
+  preserves the research-rigor invariant that no comparability assertion
+  is made without evidence.
+
+- *The runbook is the API doc.* Writing the README forced clarity about
+  the EEE-only artifact layout, what the demo proves vs. doesn't prove,
+  and where the demo stops short of full HELM-style coverage (no
+  aggregate summary builder yet for EEE-only — a follow-up).
+
+**Files changed this session.**
+
+- `tests/fixtures/eee_only_demo/build_fixture.py` (new)
+- `tests/fixtures/eee_only_demo/eee_artifacts/...` (new, 19 artifacts)
+- `eval_audit/cli/from_eee.py` (new)
+- `pyproject.toml` (registered `eval-audit-from-eee` script)
+- `eval_audit/planning/core_report_planner.py`
+  - prefilter accepts EEE-only rows
+  - `_component_suite_descriptor` is `all_local`-aware
+- `eval_audit/normalized/helm_compat.py` (empty-default fallbacks)
+- `eval_audit/reports/core_metrics.py` (None-tolerant run_path)
+- `reproduce/eee_only_demo/{README.md,00_build_fixture.sh,10_run_analysis.sh}` (new)
+- `tests/test_eee_only_demo.py` (new, slow-marked)
+- `dev/journals/claude.md` (this entry)
+
+**Test status.** Default suite: 122 passed, 48 skipped in 12.4s.
+With `--run-slow` for the new demo: 9/9 passed in ~30s.
+
+**Next step.** Aggregate-summary path (`build_reports_summary`) still
+assumes HELM-shaped index rows. The EEE-only demo currently produces
+per-packet reports but no cross-packet roll-up. Next session candidate:
+extend the summary builder to walk the EEE-aware index columns and
+produce an aggregate sankey + agreement-curve panel from EEE-only inputs.

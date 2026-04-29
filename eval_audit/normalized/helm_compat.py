@@ -30,9 +30,33 @@ from eval_audit.normalized.model import (
 
 
 class _NormalizedJsonView:
-    """Mimics ``compat.helm_outputs._JsonRunView`` for legacy consumers."""
+    """Mimics ``compat.helm_outputs._JsonRunView`` for legacy consumers.
+
+    The legacy comparison core (HelmRunDiff + HelmRunAnalysis) reads
+    ``run_spec.json`` etc. via this view. For pure-EEE runs (no HELM run
+    dir backing the normalized run) the underlying files don't exist;
+    rather than raising — which used to crash any pair comparison the
+    moment one side was EEE-only — we return shape-correct empty defaults
+    so the HELM-shaped consumers see an "unknown" recipe and the
+    comparability facts collapse to ``status='unknown'`` for HELM-side
+    fields. Instance-level metrics still flow through cleanly because
+    they live on :attr:`NormalizedRun.instances`, which the EEE loader
+    already populates.
+    """
 
     _KEYS = ("run_spec", "scenario", "scenario_state", "stats", "per_instance_stats")
+
+    # Empty values that match the shape each HELM consumer expects when the
+    # JSON file is absent. Using these instead of raising lets the legacy
+    # HELM-shape diagnosis run on EEE-only runs without crashing; the facts
+    # it emits will be "unknown" rather than wrong.
+    _EMPTY_DEFAULTS: dict[str, Any] = {
+        "run_spec": {},
+        "scenario": {},
+        "scenario_state": {},
+        "stats": [],
+        "per_instance_stats": [],
+    }
 
     def __init__(self, run: NormalizedRun):
         self._run = run
@@ -45,11 +69,11 @@ class _NormalizedJsonView:
             return cached
         helm_path = self._run.ref.origin.helm_run_path
         if helm_path is None:
-            raise FileNotFoundError(
-                f"NormalizedRun has no raw HELM origin to satisfy {name}.json; "
-                "load via HelmRawLoader or expose the HELM run via Origin.helm_run_path."
-            )
-        return json.loads(Path(helm_path, f"{name}.json").read_text())
+            return self._EMPTY_DEFAULTS[name]
+        try:
+            return json.loads(Path(helm_path, f"{name}.json").read_text())
+        except FileNotFoundError:
+            return self._EMPTY_DEFAULTS[name]
 
     def run_spec(self) -> dict[str, Any]:
         return self._load("run_spec")
