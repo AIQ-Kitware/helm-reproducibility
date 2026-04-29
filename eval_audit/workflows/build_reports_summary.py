@@ -3201,6 +3201,8 @@ def _write_scope_level_aliases(level_001: Path, level_002: Path, summary_root: P
             link_alias(src, summary_root, src_name)
     link_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.latest.sh")
     link_alias(level_001 / "reproduce.latest.sh", summary_root, "reproduce.sh")
+    link_alias(level_001 / "redraw_plots.latest.sh", summary_root, "redraw_plots.latest.sh")
+    link_alias(level_001 / "redraw_plots.latest.sh", summary_root, "redraw_plots.sh")
     for src_name in [
         "benchmark_summary.latest.csv",
         "run_inventory.latest.csv",
@@ -4011,13 +4013,14 @@ def _write_failure_taxonomy_plot(
     return {"json": str(json_fpath), "html": html_out, "jpg": jpg_out, "plotly_error": plotly_error}
 
 
-def _write_reproduce_sh(
-    fpath: Path,
+def _build_summary_cmd(
+    *,
     scope_kind: str,
     scope_value: str | None,
-    index_path: Path | None = None,
-    filter_inventory_json: Path | None = None,
-) -> None:
+    index_path: Path | None,
+    filter_inventory_json: Path | None,
+    extra_args: str = "",
+) -> str:
     cmd = 'PYTHONPATH="$REPO_ROOT" "$PYTHON_BIN" -m eval_audit.workflows.build_reports_summary'
     if scope_kind not in ("all_results", None) and scope_value:
         cmd += f" --experiment-name {scope_value}"
@@ -4025,11 +4028,71 @@ def _write_reproduce_sh(
         cmd += f" --index-fpath {shlex.quote(str(index_path))}"
     if filter_inventory_json is not None:
         cmd += f" --filter-inventory-json {shlex.quote(str(filter_inventory_json))}"
+    if extra_args:
+        cmd += f" {extra_args}"
+    return cmd + ' "$@"'
+
+
+def _write_reproduce_sh(
+    fpath: Path,
+    scope_kind: str,
+    scope_value: str | None,
+    index_path: Path | None = None,
+    filter_inventory_json: Path | None = None,
+) -> None:
+    cmd = _build_summary_cmd(
+        scope_kind=scope_kind,
+        scope_value=scope_value,
+        index_path=index_path,
+        filter_inventory_json=filter_inventory_json,
+    )
     lines = [
         "#!/usr/bin/env bash",
         "# Regenerate this summary report from the current index and analysis data.",
         f"# scope: {scope_kind}" + (f" / {scope_value}" if scope_value else ""),
         "set -euo pipefail",
+        *portable_repo_root_lines(),
+        'cd "$REPO_ROOT"',
+        cmd,
+    ]
+    fpath.write_text("\n".join(lines) + "\n")
+    logger.debug(f'Write to 💻: {rich_link(fpath)}')
+    fpath.chmod(0o755)
+
+
+def _write_redraw_plots_sh(
+    fpath: Path,
+    scope_kind: str,
+    scope_value: str | None,
+    index_path: Path | None = None,
+    filter_inventory_json: Path | None = None,
+) -> None:
+    """Emit a redraw_plots.sh next to reproduce.sh.
+
+    Same contract as the per-packet redraw_plots scripts: re-render the
+    plot artifacts in this directory after a styling tweak in
+    eval_audit/workflows/build_reports_summary.py or the shared sankey/
+    chart helpers. Today the underlying entry point still rebuilds the
+    textual artifacts too (the --plots-only flag is plumbed through but
+    no fast-path implementation exists yet); the script is the stable
+    surface that the eventual fast-path will plug into.
+    """
+    cmd = _build_summary_cmd(
+        scope_kind=scope_kind,
+        scope_value=scope_value,
+        index_path=index_path,
+        filter_inventory_json=filter_inventory_json,
+        extra_args="--plots-only",
+    )
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        "# Redraws plots in this directory after a matplotlib/plotly styling tweak.",
+        "# Today this still rebuilds the textual artifacts alongside (the underlying",
+        "# --plots-only flag is plumbed through but currently advisory). Faster than",
+        "# rerunning the per-packet reports; the heavy planner/index analysis stays",
+        "# upstream.",
+        f"# scope: {scope_kind}" + (f" / {scope_value}" if scope_value else ""),
         *portable_repo_root_lines(),
         'cd "$REPO_ROOT"',
         cmd,
@@ -4756,7 +4819,10 @@ def _render_scope_summary(
         "scope_value": scope_value,
         "scope_title": scope_title,
         "summary_root": str(summary_root),
-        "version_dpath": str(version_dpath),
+        # version_dpath was the per-stamp subdir under .history/ before the
+        # 2026-04-28 history retirement; the field is kept in the manifest
+        # for backwards compat but now equals summary_root.
+        "version_dpath": str(summary_root),
         "level_001": str(level_001),
         "level_002": str(level_002),
         "n_total": n_total,
@@ -4808,6 +4874,17 @@ def _render_scope_summary(
     )
     link_alias(reproduce_sh_fpath, level_001, "reproduce.latest.sh")
     link_alias(reproduce_sh_fpath, level_001, "reproduce.sh")
+
+    redraw_plots_fpath = level_001 / f"redraw_plots_{generated_utc}.sh"
+    _write_redraw_plots_sh(
+        redraw_plots_fpath,
+        scope_kind,
+        scope_value,
+        index_path=index_fpath,
+        filter_inventory_json=filter_inventory_json,
+    )
+    link_alias(redraw_plots_fpath, level_001, "redraw_plots.latest.sh")
+    link_alias(redraw_plots_fpath, level_001, "redraw_plots.sh")
 
     symlink_to(level_002, level_001 / "next_level")
     symlink_to(level_001, level_002 / "up_level")
@@ -4999,7 +5076,21 @@ def main(argv: list[str] | None = None) -> None:
         default=DEFAULT_BREAKDOWN_DIMS,
     )
     parser.add_argument("--max-items-per-breakdown", type=int, default=12)
+    parser.add_argument(
+        "--plots-only",
+        action="store_true",
+        default=False,
+        help=(
+            "Marker flag emitted by redraw_plots.sh. The full build today "
+            "still rebuilds the textual artifacts alongside the plots; the "
+            "flag is plumbed through so a future fast-path can short-circuit "
+            "the analysis steps and only re-render plotly/matplotlib "
+            "outputs. Setting this today is a no-op but the redraw-plots "
+            "helper script needs it as a stable contract."
+        ),
+    )
     args = parser.parse_args(argv)
+    _ = args.plots_only  # currently advisory only; reserved for future use
 
     index_fpath = (
         Path(args.index_fpath).expanduser().resolve()
