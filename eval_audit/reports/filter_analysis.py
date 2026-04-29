@@ -634,15 +634,17 @@ def to_markdown(rows: list[dict[str, Any]]) -> str:
 
 
 def _write_stamped_text(report_root: Path, root: Path, stem: str, stamp: str, suffix: str, text: str) -> Path:
-    """Write ``text`` directly to ``root/<stem>.latest<suffix>``.
+    """Write ``text`` directly to ``root/<stem><suffix>``.
 
     The ``report_root`` and ``stamp`` arguments are vestigial after the
     simplification (2026-04-28b); they're kept in the signature so existing
     callers don't have to be rewritten. Stamp infixes are no longer used in
-    filenames.
+    filenames, and the prior ``.latest`` placeholder was dropped on
+    2026-04-29 (it had no disambiguation function once stamped siblings
+    went away).
     """
     del report_root, stamp
-    fpath = root / f'{stem}.latest{suffix}'
+    fpath = root / f'{stem}{suffix}'
     logger.debug(f'Write to: {rich_link(fpath)}')
     write_text_atomic(fpath, text)
     return fpath

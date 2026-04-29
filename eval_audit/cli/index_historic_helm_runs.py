@@ -952,9 +952,14 @@ def write_official_public_index(
     timestamp: str | None = None,
 ) -> tuple[Path, Path]:
     """
-    Write the official public index to a timestamped CSV and update the .latest symlink.
+    Write the official public index to ``official_public_index.csv``.
 
-    Returns (timestamped_fpath, latest_fpath).
+    The ``timestamp`` argument is preserved for backwards compatibility
+    with callers but is no longer used: the post-history-retirement
+    publishing model writes the canonical artifact directly to
+    ``out_dpath / 'official_public_index.csv'`` and overwrites it
+    atomically. Returns ``(latest_fpath, latest_fpath)``; the duplicated
+    return is preserved so existing call-sites unpack two values.
     """
     import io
 
