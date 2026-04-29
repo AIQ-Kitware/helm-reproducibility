@@ -40,3 +40,7 @@ in-progress-notes/
 # at line 21 already covers the repo-level output dir.
 old-backup-reports/
 .cache
+.claude
+
+# symlink to directory with reports
+crfm-helm-audit-store
