@@ -158,9 +158,9 @@ def _build_official_index_row(meta: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_local_index_row(meta: dict[str, Any]) -> dict[str, Any]:
+def _build_local_index_row(meta: dict[str, Any], *, experiment_override: str | None = None) -> dict[str, Any]:
     logical_run_key = _build_logical_run_key(meta)
-    experiment_name = meta["experiment_name"] or "eee_only_local"
+    experiment_name = experiment_override or meta["experiment_name"] or "eee_only_local"
     artifact_short = _stable_short_hash(str(meta["artifact_dir"]))
     job_id = f"job_{artifact_short}"
     component_id = (
@@ -314,8 +314,14 @@ def _build_indexes(
     *,
     eee_root: Path,
     out_dir: Path,
+    experiment_name: str | None = None,
 ) -> tuple[Path, Path, list[dict[str, Any]], list[dict[str, Any]]]:
     """Discover artifacts and write the synthesized index CSVs.
+
+    ``experiment_name`` overrides the per-row experiment label that would
+    otherwise be derived from the ``local/<experiment>/...`` subdirectory.
+    Useful when the user wants every local row grouped under one logical
+    experiment regardless of the source layout.
 
     Returns ``(local_index_fpath, official_index_fpath, local_rows, official_rows)``.
     """
@@ -337,7 +343,10 @@ def _build_indexes(
         for row in official_artifacts
     ]
     local_rows = [
-        _build_local_index_row(_extract_artifact_meta(row, root=local_root))
+        _build_local_index_row(
+            _extract_artifact_meta(row, root=local_root),
+            experiment_override=experiment_name,
+        )
         for row in local_artifacts
     ]
 
@@ -369,9 +378,16 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument(
         "--experiment-name",
-        default="eee_only_demo",
-        help="Logical name for this comparison run; used in component ids and "
-             "as the planner's experiment_name filter.",
+        default=None,
+        help=(
+            "Override the logical experiment name on every local index row "
+            "(default: derive from the directory immediately below "
+            "``local/`` for each artifact, falling back to ``eee_only_local`` "
+            "when the layout is too shallow). The experiment name is used in "
+            "component IDs and is the parent dir of the per-packet output "
+            "tree, so passing this groups everything under one experiment "
+            "regardless of source layout."
+        ),
     )
     parser.add_argument(
         "--render-heavy-pairwise-plots",
@@ -406,7 +422,7 @@ def main(argv: list[str] | None = None) -> None:
         shutil.rmtree(out_dir)
 
     local_index_fpath, official_index_fpath, local_rows, official_rows = _build_indexes(
-        eee_root=eee_root, out_dir=out_dir
+        eee_root=eee_root, out_dir=out_dir, experiment_name=args.experiment_name,
     )
     print(
         f"discovered: {len(official_rows)} official + {len(local_rows)} local artifacts under {eee_root}"
