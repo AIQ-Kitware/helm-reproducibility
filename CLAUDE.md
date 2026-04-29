@@ -76,13 +76,32 @@ See [`docs/pipeline.md`](docs/pipeline.md) for the canonical pipeline. The high-
 - **Stage 5 (analyze-experiment / rebuild-core)**: Per-run reproducibility analysis with tolerance sweeps and per-metric curves
 - **Stage 6 (build_reports_summary)**: Aggregate reporting with operational sankey, reproducibility sankey, agreement curves, and per-metric breakdowns
 
+**EEE-only short circuit.** When the user already has both sides of the
+comparison in `every_eval_ever` artifact format (no HELM run dirs, no
+`run_spec.json`), [`eval-audit-from-eee`](eval_audit/cli/from_eee.py)
+skips Stages 1–2 entirely. It walks `<eee-root>/{official,local}/`,
+synthesizes the index rows the rest of the pipeline expects, runs
+Stages 5–6 against them, and lands a per-packet + cross-packet report
+at `<out>/`. The tutorial fixture lives at
+[`tests/fixtures/eee_only_demo/eee_artifacts/`](tests/fixtures/eee_only_demo/eee_artifacts/)
+and the runbook at
+[`reproduce/eee_only_demo/`](reproduce/eee_only_demo/). Comparability
+facts that the HELM-shaped pipeline derives from `run_spec.json`
+(scenario class, deployment, instructions, max_eval_instances)
+collapse to `status=unknown` for EEE-only inputs and surface as
+`comparability_unknown:*` warnings — that's the correct behavior, not
+a bug.
+
 ### Critical Modules
 
 | File | Purpose |
 |---|---|
 | `eval_audit/cli/index_historic_helm_runs.py` | Stage 1: filtering, filter-step analysis, sankey emission |
+| `eval_audit/cli/from_eee.py` | EEE-only tutorial path; skips Stages 1–2 and routes EEE artifacts straight into the planner + core-metrics + aggregate summary |
 | `eval_audit/reports/core_metrics.py` | Per-metric agreement curves, tolerance thresholds, instance-level vs. run-level metrics |
-| `eval_audit/workflows/build_reports_summary.py` | Aggregate reporting, README generation, symlink management |
+| `eval_audit/planning/core_report_planner.py` | Comparison-intent planner; pairs official + local components by logical run key, emits `local_repeat` for multi-attempt locals |
+| `eval_audit/normalized/helm_compat.py` | Adapter that lets HELM-shape consumers (HelmRunDiff) read EEE-only NormalizedRun via shape-correct empty defaults |
+| `eval_audit/workflows/build_reports_summary.py` | Aggregate reporting, README generation, symlink management; `--no-canonical-scan` for tutorial-scope runs |
 | `eval_audit/utils/sankey.py` | Sankey renderer (`emit_sankey_artifacts`), handles HTML+JPG sidecar generation |
 | `docs/pipeline.md` | User-facing pipeline documentation (start here for "how do I run this?") |
 | `docs/helm-reproduction-research-journal.md` | Research context, failure taxonomies, what we learned |
