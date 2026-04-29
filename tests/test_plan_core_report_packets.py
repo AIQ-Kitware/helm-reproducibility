@@ -10,6 +10,13 @@ from eval_audit.planning import core_report_planner
 from eval_audit.normalized.eee_artifacts import local_eee_parent_for_row
 from eval_audit.workflows import plan_core_report_packets
 
+# Each test calls core_report_planner.build_planning_artifact, which (when
+# given a local-side row) triggers an EEE conversion of the underlying HELM
+# run. That conversion is the dominant cost (~10-20s/test). Mark the whole
+# module slow so the default `pytest tests/` run skips it; pass `--run-slow`
+# to include.
+pytestmark = pytest.mark.slow
+
 
 def _write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -254,6 +261,7 @@ def test_planner_discovers_prebuilt_official_eee_artifacts(tmp_path):
     assert "eee_artifact_present" in official_component["tags"]
 
 
+@pytest.mark.slow
 def test_planner_discovers_existing_local_eee_artifacts_without_conversion(tmp_path):
     local_index, official_index = _setup_index_inputs(tmp_path)
     rows = core_report_planner.load_index_rows(local_index)
@@ -280,6 +288,7 @@ def test_planner_discovers_existing_local_eee_artifacts_without_conversion(tmp_p
     assert local_component["eee_artifact_path"] == str(eee_output.resolve())
 
 
+@pytest.mark.slow
 def test_planner_emits_local_repeat_when_multiple_local_components_exist(tmp_path):
     local_index, official_index = _setup_index_inputs(tmp_path)
     artifact = core_report_planner.build_planning_artifact(

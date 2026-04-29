@@ -210,6 +210,7 @@ def test_build_filter_inventory_rows_excludes_gated_dataset_benchmarks_even_with
     assert "gated dataset" in row["selection_explanation"]
 
 
+@pytest.mark.slow
 def test_emit_filter_report_artifacts_writes_tables(tmp_path: Path):
     inventory_rows = [
         {

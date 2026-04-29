@@ -32,23 +32,25 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def _load() -> "object":
+@pytest.fixture(scope="module")
+def nrun():
+    """Module-scoped HELM-fixture load. The HELM->EEE conversion is the
+    dominant cost (~6-8s); sharing it across the 3 tests in this file keeps
+    each individual test fast in the default suite."""
     pytest.importorskip("every_eval_ever")
     pytest.importorskip("helm")
     ref = NormalizedRunRef.from_helm_run(HELM_FIXTURE_RUN, source_kind=SourceKind.OFFICIAL)
     return load_run(ref)
 
 
-def test_run_level_self_pair_zero_delta() -> None:
-    nrun = _load()
+def test_run_level_self_pair_zero_delta(nrun) -> None:
     rows = ncompare.run_level_core_rows(nrun, nrun)
     assert rows, "expected at least one core run-level row"
     assert all(row["abs_delta"] == 0.0 for row in rows)
     assert all(row["metric_class"] == "core" for row in rows)
 
 
-def test_instance_level_self_pair_zero_delta() -> None:
-    nrun = _load()
+def test_instance_level_self_pair_zero_delta(nrun) -> None:
     rows = ncompare.instance_level_core_rows(nrun, nrun)
     assert rows, "expected at least one core instance-level row"
     assert all(row["abs_delta"] == 0.0 for row in rows)
@@ -57,8 +59,7 @@ def test_instance_level_self_pair_zero_delta() -> None:
     assert any(m.startswith("exact_match") for m in metrics)
 
 
-def test_core_metric_keys_are_core_classified() -> None:
-    nrun = _load()
+def test_core_metric_keys_are_core_classified(nrun) -> None:
     keys = ncompare.core_metric_keys(nrun)
     assert keys
     from eval_audit.helm import metrics as hm

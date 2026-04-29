@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from eval_audit.reports import core_metrics
 
@@ -44,11 +45,43 @@ def test_plot_layout_controls_suptitle_spacing():
 def test_plot_layout_defaults_are_code_level_controls():
     default = core_metrics.PlotLayout()
 
+    assert default.figure_scale > 0
     assert default.suptitle_y is not None
     assert default.constrained_h_pad is not None
     assert default.constrained_hspace is not None
     assert default.constrained_w_pad is not None
     assert default.constrained_wspace is not None
+
+
+def test_scaled_figsize_uses_plot_layout_scale():
+    assert core_metrics._scaled_figsize(10, 5, core_metrics.PlotLayout(figure_scale=1.5)) == (15, 7.5)
+    assert core_metrics._scaled_figsize(10, 5, core_metrics.PlotLayout(figure_scale=0)) == (10, 5)
+
+
+def test_subplot_adjust_kwargs_allow_explicit_margins():
+    class FakeFigure:
+        def get_size_inches(self):
+            return (10, 5)
+
+    layout = core_metrics.PlotLayout(
+        constrained_h_pad=0.5,
+        constrained_w_pad=0.5,
+        constrained_hspace=0.3,
+        constrained_wspace=0.2,
+        subplot_left=0.11,
+        subplot_right=0.93,
+        subplot_bottom=0.17,
+        subplot_top=0.81,
+    )
+
+    assert core_metrics._subplot_adjust_kwargs(FakeFigure(), layout, top=0.9) == {
+        "left": 0.11,
+        "right": 0.93,
+        "bottom": 0.17,
+        "top": 0.81,
+        "hspace": 0.3,
+        "wspace": 0.2,
+    }
 
 
 def test_metric_domain_helper_is_conservative():
@@ -119,6 +152,7 @@ def test_single_run_instance_rows_honor_manifest_component(monkeypatch):
     assert calls == [("component", component), ("records", marker)]
 
 
+@pytest.mark.slow
 def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(tmp_path, monkeypatch):
     report_dpath = tmp_path / "report"
     report_dpath.mkdir()
@@ -382,6 +416,7 @@ def test_core_metrics_single_run_uses_manifests_and_writes_comparability_block(t
         base_argv + [
             "--render-heavy-pairwise-plots",
             "--plots-only",
+            "--plot_figure_scale", "1.2",
             "--plot_suptitle_y", "1.03",
             "--plot_constrained_h_pad", "0.25",
             "--plot_constrained_hspace", "0.16",

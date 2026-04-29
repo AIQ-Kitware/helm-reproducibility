@@ -4,6 +4,8 @@ import csv
 import json
 from pathlib import Path
 
+import pytest
+
 from eval_audit.planning.core_report_planner import (
     build_planning_artifact,
     _comparability_warning_lines,
@@ -158,6 +160,7 @@ def _write_planner_artifact(tmp_path: Path, *, single_run: bool) -> tuple[Path, 
     return planner_fpath, artifact
 
 
+@pytest.mark.slow
 def test_single_run_core_report_uses_planner_packet_and_cleans_repeat_artifacts(tmp_path, monkeypatch):
     planner_fpath, artifact = _write_planner_artifact(tmp_path, single_run=True)
     packet = artifact["packets"][0]
@@ -233,6 +236,7 @@ def test_component_link_basename_is_bounded_for_verbose_fallback_ids():
     assert basename == component_link_basename(component_id)
 
 
+@pytest.mark.slow
 def test_multi_run_core_report_renders_only_declared_planner_comparisons(tmp_path, monkeypatch):
     planner_fpath, artifact = _write_planner_artifact(tmp_path, single_run=False)
     packet = artifact["packets"][0]

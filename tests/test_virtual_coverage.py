@@ -156,7 +156,13 @@ def test_recipe_identical_join_via_run_spec_hash(tmp_path):
     assert not m2.matched_recipe_identical
 
 
-def test_coverage_artifacts_written_with_latest_aliases(tmp_path):
+def test_coverage_artifacts_written_with_latest_aliases(tmp_path, monkeypatch):
+    # Skip the plotly+chrome render step: this test asserts on the
+    # non-plotly artifacts (summary.txt / coverage.json / missing.csv);
+    # the sankey HTML/PNG output is covered separately by
+    # test_emit_sankey_artifacts_writes_png_and_latest_alias.
+    monkeypatch.setenv("HELM_AUDIT_SKIP_PLOTLY", "1")
+
     targets = [_target("eleutherai/pythia-6.9b", "mmlu", "v0.2.4")]
     locals_ = []
     coverage = compute_coverage(
