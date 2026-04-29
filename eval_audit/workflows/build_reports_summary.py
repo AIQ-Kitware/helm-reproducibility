@@ -3303,6 +3303,12 @@ def _render_breakdown_scopes(
                 breakdown_dims=[],
                 max_items_per_breakdown=max_items_per_breakdown,
                 include_visuals=False,
+                # ``level_002.parent`` is the top-level summary_root for
+                # this scope; the breakdown renders use it to write
+                # delegating reproduce/redraw stubs that exec the
+                # top-level scripts instead of emitting an invalid
+                # ``--experiment-name <benchmark>`` invocation.
+                top_level_summary_root=level_002.parent,
             )
             manifest_rows.append(
                 {
@@ -4069,6 +4075,48 @@ def _write_reproduce_sh(
     fpath.chmod(0o755)
 
 
+def _write_delegating_script(
+    fpath: Path,
+    *,
+    target_script: Path,
+    purpose: str,
+) -> None:
+    """Emit a stub script that execs the canonical top-level script.
+
+    Used inside breakdown sub-trees (``by_benchmark/boolq/`` etc.) where
+    re-running an isolated scope rebuild is not meaningful — the only
+    correct refresh is rebuilding the whole report at the top level.
+    The stub locates ``target_script`` via a relative path (so the
+    summary tree can be moved or symlinked without breaking) and execs
+    it, forwarding ``$@``.
+    """
+    rel_target = os.path.relpath(target_script, start=fpath.parent)
+    lines = [
+        "#!/usr/bin/env bash",
+        "set -euo pipefail",
+        f"# {purpose}",
+        "# This is a sub-tree script — running it rebuilds the *whole* report",
+        f"# at the top level ({target_script.parent}/), not just this slice,",
+        "# because the per-benchmark / per-model / per-machine breakdowns are",
+        "# derived views with no standalone scope filter on the build CLI.",
+        "# Resolve through symlinks so invoking the breakdown-root alias",
+        "# (e.g. <breakdown>/redraw_plots.sh, which is itself a symlink",
+        "# into level_001/) finds the same target as invoking the canonical",
+        "# script directly.",
+        'SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"',
+        'SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"',
+        f'TARGET_SCRIPT="$SCRIPT_DIR/{rel_target}"',
+        'if [[ ! -f "$TARGET_SCRIPT" ]]; then',
+        '  echo "FAIL: top-level script not found at $TARGET_SCRIPT" >&2',
+        '  exit 1',
+        'fi',
+        'exec bash "$TARGET_SCRIPT" "$@"',
+    ]
+    fpath.write_text("\n".join(lines) + "\n")
+    logger.debug(f'Write delegating script: {rich_link(fpath)}')
+    fpath.chmod(0o755)
+
+
 def _write_redraw_plots_sh(
     fpath: Path,
     scope_kind: str,
@@ -4124,7 +4172,26 @@ def _render_scope_summary(
     breakdown_dims: list[str],
     max_items_per_breakdown: int,
     include_visuals: bool = True,
+    top_level_summary_root: Path | None = None,
 ) -> None:
+    """Render a summary tree under ``summary_root``.
+
+    When ``top_level_summary_root`` is None (default), this is the
+    canonical/top-level call: scope is either ``all_results`` or a real
+    ``--experiment-name`` value, so the emitted ``reproduce.sh`` /
+    ``redraw_plots.sh`` invoke ``build_reports_summary`` with that scope
+    directly.
+
+    When ``top_level_summary_root`` is provided, this is a recursive
+    breakdown render (e.g. ``by_benchmark/boolq/``). The scope (e.g.
+    ``benchmark`` / ``boolq``) is *not* a filter the CLI knows how to
+    honor — there is no ``--benchmark`` flag — so the breakdown's
+    ``reproduce.sh`` / ``redraw_plots.sh`` are emitted as **delegating
+    stubs** that exec the top-level scripts. Running the breakdown's
+    script then regenerates the entire report (including this
+    breakdown's slice) which is the only correct refresh for a
+    derived view.
+    """
     if not scope_rows:
         return
 
@@ -4578,11 +4645,11 @@ def _render_scope_summary(
         end_to_end_tol010_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
         end_to_end_tol050_art = {"json": None, "txt": None, "key_txt": None, "html": None, "jpg": None, "plotly_error": None}
 
-    failure_table = _write_table_artifacts(failed_rows, level_001 / f"failure_runs_{generated_utc}", machine_dpath=level_001_machine, static_dpath=level_001_static)
-    failure_reason_table = _write_table_artifacts(failure_reason_rows, level_001 / f"failure_reasons_{generated_utc}", machine_dpath=level_001_machine, static_dpath=level_001_static)
-    benchmark_table = _write_table_artifacts(benchmark_summary, level_002 / f"benchmark_summary_{generated_utc}", machine_dpath=level_002_machine, static_dpath=level_002_static)
-    run_inventory_table = _write_table_artifacts(run_inventory, level_002 / f"run_inventory_{generated_utc}", machine_dpath=level_002_machine, static_dpath=level_002_static)
-    repro_table = _write_table_artifacts(repro_inventory, level_002 / f"reproducibility_rows_{generated_utc}", machine_dpath=level_002_machine, static_dpath=level_002_static)
+    failure_table = _write_table_artifacts(failed_rows, level_001 / "failure_runs", machine_dpath=level_001_machine, static_dpath=level_001_static)
+    failure_reason_table = _write_table_artifacts(failure_reason_rows, level_001 / "failure_reasons", machine_dpath=level_001_machine, static_dpath=level_001_static)
+    benchmark_table = _write_table_artifacts(benchmark_summary, level_002 / "benchmark_summary", machine_dpath=level_002_machine, static_dpath=level_002_static)
+    run_inventory_table = _write_table_artifacts(run_inventory, level_002 / "run_inventory", machine_dpath=level_002_machine, static_dpath=level_002_static)
+    repro_table = _write_table_artifacts(repro_inventory, level_002 / "reproducibility_rows", machine_dpath=level_002_machine, static_dpath=level_002_static)
     off_story_table = _write_structured_summary_artifacts(
         rows=off_story_summary["rows"],
         payload={
@@ -4595,7 +4662,7 @@ def _render_scope_summary(
             generated_utc=generated_utc,
             summary=off_story_summary,
         ),
-        stem=level_002 / f"off_story_summary_{generated_utc}",
+        stem=level_002 / "off_story_summary",
         machine_dpath=level_002_machine,
         static_dpath=level_002_static,
     )
@@ -4611,7 +4678,7 @@ def _render_scope_summary(
             generated_utc=generated_utc,
             summary=run_multiplicity_summary,
         ),
-        stem=level_002 / f"run_multiplicity_summary_{generated_utc}",
+        stem=level_002 / "run_multiplicity_summary",
         machine_dpath=level_002_machine,
         static_dpath=level_002_static,
     )
@@ -4627,7 +4694,7 @@ def _render_scope_summary(
             generated_utc=generated_utc,
             summary=prioritized_breakdowns_summary,
         ),
-        stem=level_002 / f"prioritized_breakdowns_{generated_utc}",
+        stem=level_002 / "prioritized_breakdowns",
         machine_dpath=level_002_machine,
         static_dpath=level_002_static,
     )
@@ -4649,7 +4716,7 @@ def _render_scope_summary(
             y="count",
             color="status_bucket",
             title=f"Benchmark Coverage and Analysis Status (analyzed runs use abs_tol={CANONICAL_AGREEMENT_TOL:g}): {scope_title}",
-            stem=level_001 / f"benchmark_status_{generated_utc}",
+            stem=level_001 / "benchmark_status",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
@@ -4663,7 +4730,7 @@ def _render_scope_summary(
             y="count",
             color="official_instance_agree_bucket",
             title=f"Official vs Local Agreement Buckets (instance-level, abs_tol={CANONICAL_AGREEMENT_TOL:g} canonical): {scope_title}",
-            stem=level_001 / f"reproducibility_buckets_{generated_utc}",
+            stem=level_001 / "reproducibility_buckets",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
@@ -4674,7 +4741,7 @@ def _render_scope_summary(
         agreement_curve_plot = _write_agreement_curve_plot(
             repro_rows=repro_rows,
             enriched_rows=enriched_rows,
-            stem=level_001 / f"agreement_curve_{generated_utc}",
+            stem=level_001 / "agreement_curve",
             title="Agreement Rate vs Tolerance (instance-level)",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
@@ -4684,7 +4751,7 @@ def _render_scope_summary(
         per_metric_agreement_plot = _write_per_metric_agreement_plot(
             repro_rows=repro_rows,
             enriched_rows=enriched_rows,
-            stem=level_001 / f"agreement_curve_per_metric_{generated_utc}",
+            stem=level_001 / "agreement_curve_per_metric",
             title=f"Agreement Rate vs Tolerance (per-metric): {scope_title}",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
@@ -4693,7 +4760,7 @@ def _render_scope_summary(
         coverage_matrix_plot = _write_coverage_matrix_plot(
             enriched_rows=enriched_rows,
             repro_rows=repro_rows,
-            stem=level_001 / f"coverage_matrix_{generated_utc}",
+            stem=level_001 / "coverage_matrix",
             title=f"Model × Benchmark Coverage and Reproducibility Status: {scope_title}",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
@@ -4701,7 +4768,7 @@ def _render_scope_summary(
         )
         failure_taxonomy_plot = _write_failure_taxonomy_plot(
             failed_rows=failed_rows,
-            stem=level_001 / f"failure_taxonomy_{generated_utc}",
+            stem=level_001 / "failure_taxonomy",
             title=f"Why Jobs Failed: Root Cause Taxonomy by Benchmark: {scope_title}",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
@@ -4713,7 +4780,7 @@ def _render_scope_summary(
             y="count",
             color="selection_status",
             title=f"Selected vs Excluded Run Specs by Model: {scope_title}",
-            stem=level_001 / f"filter_selection_by_model_{generated_utc}",
+            stem=level_001 / "filter_selection_by_model",
             machine_dpath=level_001_machine,
             interactive_dpath=level_001_interactive,
             static_dpath=level_001_static,
@@ -4741,7 +4808,7 @@ def _render_scope_summary(
         top_repro_rows=repro_bucket_rows,
         breakdown_dims=breakdown_dims,
     )
-    _write_text(level_001_readme, level_001 / f"README_{generated_utc}.txt")
+    _write_text(level_001_readme, level_001 / "README.txt")
 
     cardinality_lines = _build_scope_cardinality_lines(
         filter_inventory_rows=filter_inventory_rows,
@@ -4749,7 +4816,7 @@ def _render_scope_summary(
         scope_title=scope_title,
         generated_utc=generated_utc,
     )
-    cardinality_fpath = level_001_static / f"cardinality_summary_{generated_utc}.txt"
+    cardinality_fpath = level_001_static / "cardinality_summary.txt"
     _write_text(cardinality_lines, cardinality_fpath)
     link_alias(cardinality_fpath, level_001_static, "cardinality_summary.txt")
     link_alias(cardinality_fpath, level_001, "cardinality_summary.txt")
@@ -4771,11 +4838,11 @@ def _render_scope_summary(
     ]
     if breakdown_dims:
         level_002_lines.append("  - breakdowns/: reusable summaries for additional cuts of the same data")
-    _write_text(level_002_lines, level_002 / f"README_{generated_utc}.txt")
+    _write_text(level_002_lines, level_002 / "README.txt")
 
     latest_pairs = [
-        (level_001 / f"README_{generated_utc}.txt", level_001, "README.txt"),
-        (level_002 / f"README_{generated_utc}.txt", level_002, "README.txt"),
+        (level_001 / "README.txt", level_001, "README.txt"),
+        (level_002 / "README.txt", level_002, "README.txt"),
         (Path(failure_table["json"]), level_001_machine, "failure_runs.json"),
         (Path(failure_table["csv"]), level_001_static, "failure_runs.csv"),
         (Path(failure_table["txt"]), level_001_static, "failure_runs.txt"),
@@ -4869,31 +4936,52 @@ def _render_scope_summary(
         "run_multiplicity_summary": run_multiplicity_table,
         "identity_contract": run_multiplicity_summary.get("definitions"),
     }
-    manifest_fpath = level_001_machine / f"summary_manifest_{generated_utc}.json"
+    manifest_fpath = level_001_machine / "summary_manifest.json"
     _write_json(manifest, manifest_fpath)
     link_alias(manifest_fpath, level_001_machine, "summary_manifest.json")
 
-    reproduce_sh_fpath = level_001 / f"reproduce_{generated_utc}.sh"
-    _write_reproduce_sh(
-        reproduce_sh_fpath,
-        scope_kind,
-        scope_value,
-        index_path=index_fpath,
-        filter_inventory_json=filter_inventory_json,
-    )
-    link_alias(reproduce_sh_fpath, level_001, "reproduce.sh")
-    link_alias(reproduce_sh_fpath, level_001, "reproduce.sh")
-
-    redraw_plots_fpath = level_001 / f"redraw_plots_{generated_utc}.sh"
-    _write_redraw_plots_sh(
-        redraw_plots_fpath,
-        scope_kind,
-        scope_value,
-        index_path=index_fpath,
-        filter_inventory_json=filter_inventory_json,
-    )
-    link_alias(redraw_plots_fpath, level_001, "redraw_plots.sh")
-    link_alias(redraw_plots_fpath, level_001, "redraw_plots.sh")
+    if top_level_summary_root is None:
+        # Top-level scope: emit real scripts that invoke the build CLI
+        # with --experiment-name (or no scope arg for all_results).
+        reproduce_sh_fpath = level_001 / "reproduce.sh"
+        _write_reproduce_sh(
+            reproduce_sh_fpath,
+            scope_kind,
+            scope_value,
+            index_path=index_fpath,
+            filter_inventory_json=filter_inventory_json,
+        )
+        redraw_plots_fpath = level_001 / "redraw_plots.sh"
+        _write_redraw_plots_sh(
+            redraw_plots_fpath,
+            scope_kind,
+            scope_value,
+            index_path=index_fpath,
+            filter_inventory_json=filter_inventory_json,
+        )
+    else:
+        # Breakdown sub-render: there is no CLI flag for "scope by
+        # benchmark / model / machine / suite", so we cannot emit a
+        # standalone build invocation. Stub scripts delegate to the
+        # top-level scripts; running them rebuilds the whole report
+        # (which regenerates this slice as a side effect — the only
+        # correct refresh for a derived view).
+        top_reproduce = top_level_summary_root / "reproduce.sh"
+        top_redraw = top_level_summary_root / "redraw_plots.sh"
+        _write_delegating_script(
+            level_001 / "reproduce.sh",
+            target_script=top_reproduce,
+            purpose=(
+                f"Delegating reproduce.sh for breakdown {scope_kind}={scope_value!r}."
+            ),
+        )
+        _write_delegating_script(
+            level_001 / "redraw_plots.sh",
+            target_script=top_redraw,
+            purpose=(
+                f"Delegating redraw_plots.sh for breakdown {scope_kind}={scope_value!r}."
+            ),
+        )
 
     symlink_to(level_002, level_001 / "next_level")
     symlink_to(level_001, level_002 / "up_level")
@@ -4955,7 +5043,7 @@ def _render_scope_summary(
         "  agreement_curve.html: agreement-rate vs tolerance curve",
         "  coverage_matrix.html: model × benchmark reproducibility heat-map",
     ]
-    story_index_fpath = level_001 / f"story_index_{generated_utc}.txt"
+    story_index_fpath = level_001 / "story_index.txt"
     _write_text(story_index_lines, story_index_fpath)
     link_alias(story_index_fpath, level_001, "story_index.txt")
 

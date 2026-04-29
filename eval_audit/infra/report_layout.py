@@ -97,11 +97,22 @@ def compat_core_run_reports_root() -> Path:
 def portable_repo_root_lines(repo_root_fallback: Path | None = None) -> list[str]:
     """Bash lines that resolve ``REPO_ROOT`` for a generated reproduce script.
 
-    Walks up from the script's directory looking for ``pyproject.toml`` +
-    ``eval_audit/``. If the script lives outside the repo (the new
-    publication-root location does), the walk-up will fail, so we bake
-    in an absolute fallback at script-generation time. ``REPO_ROOT`` env
-    var, if set, always wins.
+    Resolution order:
+
+    1. ``$REPO_ROOT`` env var, if it points at a real ``eval_audit`` checkout.
+    2. Walk up from the script's directory (resolving symlinks first, so a
+       ``redraw_plots.sh`` that's a symlink into ``level_001/`` still
+       finds the repo from the symlink target, not the alias). The walk
+       only succeeds when the script lives *inside* a working tree —
+       which the in-repo runbooks do, but the publication-root scripts
+       don't.
+    3. ``python -c "import eval_audit; ..."`` to locate the package via
+       its installed ``__file__``. This is the cheapest mechanism for
+       scripts that live outside the source tree (under
+       ``$AUDIT_STORE_ROOT/...``) but were generated from a host that
+       has ``eval_audit`` installed editable. Catches the common case
+       where the absolute fallback baked at generation time has moved.
+    4. The absolute fallback baked in at generation time. Last-ditch.
     """
     if repo_root_fallback is None:
         # Late import to avoid a cycle with paths.py.
@@ -109,22 +120,34 @@ def portable_repo_root_lines(repo_root_fallback: Path | None = None) -> list[str
         repo_root_fallback = _repo_root()
     fallback_repr = str(repo_root_fallback).replace('"', '\\"')
     return [
-        'SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"',
-        'if [[ -n "${REPO_ROOT:-}" && -f "$REPO_ROOT/pyproject.toml" && -d "$REPO_ROOT/eval_audit" ]]; then',
+        'SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"',
+        'SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"',
+        '_repo_root_ok() { [[ -f "$1/pyproject.toml" && -d "$1/eval_audit" ]]; }',
+        'if [[ -n "${REPO_ROOT:-}" ]] && _repo_root_ok "$REPO_ROOT"; then',
         '  :',
         'else',
         '  REPO_ROOT="$SCRIPT_DIR"',
-        '  while [[ ! -f "$REPO_ROOT/pyproject.toml" || ! -d "$REPO_ROOT/eval_audit" ]]; do',
+        '  while ! _repo_root_ok "$REPO_ROOT"; do',
         '    NEXT="$(dirname "$REPO_ROOT")"',
         '    if [[ "$NEXT" == "$REPO_ROOT" ]]; then',
-        f'      REPO_ROOT="{fallback_repr}"',
+        '      REPO_ROOT=""',
         '      break',
         '    fi',
         '    REPO_ROOT="$NEXT"',
         '  done',
         'fi',
-        'if [[ ! -f "$REPO_ROOT/pyproject.toml" || ! -d "$REPO_ROOT/eval_audit" ]]; then',
-        '  echo "Could not locate eval_audit repo root from $SCRIPT_DIR (fallback ' f'{fallback_repr}' ' also missing); set REPO_ROOT=" >&2',
+        'if [[ -z "${REPO_ROOT:-}" ]] || ! _repo_root_ok "$REPO_ROOT"; then',
+        '  # Try installed eval_audit (editable install in any active venv).',
+        '  IMPORTED_REPO="$( { python -c "import eval_audit, pathlib; print(pathlib.Path(eval_audit.__file__).resolve().parent.parent)" 2>/dev/null; } || true )"',
+        '  if [[ -n "$IMPORTED_REPO" ]] && _repo_root_ok "$IMPORTED_REPO"; then',
+        '    REPO_ROOT="$IMPORTED_REPO"',
+        '  fi',
+        'fi',
+        'if [[ -z "${REPO_ROOT:-}" ]] || ! _repo_root_ok "$REPO_ROOT"; then',
+        f'  REPO_ROOT="{fallback_repr}"',
+        'fi',
+        'if ! _repo_root_ok "$REPO_ROOT"; then',
+        '  echo "Could not locate eval_audit repo root from $SCRIPT_DIR (fallback ' f'{fallback_repr}' ' missing; \"import eval_audit\" failed too); set REPO_ROOT=" >&2',
         '  exit 1',
         'fi',
         'PYTHON_BIN="${PYTHON_BIN:-python}"',
