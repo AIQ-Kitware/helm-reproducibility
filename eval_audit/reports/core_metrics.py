@@ -1008,11 +1008,18 @@ def _plot_run_metric_distributions(
     alias_map = short_alias_map(long_labels)
     df = df.assign(run=df['run'].map(alias_map).fillna(df['run']))
     _apply_matplotlib_style()
+    layout = plot_layout or PlotLayout()
+    # Reserve a fixed inch allocation at the top of the figure for the
+    # 4-line fontsize-15 suptitle; computed in inches and converted to a
+    # figure-fraction below so the suptitle never crashes the first axis
+    # title regardless of how many metric rows we plot.
+    suptitle_band_in = 1.6
+    fig_h_in = 3.2 * len(metrics) + suptitle_band_in
     fig, axes = plt.subplots(
         len(metrics),
         1,
-        figsize=_scaled_figsize(10, 3.2 * len(metrics), plot_layout),
-        constrained_layout=True,
+        figsize=_scaled_figsize(10, fig_h_in, plot_layout),
+        constrained_layout=False,
     )
     if len(metrics) == 1:
         axes = [axes]
@@ -1063,6 +1070,14 @@ def _plot_run_metric_distributions(
         fontsize=15,
         plot_layout=plot_layout,
     )
+    # Pin top= so the reserved suptitle band is honored regardless of how
+    # many metric rows are stacked below it. Bump hspace so the row-below
+    # title doesn't crowd the row-above tick labels.
+    actual_fig_h = fig.get_size_inches()[1]
+    top_fraction = max(0.5, 1.0 - (suptitle_band_in / actual_fig_h))
+    adjust_kwargs = _subplot_adjust_kwargs(fig, layout, top=top_fraction, bottom=0.05)
+    adjust_kwargs['hspace'] = max(adjust_kwargs.get('hspace', 0.35), 0.35)
+    fig.subplots_adjust(**adjust_kwargs)
     out_fpath = fig_dpath / f'{out_name}.latest.png'
     _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
