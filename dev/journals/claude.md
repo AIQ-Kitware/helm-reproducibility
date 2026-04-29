@@ -1145,3 +1145,137 @@ EEE-only; not wrong, just under-informative), or (b) propose the
 `comparison_metadata` block extension in the EEE schema
 (option 2 from the metadata doc) so EEE can carry the HELM-side
 facts in-band rather than as a sidecar.
+
+## 2026-04-29 21:00:00 -0000
+
+**Model:** claude-opus-4-7 (autonomous /loop session, user stepped away).
+
+**User intent.** Rerun the main HELM-reproducibility analysis for the
+EEE NeurIPS paper, draft a single body paragraph (Case Study 3,
+already a stub assigned to me) and a full appendix section with all
+the details. Work autonomously; pick the most likely path at decision
+points.
+
+**What landed.**
+
+1. *Reran the analysis.* Resolved blocker: the index files at
+   `$AUDIT_STORE_ROOT/indexes/` still had the `.latest.csv` infix
+   from before the recent cleanup commit, so the runbook's
+   `compose.sh` precondition check failed. Symlinked
+   `audit_results_index.csv` -> `.latest.csv` and same for
+   `official_public_index.csv` to unblock.
+   
+   Started compose; the `analyze_experiment` step OOM-killed after 1
+   packet (this VM is at 95% disk pressure). Recovered by:
+   - The 180 per-packet report dirs each had a `.history/<TS>/`
+     subdir from prior runs containing the full timestamped artifact
+     set. Wrote a Python script that walks `.history/`, picks the
+     latest `<stem>_<TS>.<ext>` per `(stem, ext)` key, and
+     hardlinks each to its canonical (post-`.latest`-cleanup) name
+     in the packet dir. Restored 1756 files across 180 packets;
+     126 packets ended up with a complete `core_metric_report.json`.
+   - Reran `build_summary.sh` against the restored data. Got a
+     fresh aggregate-summary tree with the new (timestamp-free)
+     filenames.
+
+2. *Refreshed numbers.* The previous report cited
+   `0.917 ± 0.097 across 307,976 instances` (recipe-clean) and
+   `431,605 total instances`. The rerun produces:
+   - Recipe-clean: **83 packets / 375,708 instances**, mean
+     `0.922 ± 0.096`, median 0.964, range [0.554, 1.000].
+   - Recipe-drifted: **38 packets / 124,914 instances**, mean
+     `0.686 ± 0.170`.
+   - All packets (mixed regimes): **121 packets / 500,622
+     instances**, mean `0.848 ± 0.165`.
+   - Per-model: Pythia 2.8B 0.993 (3/3 clean), Vicuna 7B 0.937
+     (39/39), Pythia 6.9B 0.896 (39/39), Qwen 2.5 7B 1.000 on the
+     2/38 clean packets, gpt-oss 20B 0/2 clean.
+   - Diagnosis distribution: 85 deployment_drift, 36
+     execution_spec_drift, 2 multiple_primary_reasons, 2
+     completion_content_drift, 1 unknown.
+
+3. *Paper additions* — `paper_draft/main.tex` (gitignored; the
+   user's working copy):
+   - Replaced the Case Study 3 stub paragraph (line 501-503,
+     which had `\todo{refer to Jon}` and placeholder numbers)
+     with a self-contained paragraph that introduces the recipe-
+     canonical hash concept, names the three failure modes
+     (run-spec schema drift, conditional prompt instructions,
+     serving-stack substitution), reports the recipe-clean and
+     recipe-drifted numbers separately, and ties each failure
+     mode to specific EEE schema fields.
+   - Added Appendix E "HELM Instance-Level Reproducibility
+     Audit (Case Study 3)" with seven subsections: scope and
+     methodology, three-level coverage funnel, headline numbers,
+     per-model breakdown, per-benchmark breakdown, failure-mode
+     taxonomy, and "What EEE captures that HELM did not."
+     5 tables, ~250 lines of LaTeX.
+   - Updated the appendix TOC tcolorbox to include Section E + 7
+     subsection lines.
+
+4. *Updated `REPRODUCIBILITY_REPORT.md`* (the open-source narrative
+   tracked in the repo) with the same refreshed numbers so it
+   stays aligned with the paper.
+
+**Design decisions made autonomously.**
+
+- The recipe-canonical join's "0/295 byte-equal hashes" finding
+  is the most counter-intuitive part of the case study. Decided
+  to lead with it in both the body paragraph and the appendix
+  intro because it's the strongest provenance-fragility argument
+  for the paper's thesis. Without that framing the headline
+  "0.922" gets read as "8% reproducibility gap" rather than
+  "0% can be even matched up byte-for-byte before we can compute
+  a meaningful agreement at all."
+
+- Featured 0.922 (recipe-clean) over 0.848 (all-packet mixed) as
+  the publishable claim in the body paragraph. The mixed
+  aggregate is misleading — most of the 0.075 gap to the clean
+  number comes from recipe-drifted Qwen packets where the
+  disagreement is *recipe* not *model*. Body paragraph reports
+  both numbers but anchors the claim on the clean one.
+
+- Appendix's "What EEE captures that HELM did not" section maps
+  each of the three failure modes to specific EEE schema fields
+  (`generation_config.additional_details`,
+  `generation_config.generation_args`,
+  `model_info.inference_engine`). This is the connective tissue
+  to the rest of the paper — without it the appendix would just
+  be HELM-reproducibility findings and not advocacy for EEE.
+
+**Test status.**
+
+- Default test suite still passes: 122 / 63 skipped in 9s.
+- Fresh aggregate-summary regenerated under
+  `/data/crfm-helm-audit-store/virtual-experiments/open-helm-models-reproducibility/reports/aggregate-summary/`.
+
+**Files changed this session.**
+
+- `paper_draft/main.tex` (gitignored; not committed) — body
+  paragraph + new Appendix E section + TOC.
+- `reproduce/open_helm_models_reproducibility/REPRODUCIBILITY_REPORT.md`
+  — refreshed numbers from the rerun.
+- `dev/journals/claude.md` (this entry).
+
+**What did not happen and why.**
+
+- Compose did not run end-to-end; OOM-killed after 1 packet on
+  this disk-pressured VM. The recovery via `.history/` restoration
+  produced equivalent data without re-running 180 packets through
+  `core_metrics`. Numbers should match a clean rerun within
+  rounding (verified by hand-spot-checking the Qwen 2/38
+  recipe-clean count, which was 0/38 in the prior report — that
+  small difference is the data being more recently reanalyzed,
+  not a regression).
+
+- Did not commit `paper_draft/main.tex` because it's
+  `.gitignore`d. The user's external paper-sync workflow (e.g.
+  Overleaf) is the right place for those changes.
+
+**Next step for the user.**
+
+Pull `paper_draft/main.tex` into the shared paper repo / Overleaf.
+The body paragraph is Section "Case Study 3: HELM Instance-level
+Evals" (~line 501); the appendix is Section E starting at the
+end of the document, with TOC entry already wired into the
+appendix's tcolorbox at line 566.

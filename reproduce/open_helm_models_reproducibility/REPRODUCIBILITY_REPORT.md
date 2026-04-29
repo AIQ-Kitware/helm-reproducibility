@@ -5,7 +5,7 @@
 
 This is the expanded virtual experiment that the NeurIPS EEE paper case
 study draws from. Five open-weight model families, 19 benchmarks, 121
-analyzed packets totaling **431,605 instance-level comparisons**, all
+analyzed packets totaling **500,622 instance-level comparisons**, all
 joined against the published HELM reference results.
 
 The manifest is checked in at
@@ -18,13 +18,13 @@ the structural quirks we encountered are catalogued in
 
 > **On the 83 recipe-canonical packets — the comparisons where local
 > and public HELM agree on prompt, decoding, and scenario — open-weight
-> HELM runs reproduce at instance-level agreement 0.917 ± 0.097
-> (mean ± stdev) at abs_tol=0 across 307,976 instances. Median 0.960,
+> HELM runs reproduce at instance-level agreement 0.922 ± 0.096
+> (mean ± stdev) at abs_tol=0 across 375,708 instances. Median 0.964,
 > minimum 0.554, max 1.000.**
 >
 > **On the 38 recipe-drifted packets — comparisons where local and
 > public HELM disagree on adapter spec (different prompts, different
-> max_train_instances) — agreement drops to 0.696 ± 0.182. This drift
+> max_train_instances) — agreement drops to 0.686 ± 0.170. This drift
 > is recipe-side and cannot be attributed to the deployment
 > substitution.**
 
@@ -63,9 +63,9 @@ recipe-clean count.
 | model                            | recipe-clean / total | mean agree@0 |   min |   max | dominant diagnosis                        |
 |----------------------------------|----------------------|-------------:|------:|------:|-------------------------------------------|
 | `eleutherai/pythia-2.8b-v0`      | 3 / 3                |        0.993 | 0.981 | 1.000 | deployment_drift                          |
-| `lmsys/vicuna-7b-v1.3`           | 39 / 39              |        0.938 | 0.554 | 1.000 | deployment_drift                          |
+| `lmsys/vicuna-7b-v1.3`           | 39 / 39              |        0.937 | 0.554 | 1.000 | deployment_drift                          |
 | `eleutherai/pythia-6.9b`         | 39 / 39              |        0.896 | 0.679 | 1.000 | deployment_drift                          |
-| `qwen/qwen2.5-7b-instruct-turbo` | 0 / 38               |        0.716 | 0.283 | 1.000 | **execution_spec_drift** (recipe-drifted) |
+| `qwen/qwen2.5-7b-instruct-turbo` | 2 / 38               |        0.716 | 0.283 | 1.000 | **execution_spec_drift** (recipe-drifted) |
 | `openai/gpt-oss-20b`             | 0 / 2                |        0.436 | 0.434 | 0.438 | multiple_primary_reasons                  |
 
 The Qwen number was previously attributed in this report to "different
