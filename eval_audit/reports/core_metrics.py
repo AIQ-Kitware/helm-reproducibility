@@ -953,7 +953,12 @@ def _plot_pair_metric_distributions(
         fontsize=12,
         y=layout.suptitle_y if layout.suptitle_y is not None else 0.995,
     )
-    fig.subplots_adjust(**_subplot_adjust_kwargs(fig, layout, top=0.86, bottom=0.13))
+    adjust_kwargs = _subplot_adjust_kwargs(fig, layout, top=0.86, bottom=0.13)
+    # Multi-column grid: each column has its own y-axis label which crowds
+    # the plot to its left at the layout default wspace=0.05. Bump wspace
+    # so y-axis labels and tick labels have breathing room.
+    adjust_kwargs['wspace'] = max(adjust_kwargs.get('wspace', 0.30), 0.30)
+    fig.subplots_adjust(**adjust_kwargs)
     out_fpath = fig_dpath / f'core_metric_distributions.latest.png'
     _atomic_savefig(fig, out_fpath, dpi=180)
     plt.close(fig)
