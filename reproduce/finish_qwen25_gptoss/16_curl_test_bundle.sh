@@ -74,7 +74,9 @@ while IFS=$'\t' read -r name base_url api_key proto cls; do
     echo "  api_key:    (empty)"
   fi
 
+  echo "available models"
   curl  "${base_url}/models"   -H "Authorization: Bearer $LITELLM_MASTER_KEY"
+  echo "--"
 
   if [[ "$proto" == "completions" ]]; then
     url="${base_url%/}/completions"
