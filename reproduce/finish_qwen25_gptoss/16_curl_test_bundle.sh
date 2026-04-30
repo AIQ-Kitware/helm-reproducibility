@@ -53,6 +53,9 @@ for entry in (data.get("model_deployments") or []):
     print(f"{name}\t{base}\t{api_key}\t{proto}\t{cls}")
 PY
 
+# Check what models are there
+
+
 n_total=0
 n_pass=0
 n_fail=0
@@ -62,6 +65,7 @@ while IFS=$'\t' read -r name base_url api_key proto cls; do
   echo "  base_url:   $base_url"
   echo "  client:     $cls"
   echo "  protocol:   $proto"
+  
   if [[ -n "$api_key" ]]; then
     # Show only the prefix and length so secrets aren't dumped to logs.
     head4="${api_key:0:4}"
@@ -69,6 +73,8 @@ while IFS=$'\t' read -r name base_url api_key proto cls; do
   else
     echo "  api_key:    (empty)"
   fi
+
+  curl  "${base_url}/models"   -H "Authorization: Bearer $LITELLM_MASTER_KEY"
 
   if [[ "$proto" == "completions" ]]; then
     url="${base_url%/}/completions"
