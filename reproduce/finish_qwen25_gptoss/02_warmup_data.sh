@@ -24,7 +24,11 @@ fi
 # missing repo (e.g. v1.14.0 safety datasets that may not be public
 # yet) doesn't abort the rest of the warmup.
 DATASETS=(
-  hendrycks/competition_math      # math:* run_entries
+  # ``hendrycks/competition_math`` (HELM ``math:*`` run_entries) is
+  # intentionally absent: the math benchmark is disabled in the
+  # finish_qwen25_gptoss preset because the dataset is not reliably
+  # reachable from aiq-gpu today. Re-add this line and the 7 math
+  # run_entries in adapter.py if access is restored.
   natural_questions               # natural_qa:* run_entries
   google/IFEval                   # ifeval (gpt-oss smoke)
   Idavidrein/gpqa                 # gpqa

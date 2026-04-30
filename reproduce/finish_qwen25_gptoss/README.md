@@ -10,7 +10,7 @@ gaps surfaced by Case Study 3 (the EEE NeurIPS paper appendix and
   pulls the public run_specs (with the prefix intact) and re-executes
   them against the local vLLM service. This runbook also covers the 9
   unique `lite/v1.9.0` Qwen run_entries that have no local repro at
-  all (math × 7 + natural_qa × 2).
+  all (natural_qa × 2; the 7 math entries are disabled — see Caveats).
 - **gpt-oss 20B** is currently 0 / 2 recipe-clean. This runbook covers
   the 8 missing `capabilities/v1.12.0` and `safety/v1.14.0` entries.
 
@@ -34,7 +34,7 @@ this runbook supports today.
 
 ```bash
 ./00_check_env.sh         # eval-audit-check-env + verify GPU layout
-./02_warmup_data.sh       # pre-cache the HF datasets HELM needs (math, gpqa, ...)
+./02_warmup_data.sh       # pre-cache the HF datasets HELM needs (natural_qa, gpqa, ifeval, ...)
 ./05_write_bundle.sh      # write the eval-audit benchmark bundle
 ./10_start_service.sh     # vllm_service: switch to the new profile
 ./15_validate_server.sh   # smoke-test the LiteLLM router for all 4 models
@@ -80,22 +80,23 @@ $AUDIT_STORE_ROOT/indexes/audit_results_index.csv       # refreshed by 60_index_
 
 ## Caveats
 
-- **MATH benchmark dataset must be pre-cached**. HELM's `math:` runs
-  load `hendrycks/competition_math` from HuggingFace at run time. If
-  `aiq-gpu` is in offline mode (or the HF cache hasn't seen this
-  dataset before), the run crashes with
-  `FileNotFoundError: Couldn't find a dataset script at
-  .../hendrycks/competition_math/competition_math.py`. Pre-cache with:
+- **MATH benchmark is disabled** in this preset.
+  HELM's `math:` runs load `hendrycks/competition_math` from
+  HuggingFace at run time, and that dataset is not reliably reachable
+  from `aiq-gpu` today. The 7 math run_entries (algebra,
+  counting_and_probability, geometry, intermediate_algebra,
+  number_theory, prealgebra, precalculus — all level=1, CoT=True) are
+  commented out of the `finish_qwen25_gptoss` preset's full manifest,
+  and the smoke manifest's Qwen entry uses `mmlu:us_foreign_policy`
+  instead. To re-enable, restore the 7 entries in
+  `eval_audit/integrations/vllm_service/adapter.py` and add
+  `hendrycks/competition_math` back to the warmup list in
+  `02_warmup_data.sh`.
 
-  ```bash
-  huggingface-cli download hendrycks/competition_math \
-    --repo-type dataset
-  ```
-
-  This populates `$HF_HOME/datasets/hendrycks___competition_math`
-  once and subsequent runs use the cache. The same workaround applies
-  to any other HF-backed benchmark (`gpqa`, `mmlu_pro`, `omni_math`,
-  etc.) when the host can't reach the Hub at run time.
+  The same Hub-cache workaround applies if any other HF-backed
+  benchmark (`gpqa`, `mmlu_pro`, `omni_math`, etc.) starts failing
+  for the same reason: pre-cache with
+  `huggingface-cli download <repo> --repo-type dataset`.
 
 - **HELM-version requirement for the safety entries**:
   `anthropic_red_team`, `harm_bench`, `simple_safety_tests`, and

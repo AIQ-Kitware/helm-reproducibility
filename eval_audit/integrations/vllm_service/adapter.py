@@ -160,7 +160,12 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
             ),
             "run_entries": [
                 # One quick run from each model, both 5 instances.
-                "math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                # Qwen smoke uses MMLU instead of MATH because the
+                # MATH benchmark depends on the ``hendrycks/competition_math``
+                # HF dataset which has been disabled in this preset
+                # (see ``full_manifest.run_entries`` below for the
+                # explanation).
+                "mmlu:subject=us_foreign_policy,method=multiple_choice_joint,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
                 "ifeval:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
             ],
             "suite": "audit-finish-qwen25-gptoss-smoke",
@@ -172,23 +177,26 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
                 "Closes the Qwen 2.5 + gpt-oss gaps in the open-weight "
                 "HELM audit (Case Study 3). Qwen rows replay the "
                 "execution-spec-drifted public run_specs (with the "
-                "matching adapter_spec.instructions prefix) plus the 9 "
-                "missing math + natural_qa entries; gpt-oss rows cover "
-                "the 8 capabilities/safety entries from suite v1.12.0 / "
-                "v1.14.0 with no local repro yet."
+                "matching adapter_spec.instructions prefix) plus the 2 "
+                "missing natural_qa entries (MATH disabled — see notes); "
+                "gpt-oss rows cover the 8 capabilities/safety entries "
+                "from suite v1.12.0 / v1.14.0 with no local repro yet."
             ),
             "run_entries": [
                 # ── Qwen 2.5 7B: missing benchmarks (no local repro yet)
-                # MATH × 7 subjects, level=1, CoT=True. The lite/v1.9.0
-                # and tmp/lite/v1.9.0 tracks are the same benchmark
-                # spec; running once covers both.
-                "math:subject=algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
-                "math:subject=counting_and_probability,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
-                "math:subject=geometry,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
-                "math:subject=intermediate_algebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
-                "math:subject=number_theory,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
-                "math:subject=prealgebra,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
-                "math:subject=precalculus,level=1,use_official_examples=False,use_chain_of_thought=True,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
+                #
+                # ``math:`` × 7 subjects (algebra, counting_and_probability,
+                # geometry, intermediate_algebra, number_theory,
+                # prealgebra, precalculus) at level=1, CoT=True is
+                # **disabled**. HELM's math scenario loads the
+                # ``hendrycks/competition_math`` HuggingFace dataset at
+                # run time and the local crfm-helm install on aiq-gpu
+                # cannot reach (or pre-cache) it cleanly today. Adding
+                # the 7 entries back is a one-line revert once the
+                # dataset is reachable; meanwhile the 2 natural_qa
+                # entries below are the only "missing-no-local-repro"
+                # contribution from Qwen in this batch.
+
                 # natural_qa × 2 modes
                 "natural_qa:mode=closedbook,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
                 "natural_qa:mode=openbook_longans,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
