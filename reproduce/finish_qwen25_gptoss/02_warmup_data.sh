@@ -36,7 +36,10 @@ DATASETS=(
   # natural_qa run_entries in adapter.py if the access path is fixed.
   # (was: natural_questions)
   google/IFEval                   # ifeval (gpt-oss smoke)
-  Idavidrein/gpqa                 # gpqa
+  # ``Idavidrein/gpqa`` is a gated HF dataset; aiq-gpu's HF login
+  # does not have access. Disabled 2026-04-30; re-add this entry
+  # and the gpqa run_entry in adapter.py once credentials are in
+  # place. (was: Idavidrein/gpqa)
   TIGER-Lab/MMLU-Pro              # mmlu_pro
   walledai/HarmBench              # harm_bench
   Anthropic/hh-rlhf               # anthropic_red_team (best-effort)

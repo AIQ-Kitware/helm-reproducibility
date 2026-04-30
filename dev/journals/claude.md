@@ -1511,3 +1511,32 @@ the bundle from the patched ``adapter.py`` (or hand-edit the bundle's
 ``full_manifest.yaml``), then rerun ``50_run_full.sh``.
 ``compute_if_missing`` skips entries already done, so only the
 ``mmlu_pro`` entry will execute.
+
+## 2026-04-30 02:30:00 -0500 — gpqa is a gated HF dataset; disabled
+
+**Symptom.** ``audit-finish-qwen25-gptoss`` on aiq-gpu, the gpt-oss
+``gpqa:subset=gpqa_main`` entry failed:
+
+```
+datasets.exceptions.DatasetNotFoundError: Dataset 'Idavidrein/gpqa'
+is a gated dataset on the Hub.
+```
+
+**Cause.** ``Idavidrein/gpqa`` is gated. The aiq-gpu HF login does
+not have access. This is the same shape as the math /
+natural_questions blockers — environment / credential issue, not a
+reproducibility problem.
+
+**Fix.** Disabled in three places (same pattern as math / natural_qa):
+
+- ``eval_audit/integrations/vllm_service/adapter.py:236`` (run_entry
+  commented out with a re-enable note dated 2026-04-30)
+- ``reproduce/finish_qwen25_gptoss/02_warmup_data.sh:39`` (HF cache
+  warmup line removed with a re-enable note)
+- ``reproduce/finish_qwen25_gptoss/README.md`` Caveats table now
+  lists three disabled families instead of two.
+
+**Re-enable knob.** Get HF credentials with access to the gate, add
+``Idavidrein/gpqa`` back to ``02_warmup_data.sh``, uncomment the
+gpt-oss gpqa run_entry in ``adapter.py``, and remove the gpqa row
+from the README table.

@@ -233,7 +233,13 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
                 "wmt_14:language_pair=fr-en,model=qwen/qwen2.5-7b-instruct-turbo,model_deployment=vllm/qwen2-5-7b-instruct-turbo-local",
 
                 # ── gpt-oss 20B: missing capabilities/v1.12.0 entries
-                "gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                # gpqa is a gated HF dataset (Idavidrein/gpqa) and
+                # cannot be downloaded from aiq-gpu without HF
+                # credentials with access to the gate. Disabled
+                # 2026-04-30; re-enable by restoring this line and
+                # adding ``Idavidrein/gpqa`` back to
+                # 02_warmup_data.sh once credentials are in place.
+                # "gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
                 "mmlu_pro:subject=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
                 "omni_math:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
                 "wildbench:subset=v2,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",

@@ -83,15 +83,16 @@ $AUDIT_STORE_ROOT/indexes/audit_results_index.csv       # refreshed by 60_index_
 
 ## Caveats
 
-- **Two Qwen benchmark families are disabled** in this preset because
+- **Three benchmark families are disabled** in this preset because
   their underlying datasets are not reachable cleanly from `aiq-gpu`
-  today. Both are commented out in the `finish_qwen25_gptoss` preset's
+  today. All are commented out in the `finish_qwen25_gptoss` preset's
   full manifest with inline notes pointing at the re-enable knobs.
 
   | family | dataset | failure | observed |
   |---|---|---|---|
   | `math:` × 7 subjects (level=1, CoT=True) | `hendrycks/competition_math` (HF) | dataset script not findable in cache; HF Hub fetch fails | 2026-04-29 |
   | `natural_qa:` × 2 modes (closedbook, openbook_longans) | `natural_questions` (HELM fetches via Google Storage URL) | HTTP 403 Forbidden from aiq-gpu egress | 2026-04-30 |
+  | `gpqa:subset=gpqa_main` (gpt-oss-20B, CoT=True, FS=False) | `Idavidrein/gpqa` (HF, **gated**) | `DatasetNotFoundError`; aiq-gpu's HF login lacks access to the gate | 2026-04-30 |
 
   The smoke manifest's Qwen entry uses `mmlu:us_foreign_policy`
   instead so the smoke run doesn't depend on either disabled dataset.
