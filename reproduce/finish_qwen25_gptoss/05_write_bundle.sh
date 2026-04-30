@@ -30,6 +30,28 @@ if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
   echo "      override LITELLM_ENV_FPATH=/path/to/.env if the default path is wrong." >&2
   exit 1
 fi
+if [[ ! "$LITELLM_MASTER_KEY" =~ ^sk- ]]; then
+  # LiteLLM's proxy validates incoming bearer tokens against the
+  # master key but also enforces that virtual keys start with ``sk-``.
+  # When the master key itself doesn't start with ``sk-``, the same
+  # validator path rejects it with
+  #   401 Authentication Error: LiteLLM Virtual Key expected.
+  #   Received=<mykey> expected to start with 'sk-'
+  # mid-run. Fail at bundle-write time with a clear remediation
+  # message instead.
+  echo "FAIL: LITELLM_MASTER_KEY does not start with 'sk-'. LiteLLM's" >&2
+  echo "      proxy will reject bearer tokens lacking that prefix with" >&2
+  echo "      a 401 (\"LiteLLM Virtual Key expected\") mid-run." >&2
+  echo "      Fix:" >&2
+  echo "        1. Prepend 'sk-' to the value in $ENV_FPATH" >&2
+  echo "        2. Restart the litellm container:" >&2
+  echo "             cd \"$(dirname "$ENV_FPATH")/.." >&2
+  echo "             docker compose -f generated/docker-compose.yml \\" >&2
+  echo "                 --env-file generated/.env up -d \\" >&2
+  echo "                 --no-deps --force-recreate litellm" >&2
+  echo "        3. Re-run this script." >&2
+  exit 1
+fi
 
 cd "$ROOT"
 python -m eval_audit.integrations.vllm_service export-benchmark-bundle \
