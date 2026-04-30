@@ -4,7 +4,7 @@ description: Checked-in reference manifest for the targeted in-scope gpt-oss his
 run_entries:
   - bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
   - ifeval:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
-  - mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
+  - mmlu_pro:subject=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local
 max_eval_instances: 1000
 suite: audit-historic-grid-gpt-oss-20b-vllm-trimmed
 mode: compute_if_missing

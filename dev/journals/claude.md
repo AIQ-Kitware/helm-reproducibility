@@ -1469,3 +1469,45 @@ defensive parsing is the right call.
 **Next steps.** None blocking. If we want to make the cross-harness
 gap visible without `30_inspect.sh`-style ad-hoc inspection, the
 followup is the planner extension above (EEE-native facts).
+
+## 2026-04-30 02:05:00 -0500 — mmlu_pro `subset=` vs `subject=` arg-name bug
+
+**Symptom.** `audit-finish-qwen25-gptoss` run on aiq-gpu failed one
+entry with:
+
+```
+TypeError: get_mmlu_pro_spec() got an unexpected keyword argument
+'subset'. Did you mean 'subject'?
+```
+
+**Cause.** HELM's
+[`get_mmlu_pro_spec`](../../submodules/helm/src/helm/benchmark/run_specs/capabilities_run_specs.py#L28)
+takes ``subject="all"`` as the kwarg but renders its *display*
+``run_spec_name`` as ``mmlu_pro:subset={subject},...`` (line 35). The
+display string is **not** a valid ``--run-entries`` argument for
+itself — feeding it back to ``helm-run`` triggers the TypeError. We
+had copied the display form into our run_entries.
+
+**Fix.** Three sites changed ``subset=all`` → ``subject=all`` for
+``mmlu_pro``:
+- ``eval_audit/integrations/vllm_service/adapter.py:36``
+- ``eval_audit/integrations/vllm_service/adapter.py:237``
+- ``configs/gpt_oss_20b_vllm_manifest.yaml:7``
+
+Other ``subset=`` entries (``gpqa``, ``wildbench``) are correct —
+their kwarg really is ``subset``. ``mmlu_pro`` is the one HELM
+run_spec where the display name disagrees with the kwarg.
+
+**Insight.** Public HELM run dirs are named with the display form, so
+*looking* at a public run directory and copy-pasting the trailing
+path component into a run_entry fails for ``mmlu_pro``. The sound way
+to derive run_entries is from the kwargs of the
+``@run_spec_function``-decorated function, not from the display
+``run_spec_name``. Worth keeping in mind if any other scenarios get a
+similar display/kwarg divergence in future HELM versions.
+
+**On aiq-gpu next step.** Rerun ``05_write_bundle.sh`` to regenerate
+the bundle from the patched ``adapter.py`` (or hand-edit the bundle's
+``full_manifest.yaml``), then rerun ``50_run_full.sh``.
+``compute_if_missing`` skips entries already done, so only the
+``mmlu_pro`` entry will execute.

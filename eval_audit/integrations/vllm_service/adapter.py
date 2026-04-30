@@ -33,7 +33,7 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
             "run_entries": [
                 "bbq:subject=all,method=multiple_choice_joint,max_train_instances=0,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
                 "ifeval:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
-                "mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                "mmlu_pro:subject=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
             ],
             "suite": "audit-historic-grid-gpt-oss-20b-vllm-trimmed",
             "max_eval_instances": 1000,
@@ -234,7 +234,7 @@ PRESET_CONFIGS: dict[str, dict[str, Any]] = {
 
                 # ── gpt-oss 20B: missing capabilities/v1.12.0 entries
                 "gpqa:subset=gpqa_main,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
-                "mmlu_pro:subset=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
+                "mmlu_pro:subject=all,use_chain_of_thought=true,use_few_shot=false,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
                 "omni_math:model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
                 "wildbench:subset=v2,model=openai/gpt-oss-20b,model_deployment=litellm/gpt-oss-20b-local",
                 # ── gpt-oss 20B: missing safety/v1.14.0 entries
