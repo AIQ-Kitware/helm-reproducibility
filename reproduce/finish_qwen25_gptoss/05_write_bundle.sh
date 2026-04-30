@@ -8,7 +8,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STORE_ROOT="${AUDIT_STORE_ROOT:-/data/crfm-helm-audit-store}"
 BUNDLE_ROOT="${BUNDLE_ROOT:-$STORE_ROOT/local-bundles/finish_qwen25_gptoss}"
-ENV_FPATH="${LITELLM_ENV_FPATH:-/home/local/KHQ/jon.crall/code/helm_audit/submodules/vllm_service/generated/.env}"
+LITELLM_ENV_FPATH="${LITELLM_ENV_FPATH:-/home/local/KHQ/jon.crall/code/helm_audit/submodules/vllm_service/generated/.env}"
 LITELLM_BASE_URL="${LITELLM_BASE_URL:-http://localhost:14000}"
 
 # Clear any stale shell value before sourcing so the .env file is
@@ -18,8 +18,8 @@ LITELLM_BASE_URL="${LITELLM_BASE_URL:-http://localhost:14000}"
 # stop using whatever was in env *before* this script ran.)
 unset LITELLM_MASTER_KEY VLLM_BACKEND_API_KEY VLLM_API_KEY KUBEAI_OPENAI_API_KEY
 
-if [[ ! -f "$ENV_FPATH" ]]; then
-  echo "FAIL: env file not found at $ENV_FPATH" >&2
+if [[ ! -f "$LITELLM_ENV_FPATH" ]]; then
+  echo "FAIL: env file not found at $LITELLM_ENV_FPATH" >&2
   echo "      Set LITELLM_ENV_FPATH=/abs/path/to/.env to override." >&2
   exit 1
 fi
@@ -29,10 +29,10 @@ fi
 # ``export`` prefix) propagate to the python subprocess below.
 set -a
 # shellcheck disable=SC1090
-source "$ENV_FPATH"
+source "$LITELLM_ENV_FPATH"
 set +a
 if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
-  echo "FAIL: LITELLM_MASTER_KEY is not set after sourcing $ENV_FPATH." >&2
+  echo "FAIL: LITELLM_MASTER_KEY is not set after sourcing $LITELLM_ENV_FPATH." >&2
   echo "      Either the file is missing the variable or it isn't a key=value file" >&2
   echo "      bash can source. Set LITELLM_MASTER_KEY=... in your shell first, or" >&2
   echo "      override LITELLM_ENV_FPATH=/path/to/.env if the default path is wrong." >&2
@@ -42,7 +42,7 @@ fi
 # Log the key prefix so the user can verify the bundle is using the
 # expected value. Show only the first 4 chars + length; never dump
 # the full secret to stdout.
-echo "Sourced LITELLM_MASTER_KEY from $ENV_FPATH" \
+echo "Sourced LITELLM_MASTER_KEY from $LITELLM_ENV_FPATH" \
      "(prefix=${LITELLM_MASTER_KEY:0:4}.. len=${#LITELLM_MASTER_KEY})"
 
 cd "$ROOT"

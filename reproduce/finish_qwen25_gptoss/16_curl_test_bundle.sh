@@ -34,10 +34,18 @@ fi
 echo "Reading deployments from: $DEPLOYMENTS_FPATH"
 echo
 
-# Walk the YAML in Python; emit one ``name TAB base_url TAB key TAB
-# protocol_mode TAB client_class`` line per deployment. ``protocol_mode``
-# is inferred from the client_class (Chat* → chat; LegacyCompletions*
-# → completions).
+# Walk the YAML in Python; emit one
+# ``name TAB base_url TAB key TAB protocol TAB client_class TAB request_model``
+# line per deployment.
+#
+# ``request_model`` is what to put in the ``model`` field of the chat
+# / completions payload — that's the OpenAI-side identifier the
+# server (LiteLLM router or vLLM) actually advertises, NOT the HELM
+# deployment ``name``. The two diverge whenever
+# ``model_deployment_name`` in the eval-audit preset overrides the
+# default (we do this so public HELM run_specs can be reused). Look
+# in ``client_spec.args.openai_model_name`` for openai-compatible
+# clients, ``client_spec.args.vllm_model_name`` for vllm-direct.
 DEPLOYMENTS_FPATH="$DEPLOYMENTS_FPATH" python3 <<'PY' > /tmp/finish_qwen25_gptoss_deployments.tsv
 import os, yaml
 from pathlib import Path
@@ -49,8 +57,14 @@ for entry in (data.get("model_deployments") or []):
     args = cs.get("args") or {}
     base = args.get("base_url", "")
     api_key = args.get("api_key", "") or ""
+    request_model = (
+        args.get("openai_model_name")
+        or args.get("vllm_model_name")
+        or entry.get("model_name")
+        or name  # last-resort fallback; if we hit this the bundle is malformed
+    )
     proto = "completions" if "Completion" in cls or "Legacy" in cls else "chat"
-    print(f"{name}\t{base}\t{api_key}\t{proto}\t{cls}")
+    print(f"{name}\t{base}\t{api_key}\t{proto}\t{cls}\t{request_model}")
 PY
 
 # Check what models are there
@@ -59,33 +73,40 @@ PY
 n_total=0
 n_pass=0
 n_fail=0
-while IFS=$'\t' read -r name base_url api_key proto cls; do
+while IFS=$'\t' read -r name base_url api_key proto cls request_model; do
   n_total=$((n_total + 1))
   echo "=== $name ==="
-  echo "  base_url:   $base_url"
-  echo "  client:     $cls"
-  echo "  protocol:   $proto"
-  
+  echo "  base_url:        $base_url"
+  echo "  client:          $cls"
+  echo "  protocol:        $proto"
+  echo "  request_model:   $request_model   (sent in the 'model' payload field)"
+  if [[ "$request_model" != "$name" ]]; then
+    echo "  (request_model differs from deployment name — that's normal when the"
+    echo "   preset overrides model_deployment_name to match a public HELM run_spec.)"
+  fi
+
   if [[ -n "$api_key" ]]; then
     # Show only the prefix and length so secrets aren't dumped to logs.
     head4="${api_key:0:4}"
-    echo "  api_key:    ${head4}..  (len=${#api_key})"
+    echo "  api_key:         ${head4}..  (len=${#api_key})"
   else
-    echo "  api_key:    (empty)"
+    echo "  api_key:         (empty)"
   fi
 
-  echo "available models"
-  curl  "${base_url}/models"   -H "Authorization: Bearer $LITELLM_MASTER_KEY"
-  echo "--"
+  echo "  available models on the server (using bundle's api_key):"
+  curl -sS "${base_url%/}/models" \
+    ${api_key:+-H "Authorization: Bearer ${api_key}"} \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print("    "+", ".join(m["id"] for m in d.get("data",[])))' \
+    || echo "    (could not parse /models response)"
 
   if [[ "$proto" == "completions" ]]; then
     url="${base_url%/}/completions"
-    payload="$(printf '{"model": "%s", "prompt": "Hello, ", "max_tokens": 1}' "$name")"
+    payload="$(printf '{"model": "%s", "prompt": "Hello, ", "max_tokens": 1}' "$request_model")"
   else
     url="${base_url%/}/chat/completions"
-    payload="$(printf '{"model": "%s", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 1}' "$name")"
+    payload="$(printf '{"model": "%s", "messages": [{"role": "user", "content": "Hi"}], "max_tokens": 1}' "$request_model")"
   fi
-  echo "  URL:        $url"
+  echo "  URL:             $url"
 
   http_code="$(curl -sS -o /tmp/finish_qwen25_gptoss_curl_body.txt -w '%{http_code}' \
     -H "Content-Type: application/json" \
@@ -121,6 +142,13 @@ if [[ "$n_fail" -gt 0 ]]; then
   echo "      that LiteLLM was started with. Re-source the .env and re-run"
   echo "      05_write_bundle.sh, or pass --api-key-value to the export-bundle"
   echo "      step in 05_write_bundle.sh."
+  echo "  - 400 'Invalid model name passed in model=...':"
+  echo "      The 'request_model' line above doesn't match any of the"
+  echo "      'available models' the server advertises. The bundle's"
+  echo "      client_spec.args.openai_model_name is probably stale or"
+  echo "      points at a name LiteLLM doesn't alias. Check the active"
+  echo "      vllm_service profile's router.aliases (or the served_aliases"
+  echo "      in default-models.yaml)."
   echo "  - 404 model not found:"
   echo "      LiteLLM router is up but doesn't have an alias for the"
   echo "      model name HELM is using. Check the profile's router.aliases."
